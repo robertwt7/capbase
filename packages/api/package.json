@@ -26,9 +26,6 @@
       "require": "./dist/*.js"
     }
   },
-  "dependencies": {
-    "@nestjs/mapped-types": "*"
-  },
   "devDependencies": {
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",

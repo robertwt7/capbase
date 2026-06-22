@@ -2,107 +2,30 @@
 // Figures here are illustrative demo data, not verified financials. They exist
 // to exercise the layout for funding rounds, investors, people, exits, and
 // market data. Swap this module for the NestJS API once endpoints are ready.
+//
+// Domain types are the single source of truth in @repo/api and are shared with
+// the NestJS backend. They are re-exported here so existing component imports
+// (e.g. `import type { FundingRound } from '../lib/data'`) keep working.
 
-export type Stage =
-  | 'Seed'
-  | 'Series A'
-  | 'Series B'
-  | 'Series C'
-  | 'Series D'
-  | 'Series E'
-  | 'Series F'
-  | 'Late stage'
-  | 'Public'
-  | 'Acquired';
+import type { Company, MarketStat, MarketTotals } from '@repo/api';
 
-export type CompanyStatus = 'Private' | 'Public' | 'Acquired';
-
-export interface RoundInvestor {
-  name: string;
-  lead: boolean;
-}
-
-export interface FundingRound {
-  /** Round label, e.g. "Series B". Rounds are an ordered sequence. */
-  name: string;
-  date: string; // ISO date the round was announced
-  amountUsd: number; // capital raised in this round
-  postMoneyUsd: number | null; // post-money valuation, when disclosed
-  lead: string | null;
-  investors: RoundInvestor[];
-}
-
-export interface Person {
-  name: string;
-  role: string;
-  since: number; // year joined
-  prior?: string; // notable prior affiliation
-}
-
-export interface InvestorHolding {
-  name: string;
-  type: 'Venture' | 'Growth' | 'Angel' | 'Corporate' | 'Private equity';
-  firstRound: string;
-  rounds: number; // how many rounds they participated in
-}
-
-export interface AcquisitionDeal {
-  /** The company Capbase's subject acquired. */
-  target: string;
-  date: string;
-  amountUsd: number | null;
-  rationale: string;
-}
-
-export interface ExitEvent {
-  type: 'IPO' | 'Acquisition' | 'Secondary';
-  date: string;
-  valueUsd: number | null;
-  detail: string;
-}
-
-export interface DiversitySignal {
-  label: string;
-  value: string;
-  note: string;
-}
-
-export interface MarketStat {
-  sector: string;
-  dealCount: number;
-  totalRaisedUsd: number;
-  medianValuationUsd: number;
-  trendPct: number; // quarter-over-quarter change in deal volume
-}
-
-export interface Company {
-  slug: string;
-  name: string;
-  domain: string; // used to resolve the logo
-  oneLiner: string;
-  description: string;
-  hq: string;
-  founded: number;
-  headcount: number;
-  industry: string[];
-  status: CompanyStatus;
-  stage: Stage;
-  totalRaisedUsd: number;
-  lastValuationUsd: number | null;
-  // Detailed sections — present on fully-profiled companies.
-  rounds?: FundingRound[];
-  people?: Person[];
-  investors?: InvestorHolding[];
-  acquisitions?: AcquisitionDeal[];
-  exits?: ExitEvent[];
-  diversity?: DiversitySignal[];
-  financials?: {
-    revenueUsd: number;
-    revenueGrowthPct: number;
-    grossMarginPct: number;
-    burnMonths: number | null;
-  };
-}
+export type {
+  Stage,
+  CompanyStatus,
+  InvestorType,
+  ExitType,
+  RoundInvestor,
+  FundingRound,
+  Person,
+  InvestorHolding,
+  AcquisitionDeal,
+  ExitEvent,
+  DiversitySignal,
+  CompanyFinancials,
+  Company,
+  MarketStat,
+  MarketTotals,
+} from '@repo/api';
 
 const companies: Company[] = [
   {
@@ -368,7 +291,7 @@ export const marketStats: MarketStat[] = [
   { sector: 'Enterprise SaaS', dealCount: 1105, totalRaisedUsd: 16_300_000_000, medianValuationUsd: 70_000_000, trendPct: -2 },
 ];
 
-export const marketTotals = {
+export const marketTotals: MarketTotals = {
   totalRaisedUsd: 110_600_000_000,
   dealCount: 4615,
   newUnicorns: 38,

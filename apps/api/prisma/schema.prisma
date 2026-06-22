@@ -1,0 +1,223 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+// Moderation state of a crowdsourced row. Public reads only return APPROVED.
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+
+  companies    Company[]
+  rounds       FundingRound[]
+  people       Person[]
+  investors    InvestorHolding[]
+  acquisitions AcquisitionDeal[]
+  exits        ExitEvent[]
+  diversity    DiversitySignal[]
+}
+
+model Company {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  domain      String
+  oneLiner    String
+  description String
+  hq          String
+  founded     Int
+  headcount   Int
+  industry    String[]
+  // Domain status (Private/Public/Acquired) — distinct from moderationStatus.
+  status      String
+  stage       String
+  totalRaisedUsd   BigInt
+  lastValuationUsd BigInt?
+
+  // Embedded financials (optional).
+  revenueUsd       BigInt?
+  revenueGrowthPct Float?
+  grossMarginPct   Float?
+  burnMonths       Int?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  rounds       FundingRound[]
+  people       Person[]
+  investors    InvestorHolding[]
+  acquisitions AcquisitionDeal[]
+  exits        ExitEvent[]
+  diversity    DiversitySignal[]
+
+  @@index([moderationStatus])
+}
+
+model FundingRound {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  date         DateTime
+  amountUsd    BigInt
+  postMoneyUsd BigInt?
+  lead         String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  investors RoundInvestor[]
+
+  @@index([companyId])
+  @@index([moderationStatus])
+}
+
+// Investors named on a specific round; inherits the round's review state.
+model RoundInvestor {
+  id      String       @id @default(cuid())
+  roundId String
+  round   FundingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  name    String
+  lead    Boolean      @default(false)
+
+  @@index([roundId])
+}
+
+model InvestorHolding {
+  id         String  @id @default(cuid())
+  companyId  String
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  type       String
+  firstRound String
+  rounds     Int
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([moderationStatus])
+}
+
+model Person {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  role      String
+  since     Int
+  prior     String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([moderationStatus])
+}
+
+model AcquisitionDeal {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  target    String
+  date      DateTime
+  amountUsd BigInt?
+  rationale String
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([moderationStatus])
+}
+
+model ExitEvent {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type      String
+  date      DateTime
+  valueUsd  BigInt?
+  detail    String
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([moderationStatus])
+}
+
+model DiversitySignal {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label     String
+  value     String
+  note      String
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([moderationStatus])
+}
+
+// Aggregate sector statistics — seeded, not user-contributed (for now).
+model MarketStat {
+  id                 String @id @default(cuid())
+  sector             String @unique
+  dealCount          Int
+  totalRaisedUsd     BigInt
+  medianValuationUsd BigInt
+  trendPct           Float
+}
+
+// Top-of-market totals shown on the landing hero. Singleton (one row).
+model MarketSnapshot {
+  id             String @id @default(cuid())
+  totalRaisedUsd BigInt
+  dealCount      Int
+  newUnicorns    Int
+  quarter        String
+}
