@@ -1,147 +1,122 @@
-import type { Link } from '@repo/api';
-import { Button } from '@repo/ui/button';
-import Image, { type ImageProps } from 'next/image';
+import Link from 'next/link';
+
+import { CompanyLogo } from '../components/CompanyLogo';
+import { getCompanies, marketStats, marketTotals } from '../lib/data';
+import { formatCount, formatUsd, signedPct } from '../lib/format';
 
 import styles from './page.module.css';
 
-type Props = Omit<ImageProps, 'src'> & {
-  srcLight: string;
-  srcDark: string;
-};
-
-const ThemeImage = (props: Props) => {
-  const { srcLight, srcDark, ...rest } = props;
+export default function Home() {
+  const companies = getCompanies();
 
   return (
-    <>
-      <Image {...rest} src={srcLight} className="imgLight" />
-      <Image {...rest} src={srcDark} className="imgDark" />
-    </>
-  );
-};
-
-async function getLinks(): Promise<Link[]> {
-  try {
-    const res = await fetch('http://localhost:3000/links', {
-      cache: 'no-store',
-    });
-
-    if (!res.ok) {
-      throw new Error('Failed to fetch links');
-    }
-
-    return res.json();
-  } catch (error) {
-    console.error('Error fetching links:', error);
-    return [];
-  }
-}
-
-export default async function Home() {
-  const links = await getLinks();
-
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <ThemeImage
-          className={styles.logo}
-          srcLight="turborepo-dark.svg"
-          srcDark="turborepo-light.svg"
-          alt="Turborepo logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol>
-          <li>
-            Get started by editing <code>apps/web/app/page.tsx</code>
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
-
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new/clone?demo-description=Learn+to+implement+a+monorepo+with+a+two+Next.js+sites+that+has+installed+three+local+packages.&demo-image=%2F%2Fimages.ctfassets.net%2Fe5382hct74si%2F4K8ZISWAzJ8X1504ca0zmC%2F0b21a1c6246add355e55816278ef54bc%2FBasic.png&demo-title=Monorepo+with+Turborepo&demo-url=https%3A%2F%2Fexamples-basic-web.vercel.sh%2F&from=templates&project-name=Monorepo+with+Turborepo&repository-name=monorepo-turborepo&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fturborepo%2Ftree%2Fmain%2Fexamples%2Fbasic&root-directory=apps%2Fdocs&skippable-integrations=1&teamSlug=vercel&utm_source=create-turbo"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            href="https://turborepo.dev/docs?utm_source"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.secondary}
-          >
-            Read our docs
-          </a>
+    <main>
+      <section className={styles.hero}>
+        <div className={styles.heroInner}>
+          <p className={styles.eyebrow}>
+            {marketTotals.quarter} · private market intelligence
+          </p>
+          <h1 className={styles.headline}>
+            The cap table of the private economy, in the open.
+          </h1>
+          <p className={styles.lede}>
+            Funding rounds, investors, people, and exits for the companies
+            shaping each sector — sourced openly, free to read, free to build on.
+          </p>
         </div>
 
-        <Button appName="web" className={styles.secondary}>
-          Open alert
-        </Button>
+        <div className={styles.tape} aria-label={`${marketTotals.quarter} market totals`}>
+          <TapeItem label="Capital deployed" value={formatUsd(marketTotals.totalRaisedUsd)} />
+          <TapeItem label="Disclosed deals" value={formatCount(marketTotals.dealCount)} />
+          <TapeItem label="New unicorns" value={formatCount(marketTotals.newUnicorns)} />
+        </div>
+      </section>
 
-        {links.length > 0 ? (
-          <div className={styles.ctas}>
-            {links.map((link) => (
-              <a
-                key={link.id}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={link.description}
-                className={styles.secondary}
-              >
-                {link.title}
-              </a>
-            ))}
+      <section className={styles.section}>
+        <div className={styles.sectionHead}>
+          <h2 className={styles.sectionTitle}>Sectors this quarter</h2>
+          <span className={styles.sectionNote}>Deal volume vs. prior quarter</span>
+        </div>
+        <div className={styles.sectors}>
+          {marketStats.map((stat) => (
+            <article key={stat.sector} className={styles.sector}>
+              <h3 className={styles.sectorName}>{stat.sector}</h3>
+              <p className={styles.sectorRaised}>{formatUsd(stat.totalRaisedUsd)}</p>
+              <div className={styles.sectorMeta}>
+                <span>{formatCount(stat.dealCount)} deals</span>
+                <span
+                  className={stat.trendPct >= 0 ? styles.trendUp : styles.trendDown}
+                >
+                  {signedPct(stat.trendPct)}
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHead}>
+          <h2 className={styles.sectionTitle}>Companies</h2>
+          <span className={styles.sectionNote}>{companies.length} profiles</span>
+        </div>
+
+        <div className={styles.table} role="table" aria-label="Company directory">
+          <div className={`${styles.row} ${styles.rowHead}`} role="row">
+            <span role="columnheader">Company</span>
+            <span role="columnheader">Stage</span>
+            <span role="columnheader" className={styles.num}>
+              Last valuation
+            </span>
+            <span role="columnheader" className={styles.num}>
+              Total raised
+            </span>
           </div>
-        ) : (
-          <div style={{ color: '#666' }}>
-            No links available. Make sure the NestJS API is running on port
-            3000.
-          </div>
-        )}
-      </main>
+
+          {companies.map((company) => (
+            <Link
+              key={company.slug}
+              href={`/companies/${company.slug}`}
+              className={styles.row}
+              role="row"
+            >
+              <span className={styles.company} role="cell">
+                <CompanyLogo name={company.name} domain={company.domain} size={40} />
+                <span className={styles.companyText}>
+                  <span className={styles.companyName}>{company.name}</span>
+                  <span className={styles.companyLine}>{company.oneLiner}</span>
+                </span>
+              </span>
+              <span className={styles.stage} role="cell">
+                <span className={styles.stageTag}>{company.stage}</span>
+                <span className={styles.sectorTag}>{company.industry[0]}</span>
+              </span>
+              <span className={`${styles.num} ${styles.valuation}`} role="cell">
+                {formatUsd(company.lastValuationUsd)}
+              </span>
+              <span className={`${styles.num} ${styles.raised}`} role="cell">
+                {formatUsd(company.totalRaisedUsd)}
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <footer className={styles.footer}>
-        <a
-          href="https://vercel.com/templates?search=turborepo&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          href="https://turborepo.dev?utm_source=create-turbo"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to turborepo.dev →
-        </a>
+        <span>Capbase · open company and funding data</span>
+        <span className={styles.footerNote}>
+          Figures shown are illustrative demo data.
+        </span>
       </footer>
+    </main>
+  );
+}
+
+function TapeItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.tapeItem}>
+      <span className={styles.tapeValue}>{value}</span>
+      <span className={styles.tapeLabel}>{label}</span>
     </div>
   );
 }

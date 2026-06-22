@@ -3,7 +3,7 @@
 First, run the development server:
 
 ```bash
-pnpm dev
+yarn dev
 # Also works with NPM, YARN, BUN, ...
 ```
 

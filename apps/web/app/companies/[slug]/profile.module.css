@@ -1,0 +1,435 @@
+.page {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 32px var(--page-pad) 0;
+}
+
+.back {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--graphite-500);
+  transition: color 0.15s ease;
+}
+
+.back:hover {
+  color: var(--ink);
+}
+
+/* Header */
+.header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 28px;
+  padding: 28px 0 36px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.headerBody {
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(30px, 4vw, 44px);
+  letter-spacing: -0.035em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--graphite-700);
+  border: 1px solid var(--graphite-300);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.oneLiner {
+  margin-top: 12px;
+  font-size: 17px;
+  color: var(--graphite-700);
+  max-width: 48ch;
+}
+
+.tags {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  font-size: 12px;
+  color: var(--graphite-700);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 16px 32px;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.factLabel {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--graphite-500);
+}
+
+.factValue {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* Stat band */
+.statBand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 64px;
+  padding: 32px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.statValue {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: clamp(24px, 3vw, 34px);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.statLabel {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--graphite-500);
+}
+
+/* About */
+.about {
+  padding: 36px 0;
+  max-width: 70ch;
+}
+
+.aboutText {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--graphite-900);
+}
+
+/* Generic block */
+.block {
+  padding: 32px 0;
+  border-top: 1px solid var(--line);
+}
+
+.blockHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.blockTitle {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.blockNote {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+}
+
+/* Investors */
+.investors {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.investor {
+  background: var(--surface);
+  padding: 16px 18px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.investorName {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.investorType {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--graphite-500);
+  text-align: right;
+}
+
+.investorRounds {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--graphite-500);
+}
+
+/* People */
+.people {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.person {
+  background: var(--surface);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.personName {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.personRole {
+  font-size: 13px;
+  color: var(--graphite-700);
+}
+
+.personMeta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+  margin-top: 4px;
+}
+
+/* Deals (acquisitions + exits) */
+.dealGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+}
+
+.dealGrid .block {
+  border-top: 1px solid var(--line);
+}
+
+.deals {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.deal {
+  background: var(--surface);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dealTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dealName {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.dealAmount {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.dealDate {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+}
+
+.dealNote {
+  font-size: 13px;
+  color: var(--graphite-700);
+  margin-top: 2px;
+}
+
+/* Diversity */
+.diversity {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.diversityItem {
+  background: var(--surface);
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diversityValue {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.diversityLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--graphite-900);
+}
+
+.diversityNote {
+  font-size: 12px;
+  color: var(--graphite-500);
+}
+
+/* Empty states */
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 28px 22px;
+  border: 1px dashed var(--graphite-300);
+  border-radius: 10px;
+}
+
+.emptyText {
+  font-size: 14px;
+  color: var(--graphite-500);
+}
+
+.emptyAction {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.emptyAction:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Footer */
+.footer {
+  margin-top: 24px;
+  padding: 28px 0 64px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+}
+
+@media (max-width: 860px) {
+  .header {
+    grid-template-columns: auto 1fr;
+  }
+
+  .facts {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(4, auto);
+    justify-content: start;
+  }
+
+  .people,
+  .diversity {
+    grid-template-columns: 1fr;
+  }
+
+  .dealGrid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .header {
+    grid-template-columns: 1fr;
+  }
+
+  .investors {
+    grid-template-columns: 1fr;
+  }
+
+  .facts {
+    grid-template-columns: repeat(2, auto);
+  }
+}
