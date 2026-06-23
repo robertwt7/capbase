@@ -1,13 +1,17 @@
 import Link from 'next/link';
 
 import { CompanyLogo } from '../components/CompanyLogo';
-import { getCompanies, marketStats, marketTotals } from '../lib/data';
+import { getCompanies, getMarketStats, getMarketTotals } from '../lib/data';
 import { formatCount, formatUsd, signedPct } from '../lib/format';
 
 import styles from './page.module.css';
 
-export default function Home() {
-  const companies = getCompanies();
+export default async function Home() {
+  const [companies, marketStats, marketTotals] = await Promise.all([
+    getCompanies(),
+    getMarketStats(),
+    getMarketTotals(),
+  ]);
 
   return (
     <main>

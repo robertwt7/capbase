@@ -1,3 +1,6 @@
+x-db-url: &db-url
+  DATABASE_URL: postgresql://capbase:capbase@postgres:5432/capbase?schema=public
+
 services:
   postgres:
     image: postgres:16
@@ -17,6 +20,84 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: capbase-api
+    container_name: capbase-api
+    restart: unless-stopped
+    environment:
+      <<: *db-url
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.dev}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      ADMIN_NAME: ${ADMIN_NAME:-Capbase Admin}
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: capbase-web
+    container_name: capbase-web
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:3000
+    ports:
+      - '3001:3001'
+    depends_on:
+      api:
+        condition: service_healthy
+
+  jobs:
+    build:
+      context: .
+      dockerfile: apps/jobs/Dockerfile
+    image: capbase-jobs
+    container_name: capbase-jobs
+    restart: unless-stopped
+    environment:
+      <<: *db-url
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-capbase-ingest (contact@example.com)}
+      CRON_SCHEDULE: ${CRON_SCHEDULE:-0 6 * * *}
+      INGEST_ON_BOOT: ${INGEST_ON_BOOT:-false}
+      INGEST_LIMIT: ${INGEST_LIMIT:-50}
+    ports:
+      - '3002:3002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  # One-shot DB seed: `docker compose --profile seed run --rm seed`.
+  # Reuses the api image (has Prisma schema + seed). Not started by default.
+  seed:
+    image: capbase-api
+    profiles: ['seed']
+    environment:
+      <<: *db-url
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.dev}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      ADMIN_NAME: ${ADMIN_NAME:-Capbase Admin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['yarn', 'workspace', '@repo/db', 'seed']
 
 volumes:
   capbase-pgdata:

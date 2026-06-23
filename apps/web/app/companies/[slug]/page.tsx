@@ -3,14 +3,10 @@ import { notFound } from 'next/navigation';
 
 import { CompanyLogo } from '../../../components/CompanyLogo';
 import { FundingLadder } from '../../../components/FundingLadder';
-import { getCompanies, getCompany } from '../../../lib/data';
+import { getCompany } from '../../../lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '../../../lib/format';
 
 import styles from './profile.module.css';
-
-export function generateStaticParams() {
-  return getCompanies().map((c) => ({ slug: c.slug }));
-}
 
 export default async function CompanyProfile({
   params,
@@ -18,7 +14,7 @@ export default async function CompanyProfile({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const company = getCompany(slug);
+  const company = await getCompany(slug);
 
   if (!company) {
     notFound();

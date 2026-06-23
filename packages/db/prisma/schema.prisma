@@ -60,6 +60,10 @@ model Company {
   grossMarginPct   Float?
   burnMonths       Int?
 
+  // Provenance for ingested rows (e.g. SEC_EDGAR). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
@@ -73,6 +77,7 @@ model Company {
   exits        ExitEvent[]
   diversity    DiversitySignal[]
 
+  @@unique([externalSource, externalId])
   @@index([moderationStatus])
 }
 
@@ -86,6 +91,10 @@ model FundingRound {
   postMoneyUsd BigInt?
   lead         String?
 
+  // Provenance for ingested rows (e.g. SEC_EDGAR). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
@@ -94,6 +103,7 @@ model FundingRound {
 
   investors RoundInvestor[]
 
+  @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus])
 }

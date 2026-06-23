@@ -1,13 +1,16 @@
-// Mock dataset for the Capbase frontend prototype.
-// Figures here are illustrative demo data, not verified financials. They exist
-// to exercise the layout for funding rounds, investors, people, exits, and
-// market data. Swap this module for the NestJS API once endpoints are ready.
+// Data access for the Capbase frontend.
+//
+// Getters fetch live data from the NestJS API (see ./api). The arrays below are
+// kept only as an offline FALLBACK so the UI still renders if the API is
+// unreachable in local dev; they are illustrative demo figures, not verified.
 //
 // Domain types are the single source of truth in @repo/api and are shared with
 // the NestJS backend. They are re-exported here so existing component imports
 // (e.g. `import type { FundingRound } from '../lib/data'`) keep working.
 
 import type { Company, MarketStat, MarketTotals } from '@repo/api';
+
+import { apiFetch } from './api';
 
 export type {
   Stage,
@@ -27,7 +30,7 @@ export type {
   MarketTotals,
 } from '@repo/api';
 
-const companies: Company[] = [
+const fallbackCompanies: Company[] = [
   {
     slug: 'helia',
     name: 'Helia',
@@ -283,7 +286,7 @@ const companies: Company[] = [
   },
 ];
 
-export const marketStats: MarketStat[] = [
+const fallbackMarketStats: MarketStat[] = [
   { sector: 'Artificial intelligence', dealCount: 1284, totalRaisedUsd: 48_200_000_000, medianValuationUsd: 240_000_000, trendPct: 31 },
   { sector: 'Fintech', dealCount: 962, totalRaisedUsd: 19_400_000_000, medianValuationUsd: 95_000_000, trendPct: -6 },
   { sector: 'Healthcare', dealCount: 741, totalRaisedUsd: 14_800_000_000, medianValuationUsd: 78_000_000, trendPct: 4 },
@@ -291,17 +294,45 @@ export const marketStats: MarketStat[] = [
   { sector: 'Enterprise SaaS', dealCount: 1105, totalRaisedUsd: 16_300_000_000, medianValuationUsd: 70_000_000, trendPct: -2 },
 ];
 
-export const marketTotals: MarketTotals = {
+const fallbackMarketTotals: MarketTotals = {
   totalRaisedUsd: 110_600_000_000,
   dealCount: 4615,
   newUnicorns: 38,
   quarter: 'Q2 2026',
 };
 
-export function getCompanies(): Company[] {
-  return companies;
+export async function getCompanies(): Promise<Company[]> {
+  try {
+    return await apiFetch<Company[]>('/companies');
+  } catch (err) {
+    console.warn('[data] getCompanies fell back to mock data:', err);
+    return fallbackCompanies;
+  }
 }
 
-export function getCompany(slug: string): Company | undefined {
-  return companies.find((c) => c.slug === slug);
+export async function getCompany(slug: string): Promise<Company | undefined> {
+  try {
+    return await apiFetch<Company>(`/companies/${slug}`);
+  } catch (err) {
+    console.warn(`[data] getCompany(${slug}) fell back to mock data:`, err);
+    return fallbackCompanies.find((c) => c.slug === slug);
+  }
+}
+
+export async function getMarketStats(): Promise<MarketStat[]> {
+  try {
+    return await apiFetch<MarketStat[]>('/market/stats');
+  } catch (err) {
+    console.warn('[data] getMarketStats fell back to mock data:', err);
+    return fallbackMarketStats;
+  }
+}
+
+export async function getMarketTotals(): Promise<MarketTotals> {
+  try {
+    return await apiFetch<MarketTotals>('/market/totals');
+  } catch (err) {
+    console.warn('[data] getMarketTotals fell back to mock data:', err);
+    return fallbackMarketTotals;
+  }
 }

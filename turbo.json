@@ -7,7 +7,11 @@
     "JWT_EXPIRES_IN",
     "ADMIN_EMAIL",
     "ADMIN_PASSWORD",
-    "ADMIN_NAME"
+    "ADMIN_NAME",
+    "API_URL",
+    "SEC_USER_AGENT",
+    "CRON_SCHEDULE",
+    "INGEST_ON_BOOT"
   ],
   "tasks": {
     "dev": {
@@ -16,7 +20,13 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        "dist/**",
+        "src/generated/**"
+      ]
     },
     "lint": {},
     "test": {},

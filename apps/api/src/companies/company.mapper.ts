@@ -22,7 +22,7 @@ import type {
   InvestorHolding as DbInvestorHolding,
   Person as DbPerson,
   RoundInvestor as DbRoundInvestor,
-} from '../generated/prisma/client';
+} from '@repo/db';
 
 const numN = (v: bigint | null): number | null => (v === null ? null : Number(v));
 const dateOnly = (d: Date): string => d.toISOString().slice(0, 10);

@@ -8,9 +8,7 @@
     ".prettierrc.mjs",
     "eslint.config.mjs",
     "jest.config.mjs",
-    "jest.config.ts",
-    "prisma.config.ts",
-    "prisma"
+    "jest.config.ts"
   ],
   "compilerOptions": {
     "strictNullChecks": true

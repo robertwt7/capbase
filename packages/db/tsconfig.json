@@ -3,8 +3,10 @@
   "compilerOptions": {
     "baseUrl": "./",
     "outDir": "./dist",
+    "rootDir": "./src",
     "strictNullChecks": true,
-    "declaration": false,
-    "declarationMap": false
-  }
+    "declaration": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "prisma"]
 }

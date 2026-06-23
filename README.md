@@ -1,124 +1,110 @@
-# Turborepo starter
+# Capbase
 
-This is a community-maintained example. If you experience a problem, please submit a pull request with a fix. GitHub Issues will be closed.
+An open-source alternative to Crunchbase / Pitchbook: **crowdsourced** company and
+funding data with **admin moderation**, plus automated ingestion of public **SEC EDGAR
+Form D** filings. TurboRepo monorepo, TypeScript end to end.
 
-## Using this example
+> Figures in the seed dataset are illustrative demo data, not verified financials.
+> Ingested SEC Form D records are real public filings.
 
-Run the following command:
+## What's inside
 
-```bash
-npx create-turbo@latest -e with-nestjs
 ```
-
-## What's inside?
-
-This Turborepo includes the following packages & apps:
-
-### Apps and Packages
-
-```shell
 .
 ├── apps
-│   ├── api                       # NestJS app (https://nestjs.com).
-│   └── web                       # Next.js app (https://nextjs.org).
+│   ├── web    # Next.js 16 (App Router, React 19) — public site + /admin moderation portal (:3001)
+│   ├── api    # NestJS 11 REST API — auth, moderation, public reads (:3000)
+│   └── jobs   # NestJS worker — SEC EDGAR Form D ingestion, cron + backfill CLI (:3002)
 └── packages
-    ├── @repo/api                 # Shared `NestJS` resources.
-    ├── @repo/eslint-config       # `eslint` configurations (includes `prettier`)
-    ├── @repo/jest-config         # `jest` configurations
-    ├── @repo/typescript-config   # `tsconfig.json`s used throughout the monorepo
-    └── @repo/ui                  # Shareable stub React component library.
+    ├── api               # @repo/api — shared domain types (single source of truth)
+    ├── db                # @repo/db — Prisma schema, migrations, seed, generated client
+    ├── ui                # @repo/ui — shared React components
+    ├── eslint-config     # @repo/eslint-config
+    ├── jest-config       # @repo/jest-config
+    └── typescript-config # @repo/typescript-config
 ```
 
-Each package and application are mostly written in [TypeScript](https://www.typescriptlang.org/).
+### Architecture
 
-### Utilities
+- **Shared types** live in `@repo/api` (plain TS interfaces). Every app imports them, so the
+  API response shapes and the frontend props never drift.
+- **Shared database** lives in `@repo/db` — one Prisma schema + generated client used by both
+  `apps/api` and `apps/jobs` (no schema duplication). Postgres via Prisma 7 + `@prisma/adapter-pg`.
+- **Moderation model**: every contributable row has a `moderationStatus`
+  (`PENDING`/`APPROVED`/`REJECTED`). Public reads return only `APPROVED`; admins approve/reject
+  via `/admin`. Logged-in users submit contributions (land as `PENDING`).
+- **Auth**: JWT + `USER`/`ADMIN` roles (bcrypt). The web admin portal stores the JWT in an
+  httpOnly cookie set by a Next route handler.
+- **Ingestion**: `apps/jobs` pulls SEC EDGAR Form D daily index + `primary_doc.xml`, normalizes
+  via a pluggable `IngestionSource` interface, and upserts idempotently (keyed on
+  `externalSource`/`externalId`). Ingested rows are auto-`APPROVED` (SEC is an official source).
 
-This `Turborepo` has some additional tools already set for you:
+### Design system — "monochrome terminal ledger"
 
-- [TypeScript](https://www.typescriptlang.org/) for static type-safety
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-- [Jest](https://prettier.io) & [Playwright](https://playwright.dev/) for testing
+The web UI is deliberately monochrome (graphite ramp) so company logos are the only color.
+Tokens in `apps/web/app/globals.css`; fonts Archivo / IBM Plex Sans / IBM Plex Mono. All
+money/number formatting goes through `apps/web/lib/format.ts`. See `CLAUDE.md` for details.
 
-### Commands
+## Quick start
 
-This `Turborepo` already configured useful commands for all your apps and packages.
+Requires Docker, Node ≥ 18, and Yarn 4 (via Corepack).
 
-#### Build
+### Local development
 
 ```bash
-# Will build all the app & packages with the supported `build` script.
-yarn run build
-
-# ℹ️ If you plan to only build apps individually,
-# Please make sure you've built the packages first.
+make install        # yarn install
+make db-up          # start Postgres (docker compose), apply migrations, seed demo data
+make dev            # run web (:3001), api (:3000), jobs (:3002) with hot reload
 ```
 
-#### Develop
+Then open <http://localhost:3001>. Admin portal: <http://localhost:3001/admin>
+(default seeded admin — `admin@capbase.dev` / `admin12345`).
+
+Run a one-off ingestion of recent SEC Form D filings into your dev DB:
 
 ```bash
-# Will run the development server for all the app & packages with the supported `dev` script.
-yarn run dev
+make ingest             # backfill up to INGEST_LIMIT (default 50) filings
+make ingest LIMIT=10    # smaller batch
 ```
 
-#### test
+### Production-like stack (everything in Docker)
 
 ```bash
-# Will launch a test suites for all the app & packages with the supported `test` script.
-yarn run test
-
-# You can launch e2e testes with `test:e2e`
-yarn run test:e2e
-
-# See `@repo/jest-config` to customize the behavior.
+make up         # build images + start postgres, api, web, jobs (migrations run on boot)
+make seed       # one-shot: load demo data
+make logs       # tail all services
+make down       # stop the stack (keeps the DB volume)
 ```
 
-#### Lint
+The `jobs` container runs the ingestion on a cron (`CRON_SCHEDULE`, default daily 06:00).
+Set `INGEST_ON_BOOT=true` to also run once on startup, or trigger a manual backfill:
 
 ```bash
-# Will lint all the app & packages with the supported `lint` script.
-# See `@repo/eslint-config` to customize the behavior.
-yarn run lint
+make ingest-prod        # run a backfill inside the jobs container
 ```
 
-#### Format
+See `make help` for the full command list. Override env via a root `.env`
+(e.g. `JWT_SECRET`, `ADMIN_PASSWORD`, `SEC_USER_AGENT`, `CRON_SCHEDULE`).
 
-```bash
-# Will format all the supported `.ts,.js,json,.tsx,.jsx` files.
-# See `@repo/eslint-config/prettier-base.js` to customize the behavior.
-yarn format
-```
+## Common commands
 
-### Remote Caching
+| Command | Description |
+| --- | --- |
+| `make dev` | Run all apps locally (hot reload) |
+| `make build` | `turbo build` all workspaces |
+| `make test` / `make test-e2e` | Run unit / e2e tests |
+| `make db-migrate` | Create/apply a dev migration (`@repo/db`) |
+| `make db-seed` | Re-seed the dev database |
+| `make up` / `make down` | Start / stop the Docker stack |
+| `make ingest` | Run SEC Form D backfill (local) |
+| `make help` | List every target |
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+Turbo tasks can also be run directly: `yarn dev`, `yarn build`, `yarn test`, `yarn lint`.
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+## Notes
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```bash
-npx turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-```bash
-npx turbo link
-```
-
-## Useful Links
-
-This example take some inspiration the [with-nextjs](https://github.com/vercel/turborepo/tree/main/examples/with-nextjs) `Turbo` example and [01-cats-app](https://github.com/nestjs/nest/tree/master/sample/01-cats-app) `NestJs` sample.
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+- The API requires a `DATABASE_URL` (and `JWT_SECRET` in production). Copy each app's
+  `.env.example` to `.env` for local runs; Docker injects env via `docker-compose.yml`.
+- Postgres is exposed on host port **5433** (to avoid clashing with a local 5432).
+- SEC requires a descriptive `SEC_USER_AGENT` with a contact email and ≤10 req/s — the
+  ingestion client honors both.

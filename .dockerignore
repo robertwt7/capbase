@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/coverage
+**/src/generated
+.git
+.github
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+.yarn/cache
+.yarn/install-state.gz
+thoughts
+README.md
