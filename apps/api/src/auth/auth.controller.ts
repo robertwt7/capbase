@@ -1,5 +1,5 @@
 import { Body, Controller, Get, NotFoundException, Post, UseGuards } from '@nestjs/common';
-import type { AuthResponse, AuthUser } from '@repo/api';
+import type { AuthResponse, AuthUser, MyContributionsResponse } from '@repo/api';
 
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
@@ -31,5 +31,19 @@ export class AuthController {
     const user = await this.users.findById(current.id);
     if (!user) throw new NotFoundException('User not found');
     return { id: user.id, email: user.email, name: user.name, role: user.role };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/contributions')
+  async myContributions(@CurrentUser() current: RequestUser): Promise<MyContributionsResponse> {
+    const [items, until] = await Promise.all([
+      this.users.listContributions(current.id),
+      this.users.unlockedUntil(current.id),
+    ]);
+    const unlocked = until !== null && new Date() < until;
+    return {
+      access: { unlocked, unlockedUntil: until ? until.toISOString() : null },
+      items,
+    };
   }
 }

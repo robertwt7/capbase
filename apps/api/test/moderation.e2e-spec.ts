@@ -75,9 +75,15 @@ describe('Submissions & moderation (e2e)', () => {
     expect(submit.body.moderationStatus).toBe('PENDING');
     const roundId = submit.body.id;
 
-    // Not visible publicly yet.
-    const before = await request(app.getHttpServer()).get('/companies/helia').expect(200);
-    expect(before.body.rounds.some((r: { name: string }) => r.name === roundName)).toBe(false);
+    // Not visible yet (still PENDING). Read as the contributor, who is unlocked
+    // by their own submission, so the gate returns the full approved round list.
+    const before = await request(app.getHttpServer())
+      .get('/companies/helia')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(before.body.company.rounds.some((r: { name: string }) => r.name === roundName)).toBe(
+      false,
+    );
 
     // Appears in the admin queue.
     const queue = await request(app.getHttpServer())
@@ -93,8 +99,13 @@ describe('Submissions & moderation (e2e)', () => {
       .send({ status: 'APPROVED' })
       .expect(200);
 
-    // Now visible publicly.
-    const after = await request(app.getHttpServer()).get('/companies/helia').expect(200);
-    expect(after.body.rounds.some((r: { name: string }) => r.name === roundName)).toBe(true);
+    // Now visible to the (unlocked) contributor.
+    const after = await request(app.getHttpServer())
+      .get('/companies/helia')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(after.body.company.rounds.some((r: { name: string }) => r.name === roundName)).toBe(
+      true,
+    );
   });
 });

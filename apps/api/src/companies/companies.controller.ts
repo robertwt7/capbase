@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import type { Company } from '@repo/api';
+import type { Company, CompanyDetailResponse } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
@@ -25,9 +26,13 @@ export class CompaniesController {
     return this.companies.findAllApproved();
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':slug')
-  findOne(@Param('slug') slug: string): Promise<Company> {
-    return this.companies.findOneApproved(slug);
+  findOne(
+    @Param('slug') slug: string,
+    @CurrentUser() user?: RequestUser,
+  ): Promise<CompanyDetailResponse> {
+    return this.companies.getCompanyDetail(slug, user);
   }
 
   // --- Contributions (any authenticated user; created as PENDING) ---
