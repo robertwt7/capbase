@@ -81,6 +81,24 @@ in `prisma.config.ts` (reads `DATABASE_URL`), not the schema. Money is `BigInt`.
 Company/FundingRound rows also have `externalSource`/`externalId` (`@@unique`) for idempotent
 ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
 
+### Controlled vocabularies & entity metadata
+
+Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
+(`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
+— not Prisma enums. Besides `Stage`/`CompanyStatus`/`InvestorType`/`ExitType`, there is a
+**`Sector`/`SECTORS`** vocabulary (the 5 canonical sectors: `Artificial intelligence`, `Fintech`,
+`Healthcare`, `Climate`, `Enterprise SaaS`) shared between `Company.primarySector` and
+`MarketStat.sector`. This is the connection between companies and the sector tape; `MarketStat`
+aggregate numbers stay **seeded**, not computed from companies. Two small status vocabularies also
+exist: `OperatingStatus`/`OPERATING_STATUSES` (`Active`/`Closed`) and `CompanyType`/`COMPANY_TYPES`
+(`For profit`/`Non-profit`).
+
+Entities carry optional outbound-link / metadata fields (all nullable, `@IsUrl`-validated where a
+link): `Company` — `websiteUrl`, `linkedinUrl`, `twitterUrl`, `legalName`, `operatingStatus`,
+`companyType`, `primarySector`; `Person` — `linkedinUrl`, `title`; `InvestorHolding` —
+`websiteUrl`, `linkedinUrl`. They render as outbound links / facts on the company profile.
+SEC-ingested rows leave these null (no SEC→sector mapping yet).
+
 ## Jobs (apps/jobs)
 
 NestJS worker (port 3002, health endpoint) that ingests **SEC EDGAR Form D** filings —

@@ -93,7 +93,9 @@ export default async function Home() {
               </span>
               <span className={styles.stage} role="cell">
                 <span className={styles.stageTag}>{company.stage}</span>
-                <span className={styles.sectorTag}>{company.industry[0]}</span>
+                <span className={styles.sectorTag}>
+                  {company.primarySector ?? company.industry[0]}
+                </span>
               </span>
               <span className={`${styles.num} ${styles.valuation}`} role="cell">
                 {formatUsd(company.lastValuationUsd)}

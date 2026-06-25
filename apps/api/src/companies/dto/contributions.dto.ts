@@ -7,6 +7,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   Min,
   MinLength,
   ValidateNested,
@@ -76,6 +77,14 @@ export class CreatePersonDto implements CreatePersonInput {
   @IsOptional()
   @IsString()
   prior?: string;
+
+  @IsOptional()
+  @IsUrl()
+  linkedinUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  title?: string | null;
 }
 
 export class CreateInvestorDto implements CreateInvestorInput {
@@ -93,6 +102,14 @@ export class CreateInvestorDto implements CreateInvestorInput {
   @IsInt()
   @Min(0)
   rounds!: number;
+
+  @IsOptional()
+  @IsUrl()
+  websiteUrl?: string | null;
+
+  @IsOptional()
+  @IsUrl()
+  linkedinUrl?: string | null;
 }
 
 export class CreateAcquisitionDto implements CreateAcquisitionInput {

@@ -6,16 +6,23 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
 import {
   COMPANY_STATUSES,
+  COMPANY_TYPES,
+  OPERATING_STATUSES,
+  SECTORS,
   STAGES,
   type CompanyFinancials,
   type CompanyStatus,
+  type CompanyType,
   type CreateCompanyInput,
+  type OperatingStatus,
+  type Sector,
   type Stage,
 } from '@repo/api';
 
@@ -87,4 +94,32 @@ export class CreateCompanyDto implements CreateCompanyInput {
   @ValidateNested()
   @Type(() => FinancialsDto)
   financials?: CompanyFinancials;
+
+  @IsOptional()
+  @IsUrl()
+  websiteUrl?: string | null;
+
+  @IsOptional()
+  @IsUrl()
+  linkedinUrl?: string | null;
+
+  @IsOptional()
+  @IsUrl()
+  twitterUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  legalName?: string | null;
+
+  @IsOptional()
+  @IsIn([...OPERATING_STATUSES])
+  operatingStatus?: OperatingStatus | null;
+
+  @IsOptional()
+  @IsIn([...COMPANY_TYPES])
+  companyType?: CompanyType | null;
+
+  @IsOptional()
+  @IsIn([...SECTORS])
+  primarySector?: Sector | null;
 }

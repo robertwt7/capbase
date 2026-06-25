@@ -42,6 +42,9 @@ const fallbackCompanies: Company[] = [
     slug: 'helia',
     name: 'Helia',
     domain: 'stripe.com',
+    websiteUrl: 'https://stripe.com',
+    linkedinUrl: 'https://www.linkedin.com/company/helia',
+    primarySector: 'Fintech',
     oneLiner: 'Settlement infrastructure for cross-border payouts.',
     description:
       'Helia runs the ledger and compliance rails that let marketplaces pay out to contractors in 40 currencies. It sells to platforms that have outgrown a single payment processor and need real-time reconciliation across banking partners.',
@@ -172,6 +175,7 @@ const fallbackCompanies: Company[] = [
     slug: 'vellum',
     name: 'Vellum',
     domain: 'figma.com',
+    primarySector: 'Enterprise SaaS',
     oneLiner: 'Design surface for collaborative product teams.',
     description:
       'Vellum is a multiplayer canvas where product, design, and engineering iterate on the same file. It replaced a stack of single-player tools for teams that needed everyone editing live.',
@@ -199,6 +203,7 @@ const fallbackCompanies: Company[] = [
     slug: 'sable-labs',
     name: 'Sable Labs',
     domain: 'anthropic.com',
+    primarySector: 'Artificial intelligence',
     oneLiner: 'Frontier models for regulated industries.',
     description:
       'Sable Labs trains and serves large language models tuned for finance, healthcare, and legal work, with deployment options that keep data inside the customer perimeter.',
@@ -215,6 +220,7 @@ const fallbackCompanies: Company[] = [
     slug: 'gridpoint',
     name: 'GridPoint',
     domain: 'databricks.com',
+    primarySector: 'Artificial intelligence',
     oneLiner: 'Lakehouse analytics for operational data.',
     description:
       'GridPoint unifies data warehousing and machine learning on one platform, aimed at enterprises consolidating fragmented analytics stacks.',
@@ -231,6 +237,7 @@ const fallbackCompanies: Company[] = [
     slug: 'meridian',
     name: 'Meridian',
     domain: 'ramp.com',
+    primarySector: 'Fintech',
     oneLiner: 'Spend management that pays for itself.',
     description:
       'Meridian issues corporate cards and automates expense, bill pay, and accounting close for finance teams that want controls without slowing the company down.',
@@ -247,6 +254,7 @@ const fallbackCompanies: Company[] = [
     slug: 'quill',
     name: 'Quill',
     domain: 'notion.so',
+    primarySector: 'Enterprise SaaS',
     oneLiner: 'Connected workspace for docs, wikis, and projects.',
     description:
       'Quill blends documents, databases, and task tracking into one workspace teams can shape to their own process.',
@@ -263,6 +271,7 @@ const fallbackCompanies: Company[] = [
     slug: 'palette',
     name: 'Palette',
     domain: 'canva.com',
+    primarySector: 'Enterprise SaaS',
     oneLiner: 'Design tools for everyone, not just designers.',
     description:
       'Palette makes graphic design approachable with templates and drag-and-drop editing for marketers, educators, and small businesses.',
@@ -279,6 +288,7 @@ const fallbackCompanies: Company[] = [
     slug: 'beacon-hr',
     name: 'Beacon HR',
     domain: 'rippling.com',
+    primarySector: 'Enterprise SaaS',
     oneLiner: 'One system for payroll, devices, and access.',
     description:
       'Beacon HR ties employee data to payroll, IT provisioning, and app access so onboarding and offboarding happen in one workflow.',

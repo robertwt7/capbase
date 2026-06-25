@@ -47,12 +47,31 @@ export default async function CompanyProfile({
               </span>
             ))}
           </div>
+          {(company.websiteUrl || company.linkedinUrl || company.twitterUrl) && (
+            <div className={styles.links}>
+              {company.websiteUrl && (
+                <OutboundLink href={company.websiteUrl}>Website</OutboundLink>
+              )}
+              {company.linkedinUrl && (
+                <OutboundLink href={company.linkedinUrl}>LinkedIn</OutboundLink>
+              )}
+              {company.twitterUrl && (
+                <OutboundLink href={company.twitterUrl}>Twitter</OutboundLink>
+              )}
+            </div>
+          )}
         </div>
         <dl className={styles.facts}>
           <Fact label="Founded" value={company.founded.toString()} />
           <Fact label="Headquarters" value={company.hq} />
           <Fact label="Headcount" value={formatCount(company.headcount)} />
           <Fact label="Stage" value={company.stage} />
+          {company.primarySector && <Fact label="Sector" value={company.primarySector} />}
+          {company.legalName && <Fact label="Legal name" value={company.legalName} />}
+          {company.operatingStatus && (
+            <Fact label="Operating status" value={company.operatingStatus} />
+          )}
+          {company.companyType && <Fact label="Company type" value={company.companyType} />}
         </dl>
       </header>
 
@@ -99,7 +118,18 @@ export default async function CompanyProfile({
           <div className={styles.investors}>
             {company.investors.map((inv) => (
               <div key={inv.name} className={styles.investor}>
-                <span className={styles.investorName}>{inv.name}</span>
+                {inv.websiteUrl || inv.linkedinUrl ? (
+                  <a
+                    href={(inv.websiteUrl ?? inv.linkedinUrl)!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={styles.investorLink}
+                  >
+                    {inv.name}
+                  </a>
+                ) : (
+                  <span className={styles.investorName}>{inv.name}</span>
+                )}
                 <span className={styles.investorType}>{inv.type}</span>
                 <span className={styles.investorRounds}>
                   {inv.rounds} {inv.rounds === 1 ? 'round' : 'rounds'} · since {inv.firstRound}
@@ -121,11 +151,17 @@ export default async function CompanyProfile({
             {company.people.map((person) => (
               <div key={person.name} className={styles.person}>
                 <span className={styles.personName}>{person.name}</span>
-                <span className={styles.personRole}>{person.role}</span>
+                <span className={styles.personRole}>
+                  {person.role}
+                  {person.title && person.title !== person.role ? ` · ${person.title}` : ''}
+                </span>
                 <span className={styles.personMeta}>
                   Since {person.since}
                   {person.prior ? ` · prev. ${person.prior}` : ''}
                 </span>
+                {person.linkedinUrl && (
+                  <OutboundLink href={person.linkedinUrl}>LinkedIn</OutboundLink>
+                )}
               </div>
             ))}
           </div>
@@ -238,6 +274,14 @@ function LockNote({
         {signedIn ? 'Contribute to unlock' : 'Sign in to unlock'}
       </Link>
     </div>
+  );
+}
+
+function OutboundLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={styles.outLink}>
+      {children}
+    </a>
   );
 }
 

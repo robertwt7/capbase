@@ -78,6 +78,28 @@
   padding: 3px 9px;
 }
 
+/* Outbound links (monochrome — emphasis via weight + underline, no accent) */
+.links {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.outLink {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--graphite-700);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.15s ease;
+}
+
+.outLink:hover {
+  color: var(--ink);
+}
+
 .facts {
   display: grid;
   grid-template-columns: repeat(2, auto);
@@ -198,6 +220,19 @@
   font-weight: 600;
   font-size: 15px;
   color: var(--ink);
+}
+
+.investorLink {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.investorLink:hover {
+  color: var(--graphite-700);
 }
 
 .investorType {

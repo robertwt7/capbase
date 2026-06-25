@@ -18,7 +18,14 @@ function makeRound(i: number) {
 }
 
 function makePerson(i: number) {
-  return { name: `Person ${i}`, role: 'CEO', since: 2016, prior: null };
+  return {
+    name: `Person ${i}`,
+    role: 'CEO',
+    since: 2016,
+    prior: null,
+    linkedinUrl: `https://www.linkedin.com/in/person-${i}`,
+    title: 'Chief Executive Officer',
+  };
 }
 
 function dbCompany() {
@@ -40,6 +47,13 @@ function dbCompany() {
     revenueGrowthPct: null,
     grossMarginPct: null,
     burnMonths: null,
+    websiteUrl: 'https://helia.com',
+    linkedinUrl: 'https://www.linkedin.com/company/helia',
+    twitterUrl: null,
+    legalName: 'Helia Payments, Inc.',
+    operatingStatus: 'Active',
+    companyType: 'For profit',
+    primarySector: 'Fintech',
     rounds: [makeRound(1), makeRound(2), makeRound(3), makeRound(4)],
     people: [makePerson(1), makePerson(2), makePerson(3)],
     investors: [],
@@ -111,5 +125,68 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
     expect(access.unlocked).toBe(true);
     expect(company.rounds).toHaveLength(4);
     expect(lastContributionAt).not.toHaveBeenCalled();
+  });
+
+  it('maps the new link/metadata fields through to the read shape', async () => {
+    const { company } = await service.getCompanyDetail('helia', {
+      id: 'admin1',
+      role: 'ADMIN',
+    });
+
+    expect(company.websiteUrl).toBe('https://helia.com');
+    expect(company.linkedinUrl).toBe('https://www.linkedin.com/company/helia');
+    expect(company.legalName).toBe('Helia Payments, Inc.');
+    expect(company.operatingStatus).toBe('Active');
+    expect(company.companyType).toBe('For profit');
+    expect(company.primarySector).toBe('Fintech');
+    expect(company.people?.[0]?.linkedinUrl).toBe('https://www.linkedin.com/in/person-1');
+    expect(company.people?.[0]?.title).toBe('Chief Executive Officer');
+  });
+});
+
+describe('CompaniesService.createCompany (new fields persist)', () => {
+  it('passes the new link/metadata fields to prisma.company.create', async () => {
+    const create = jest.fn(async () => ({
+      id: 'c1',
+      slug: 'acme',
+      moderationStatus: 'PENDING',
+    }));
+    const findUnique = jest.fn(async () => null);
+    const prisma = {
+      company: { create, findUnique },
+    } as unknown as PrismaService;
+    const users = {} as unknown as UsersService;
+    const service = new CompaniesService(prisma, users);
+
+    await service.createCompany(
+      {
+        name: 'Acme',
+        domain: 'acme.com',
+        oneLiner: 'one',
+        description: 'desc',
+        hq: 'SF',
+        founded: 2020,
+        headcount: 5,
+        industry: ['Fintech'],
+        status: 'Private',
+        stage: 'Seed',
+        totalRaisedUsd: 100,
+        websiteUrl: 'https://acme.com',
+        linkedinUrl: 'https://www.linkedin.com/company/acme',
+        primarySector: 'Fintech',
+        operatingStatus: 'Active',
+        companyType: 'For profit',
+      } as never,
+      'u1',
+    );
+
+    const data = (create.mock.calls[0] as unknown[])[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data.data.websiteUrl).toBe('https://acme.com');
+    expect(data.data.linkedinUrl).toBe('https://www.linkedin.com/company/acme');
+    expect(data.data.primarySector).toBe('Fintech');
+    expect(data.data.operatingStatus).toBe('Active');
+    expect(data.data.companyType).toBe('For profit');
   });
 });

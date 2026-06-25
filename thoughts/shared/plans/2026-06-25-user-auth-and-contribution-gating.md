@@ -345,9 +345,10 @@ monochrome design (no accent colors).
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Web builds: `yarn workspace web build`
-- [ ] Type-check: `yarn workspace web check-types`
-- [ ] Lint: `yarn workspace web lint`
+- [x] Web builds: `yarn workspace web build`
+- [x] Type-check: `yarn workspace web check-types`
+- [~] Lint: `yarn workspace web lint` — script is broken repo-wide (Next 16 removed
+      `next lint`/`--max-warnings`); build's type-check is clean. Pre-existing, not from this work.
 
 #### Manual Verification
 - [ ] Register a new user → redirected, header shows signed-in state
@@ -396,9 +397,9 @@ logged out). Keep the existing empty-state pattern for genuinely empty sections.
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Web builds: `yarn workspace web build`
-- [ ] Type-check: `yarn workspace web check-types`
-- [ ] Lint: `yarn workspace web lint`
+- [x] Web builds: `yarn workspace web build`
+- [x] Type-check: `yarn workspace web check-types`
+- [~] Lint: `yarn workspace web lint` — broken repo-wide (see Phase 3 note); build is clean.
 
 #### Manual Verification
 - [ ] Logged-out user on a company with >2 rounds sees exactly 2 + "Showing 2 of N" CTA

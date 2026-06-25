@@ -2,14 +2,17 @@ import type {
   AcquisitionDeal,
   Company,
   CompanyStatus,
+  CompanyType,
   DiversitySignal,
   ExitEvent,
   ExitType,
   FundingRound,
   InvestorHolding,
   InvestorType,
+  OperatingStatus,
   Person,
   RoundInvestor,
+  Sector,
   Stage,
 } from '@repo/api';
 
@@ -59,6 +62,8 @@ export function toPerson(row: DbPerson): Person {
     role: row.role,
     since: row.since,
     ...(row.prior ? { prior: row.prior } : {}),
+    linkedinUrl: row.linkedinUrl,
+    title: row.title,
   };
 }
 
@@ -68,6 +73,8 @@ export function toInvestorHolding(row: DbInvestorHolding): InvestorHolding {
     type: row.type as InvestorType,
     firstRound: row.firstRound,
     rounds: row.rounds,
+    websiteUrl: row.websiteUrl,
+    linkedinUrl: row.linkedinUrl,
   };
 }
 
@@ -99,6 +106,13 @@ export function toCompany(row: DbCompanyWithRelations): Company {
     slug: row.slug,
     name: row.name,
     domain: row.domain,
+    websiteUrl: row.websiteUrl,
+    linkedinUrl: row.linkedinUrl,
+    twitterUrl: row.twitterUrl,
+    legalName: row.legalName,
+    operatingStatus: row.operatingStatus as OperatingStatus | null,
+    companyType: row.companyType as CompanyType | null,
+    primarySector: row.primarySector as Sector | null,
     oneLiner: row.oneLiner,
     description: row.description,
     hq: row.hq,
