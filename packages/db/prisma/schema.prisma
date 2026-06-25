@@ -42,6 +42,14 @@ model Company {
   slug        String  @unique
   name        String
   domain      String
+  // Outbound links + Crunchbase-style metadata (all optional).
+  websiteUrl      String?
+  linkedinUrl     String?
+  twitterUrl      String?
+  legalName       String?
+  operatingStatus String? // 'Active' | 'Closed' (validated in DTO)
+  companyType     String? // 'For profit' | 'Non-profit'
+  primarySector   String? // one of SECTORS; shared vocab with MarketStat.sector
   oneLiner    String
   description String
   hq          String
@@ -127,6 +135,8 @@ model InvestorHolding {
   type       String
   firstRound String
   rounds     Int
+  websiteUrl  String?
+  linkedinUrl String?
 
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
@@ -146,6 +156,8 @@ model Person {
   role      String
   since     Int
   prior     String?
+  linkedinUrl String?
+  title       String?
 
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?

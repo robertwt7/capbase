@@ -5,9 +5,12 @@
 import type {
   CompanyFinancials,
   CompanyStatus,
+  CompanyType,
   ExitType,
   InvestorType,
+  OperatingStatus,
   RoundInvestor,
+  Sector,
   Stage,
 } from './company';
 
@@ -25,6 +28,13 @@ export interface CreateCompanyInput {
   totalRaisedUsd: number;
   lastValuationUsd?: number | null;
   financials?: CompanyFinancials;
+  websiteUrl?: string | null;
+  linkedinUrl?: string | null;
+  twitterUrl?: string | null;
+  legalName?: string | null;
+  operatingStatus?: OperatingStatus | null;
+  companyType?: CompanyType | null;
+  primarySector?: Sector | null;
 }
 
 export interface CreateFundingRoundInput {
@@ -41,6 +51,8 @@ export interface CreatePersonInput {
   role: string;
   since: number;
   prior?: string;
+  linkedinUrl?: string | null;
+  title?: string | null;
 }
 
 export interface CreateInvestorInput {
@@ -48,6 +60,8 @@ export interface CreateInvestorInput {
   type: InvestorType;
   firstRound: string;
   rounds: number;
+  websiteUrl?: string | null;
+  linkedinUrl?: string | null;
 }
 
 export interface CreateAcquisitionInput {

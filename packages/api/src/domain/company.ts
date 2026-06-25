@@ -31,6 +31,30 @@ export type CompanyStatus = 'Private' | 'Public' | 'Acquired';
 
 export const COMPANY_STATUSES: readonly CompanyStatus[] = ['Private', 'Public', 'Acquired'];
 
+/** Controlled sector vocabulary, shared between Company.primarySector and MarketStat.sector. */
+export type Sector =
+  | 'Artificial intelligence'
+  | 'Fintech'
+  | 'Healthcare'
+  | 'Climate'
+  | 'Enterprise SaaS';
+
+export const SECTORS: readonly Sector[] = [
+  'Artificial intelligence',
+  'Fintech',
+  'Healthcare',
+  'Climate',
+  'Enterprise SaaS',
+];
+
+export type OperatingStatus = 'Active' | 'Closed';
+
+export const OPERATING_STATUSES: readonly OperatingStatus[] = ['Active', 'Closed'];
+
+export type CompanyType = 'For profit' | 'Non-profit';
+
+export const COMPANY_TYPES: readonly CompanyType[] = ['For profit', 'Non-profit'];
+
 export type InvestorType = 'Venture' | 'Growth' | 'Angel' | 'Corporate' | 'Private equity';
 
 export const INVESTOR_TYPES: readonly InvestorType[] = [
@@ -68,6 +92,8 @@ export interface Person {
   role: string;
   since: number; // year joined
   prior?: string; // notable prior affiliation
+  linkedinUrl?: string | null;
+  title?: string | null;
 }
 
 export interface InvestorHolding {
@@ -75,6 +101,8 @@ export interface InvestorHolding {
   type: InvestorType;
   firstRound: string;
   rounds: number; // how many rounds they participated in
+  websiteUrl?: string | null;
+  linkedinUrl?: string | null;
 }
 
 export interface AcquisitionDeal {
@@ -109,6 +137,13 @@ export interface Company {
   slug: string;
   name: string;
   domain: string; // used to resolve the logo
+  websiteUrl?: string | null;
+  linkedinUrl?: string | null;
+  twitterUrl?: string | null;
+  legalName?: string | null;
+  operatingStatus?: OperatingStatus | null;
+  companyType?: CompanyType | null;
+  primarySector?: Sector | null;
   oneLiner: string;
   description: string;
   hq: string;
