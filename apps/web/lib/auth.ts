@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import type { AuthUser } from '@repo/api';
+import type { AuthUser, MyContributionsResponse } from '@repo/api';
 
 import { apiFetch } from './api';
 
@@ -33,4 +33,22 @@ export async function requireAdmin(): Promise<AuthUser> {
     redirect('/admin/login');
   }
   return user;
+}
+
+/** Gate user pages: redirect to login (preserving destination) unless signed in. */
+export async function requireUser(next?: string): Promise<AuthUser> {
+  const user = await getSession();
+  if (!user) {
+    redirect(next ? `/login?next=${encodeURIComponent(next)}` : '/login');
+  }
+  return user;
+}
+
+/** The signed-in user's contribution history + current access status. */
+export async function getMyContributions(): Promise<MyContributionsResponse> {
+  const token = await getToken();
+  return apiFetch<MyContributionsResponse>('/auth/me/contributions', {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
 }

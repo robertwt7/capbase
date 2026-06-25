@@ -55,6 +55,40 @@
   color: var(--ink);
 }
 
+.account {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.accountLink {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--graphite-700);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.accountLink:hover {
+  color: var(--ink);
+}
+
+.cta {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: 999px;
+  padding: 7px 14px;
+}
+.cta:hover {
+  background: var(--graphite-900);
+}
+
 .search {
   margin-left: auto;
   display: flex;
@@ -108,6 +142,9 @@
   }
 
   .search {
+    width: auto;
+    flex: 1;
+    min-width: 0;
     max-width: none;
   }
 }

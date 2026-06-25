@@ -8,9 +8,16 @@
 // the NestJS backend. They are re-exported here so existing component imports
 // (e.g. `import type { FundingRound } from '../lib/data'`) keep working.
 
-import type { Company, MarketStat, MarketTotals } from '@repo/api';
+import {
+  PREVIEW_LIMIT,
+  type Company,
+  type CompanyDetailResponse,
+  type MarketStat,
+  type MarketTotals,
+} from '@repo/api';
 
 import { apiFetch } from './api';
+import { getToken } from './auth';
 
 export type {
   Stage,
@@ -310,12 +317,38 @@ export async function getCompanies(): Promise<Company[]> {
   }
 }
 
-export async function getCompany(slug: string): Promise<Company | undefined> {
+export async function getCompanyDetail(
+  slug: string,
+): Promise<CompanyDetailResponse | undefined> {
+  // The detail endpoint is gated per-viewer, so it is authenticated (when a
+  // session exists) and never cached.
+  const token = await getToken();
   try {
-    return await apiFetch<Company>(`/companies/${slug}`);
+    return await apiFetch<CompanyDetailResponse>(`/companies/${slug}`, {
+      headers: token ? { authorization: `Bearer ${token}` } : undefined,
+      cache: 'no-store',
+    });
   } catch (err) {
-    console.warn(`[data] getCompany(${slug}) fell back to mock data:`, err);
-    return fallbackCompanies.find((c) => c.slug === slug);
+    console.warn(`[data] getCompanyDetail(${slug}) fell back to mock data:`, err);
+    const company = fallbackCompanies.find((c) => c.slug === slug);
+    if (!company) return undefined;
+    // Offline fallback renders the full mock profile (unlocked).
+    return {
+      company,
+      access: {
+        unlocked: true,
+        previewLimit: PREVIEW_LIMIT,
+        unlockedUntil: null,
+        totals: {
+          rounds: company.rounds?.length ?? 0,
+          people: company.people?.length ?? 0,
+          investors: company.investors?.length ?? 0,
+          acquisitions: company.acquisitions?.length ?? 0,
+          exits: company.exits?.length ?? 0,
+          diversity: company.diversity?.length ?? 0,
+        },
+      },
+    };
   }
 }
 

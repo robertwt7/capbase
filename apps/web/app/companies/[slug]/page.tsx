@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import type { CompanyAccess } from '@repo/api';
 
+import { AddRoundForm } from './AddRoundForm';
 import { CompanyLogo } from '../../../components/CompanyLogo';
 import { FundingLadder } from '../../../components/FundingLadder';
-import { getCompany } from '../../../lib/data';
+import { getSession } from '../../../lib/auth';
+import { getCompanyDetail } from '../../../lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '../../../lib/format';
 
 import styles from './profile.module.css';
@@ -14,11 +17,14 @@ export default async function CompanyProfile({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const company = await getCompany(slug);
+  const [result, session] = await Promise.all([getCompanyDetail(slug), getSession()]);
 
-  if (!company) {
+  if (!result) {
     notFound();
   }
+
+  const { company, access } = result;
+  const signedIn = session !== null;
 
   return (
     <main className={styles.page}>
@@ -70,18 +76,26 @@ export default async function CompanyProfile({
         <p className={styles.aboutText}>{company.description}</p>
       </section>
 
-      <Block title="Funding rounds" note={company.rounds ? `${company.rounds.length} rounds` : undefined}>
-        {company.rounds ? (
+      <Block
+        title="Funding rounds"
+        note={access.totals.rounds > 0 ? `${access.totals.rounds} rounds` : undefined}
+      >
+        {company.rounds && company.rounds.length > 0 ? (
           <FundingLadder rounds={company.rounds} />
         ) : (
           <Empty action="Add a funding round">
             No rounds recorded yet for {company.name}.
           </Empty>
         )}
+        <LockNote shown={company.rounds?.length ?? 0} total={access.totals.rounds} access={access} slug={company.slug} signedIn={signedIn} />
+        {signedIn ? <AddRoundForm slug={company.slug} /> : null}
       </Block>
 
-      <Block title="Investors" note={company.investors ? `${company.investors.length} on file` : undefined}>
-        {company.investors ? (
+      <Block
+        title="Investors"
+        note={access.totals.investors > 0 ? `${access.totals.investors} on file` : undefined}
+      >
+        {company.investors && company.investors.length > 0 ? (
           <div className={styles.investors}>
             {company.investors.map((inv) => (
               <div key={inv.name} className={styles.investor}>
@@ -98,10 +112,11 @@ export default async function CompanyProfile({
             No investors recorded yet for {company.name}.
           </Empty>
         )}
+        <LockNote shown={company.investors?.length ?? 0} total={access.totals.investors} access={access} slug={company.slug} signedIn={signedIn} />
       </Block>
 
-      <Block title="People" note={company.people ? 'Leadership' : undefined}>
-        {company.people ? (
+      <Block title="People" note={access.totals.people > 0 ? 'Leadership' : undefined}>
+        {company.people && company.people.length > 0 ? (
           <div className={styles.people}>
             {company.people.map((person) => (
               <div key={person.name} className={styles.person}>
@@ -119,10 +134,14 @@ export default async function CompanyProfile({
             No people recorded yet for {company.name}.
           </Empty>
         )}
+        <LockNote shown={company.people?.length ?? 0} total={access.totals.people} access={access} slug={company.slug} signedIn={signedIn} />
       </Block>
 
       <div className={styles.dealGrid}>
-        <Block title="Acquisitions" note={company.acquisitions ? `${company.acquisitions.length} deals` : undefined}>
+        <Block
+          title="Acquisitions"
+          note={access.totals.acquisitions > 0 ? `${access.totals.acquisitions} deals` : undefined}
+        >
           {company.acquisitions && company.acquisitions.length > 0 ? (
             <ul className={styles.deals}>
               {company.acquisitions.map((deal) => (
@@ -141,6 +160,7 @@ export default async function CompanyProfile({
               {company.name} has no recorded acquisitions.
             </Empty>
           )}
+          <LockNote shown={company.acquisitions?.length ?? 0} total={access.totals.acquisitions} access={access} slug={company.slug} signedIn={signedIn} />
         </Block>
 
         <Block title="Exits">
@@ -160,6 +180,7 @@ export default async function CompanyProfile({
           ) : (
             <Empty>Still private — no exit on record.</Empty>
           )}
+          <LockNote shown={company.exits?.length ?? 0} total={access.totals.exits} access={access} slug={company.slug} signedIn={signedIn} />
         </Block>
       </div>
 
@@ -179,12 +200,44 @@ export default async function CompanyProfile({
             No diversity signals recorded yet for {company.name}.
           </Empty>
         )}
+        <LockNote shown={company.diversity?.length ?? 0} total={access.totals.diversity} access={access} slug={company.slug} signedIn={signedIn} />
       </Block>
 
       <footer className={styles.footer}>
         Figures shown are illustrative demo data, pending live ingestion.
       </footer>
     </main>
+  );
+}
+
+function LockNote({
+  shown,
+  total,
+  access,
+  slug,
+  signedIn,
+}: {
+  shown: number;
+  total: number;
+  access: CompanyAccess;
+  slug: string;
+  signedIn: boolean;
+}) {
+  // Only shown when the viewer is locked and there is hidden data beyond the preview.
+  if (access.unlocked || total <= shown) return null;
+  return (
+    <div className={styles.lockNote}>
+      <span className={styles.lockText}>
+        Showing <span className={styles.lockCount}>{shown}</span> of{' '}
+        <span className={styles.lockCount}>{total}</span> — contribute to unlock the rest.
+      </span>
+      <Link
+        href={signedIn ? '/contribute' : `/login?next=${encodeURIComponent(`/companies/${slug}`)}`}
+        className={styles.lockAction}
+      >
+        {signedIn ? 'Contribute to unlock' : 'Sign in to unlock'}
+      </Link>
+    </div>
   );
 }
 

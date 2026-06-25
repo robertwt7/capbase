@@ -1,0 +1,141 @@
+.main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 48px var(--page-pad) 80px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.head {
+  margin-bottom: 8px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 30px;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.sub {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--graphite-500);
+  margin: 8px 0 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--graphite-700);
+}
+
+.input,
+.textarea {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  padding: 10px 12px;
+  border: 1px solid var(--graphite-300);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+.textarea {
+  resize: vertical;
+}
+
+.error {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--graphite-300);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.submit {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border: none;
+  border-radius: 6px;
+  padding: 12px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Success panel */
+.success {
+  padding: 36px 32px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.successActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.primaryBtn {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: 999px;
+  padding: 10px 20px;
+}
+.primaryBtn:hover {
+  background: var(--graphite-900);
+}
+
+.ghostLink {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--graphite-700);
+}
+.ghostLink:hover {
+  color: var(--ink);
+}
+
+@media (max-width: 600px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

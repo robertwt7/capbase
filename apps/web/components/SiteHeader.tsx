@@ -1,8 +1,13 @@
 import Link from 'next/link';
 
+import { logout } from '../app/(account)/actions';
+import { getSession } from '../lib/auth';
+
 import styles from './SiteHeader.module.css';
 
-export function SiteHeader() {
+export async function SiteHeader() {
+  const session = await getSession();
+
   return (
     <header className={styles.header}>
       <div className={styles.inner}>
@@ -35,6 +40,33 @@ export function SiteHeader() {
             aria-label="Search Capbase"
           />
         </form>
+
+        <div className={styles.account}>
+          {session ? (
+            <>
+              <Link href="/contribute" className={styles.cta}>
+                Contribute
+              </Link>
+              <Link href="/profile" className={styles.accountLink}>
+                {session.name}
+              </Link>
+              <form action={logout}>
+                <button type="submit" className={styles.accountLink}>
+                  Sign out
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <Link href="/login" className={styles.accountLink}>
+                Sign in
+              </Link>
+              <Link href="/register" className={styles.cta}>
+                Join
+              </Link>
+            </>
+          )}
+        </div>
       </div>
     </header>
   );
