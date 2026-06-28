@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { Button, Eyebrow } from '../../components/ui';
 import { getSession } from '../../lib/auth';
 import { logoutAction } from './actions';
 
@@ -14,21 +15,21 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className={styles.shell}>
       <header className={styles.bar}>
         <Link href="/admin" className={styles.brand}>
-          Capbase <span className={styles.brandTag}>moderation</span>
+          Capbase <Eyebrow className={styles.brandTag}>moderation</Eyebrow>
         </Link>
         {session ? (
           <div className={styles.session}>
             <span className={styles.sessionWho}>{session.email}</span>
             <form action={logoutAction}>
-              <button type="submit" className={styles.linkBtn}>
+              <Button variant="ghost" size="sm" type="submit">
                 Sign out
-              </button>
+              </Button>
             </form>
           </div>
         ) : (
-          <Link href="/" className={styles.linkBtn}>
+          <Button variant="ghost" size="sm" href="/">
             ← Back to site
-          </Link>
+          </Button>
         )}
       </header>
       {children}

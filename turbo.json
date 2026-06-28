@@ -11,10 +11,14 @@
     "API_URL",
     "SEC_USER_AGENT",
     "CRON_SCHEDULE",
-    "INGEST_ON_BOOT"
+    "INGEST_ON_BOOT",
+    "NODE_ENV",
+    "PORT",
+    "INGEST_LIMIT"
   ],
   "tasks": {
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },
@@ -28,7 +32,9 @@
         "src/generated/**"
       ]
     },
-    "lint": {},
+    "lint": {
+      "dependsOn": ["^build"]
+    },
     "test": {},
     "test:e2e": {}
   }

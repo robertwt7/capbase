@@ -1,0 +1,45 @@
+/* Form field cluster — label + input/textarea/select + error.
+   Sourced from the identical .field/.fieldLabel/.input/.textarea/.error rules
+   in account / contribute / admin modules. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--graphite-700);
+}
+
+.control {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  padding: 10px 12px;
+  border: 1px solid var(--graphite-300);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+.control:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.textarea {
+  resize: vertical;
+}
+
+.error {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--graphite-300);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 0;
+}

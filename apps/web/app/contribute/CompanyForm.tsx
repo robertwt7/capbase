@@ -1,8 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import { COMPANY_STATUSES, STAGES } from '@repo/api';
+
+import { Button, Card, Field, FormError, Input, Select, Textarea } from '../../components/ui';
 
 import { createCompanyAction, type CompanyFormState } from './actions';
 
@@ -16,21 +17,21 @@ export function CompanyForm() {
   if (state.success) {
     return (
       <main className={styles.main}>
-        <div className={styles.success}>
+        <Card emphasis className={styles.success}>
           <h1 className={styles.title}>Submitted for review</h1>
           <p className={styles.sub}>
             Thanks for contributing. Your company is now pending moderation — it will appear once an
             admin approves it. Contributing has unlocked full company profiles for you.
           </p>
           <div className={styles.successActions}>
-            <Link href="/profile" className={styles.primaryBtn}>
+            <Button variant="primary" shape="pill" href="/profile">
               View your contributions
-            </Link>
-            <Link href="/" className={styles.ghostLink}>
+            </Button>
+            <Button variant="ghost" href="/">
               Back to companies
-            </Link>
+            </Button>
           </div>
-        </div>
+        </Card>
       </main>
     );
   }
@@ -46,95 +47,73 @@ export function CompanyForm() {
           </p>
         </header>
 
-        <Field name="name" label="Company name" required />
-        <Field name="domain" label="Website domain" placeholder="acme.com" required />
-        <Field name="oneLiner" label="One-liner" required />
+        <Field label="Company name">
+          <Input name="name" required />
+        </Field>
+        <Field label="Website domain">
+          <Input name="domain" placeholder="acme.com" required />
+        </Field>
+        <Field label="One-liner">
+          <Input name="oneLiner" required />
+        </Field>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Description</span>
-          <textarea className={styles.textarea} name="description" rows={4} required />
-        </label>
+        <Field label="Description">
+          <Textarea name="description" rows={4} required />
+        </Field>
 
         <div className={styles.row}>
-          <Field name="hq" label="Headquarters" placeholder="San Francisco, CA" required />
-          <Field name="founded" label="Founded (year)" type="number" required />
+          <Field label="Headquarters">
+            <Input name="hq" placeholder="San Francisco, CA" required />
+          </Field>
+          <Field label="Founded (year)">
+            <Input name="founded" type="number" min={0} required />
+          </Field>
         </div>
 
         <div className={styles.row}>
-          <Field name="headcount" label="Headcount" type="number" required />
-          <Field name="totalRaisedUsd" label="Total raised (USD)" type="number" required />
+          <Field label="Headcount">
+            <Input name="headcount" type="number" min={0} required />
+          </Field>
+          <Field label="Total raised (USD)">
+            <Input name="totalRaisedUsd" type="number" min={0} required />
+          </Field>
         </div>
 
-        <Field
-          name="industry"
-          label="Industries"
-          placeholder="Fintech, Payments, Infrastructure"
-          required
-        />
+        <Field label="Industries">
+          <Input name="industry" placeholder="Fintech, Payments, Infrastructure" required />
+        </Field>
 
         <div className={styles.row}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Status</span>
-            <select className={styles.input} name="status" defaultValue="Private" required>
+          <Field label="Status">
+            <Select name="status" defaultValue="Private" required>
               {COMPANY_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Stage</span>
-            <select className={styles.input} name="stage" defaultValue="Seed" required>
+            </Select>
+          </Field>
+          <Field label="Stage">
+            <Select name="stage" defaultValue="Seed" required>
               {STAGES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
         </div>
 
-        <Field
-          name="lastValuationUsd"
-          label="Last valuation (USD, optional)"
-          type="number"
-        />
+        <Field label="Last valuation (USD, optional)">
+          <Input name="lastValuationUsd" type="number" min={0} />
+        </Field>
 
-        {state.error ? <p className={styles.error}>{state.error}</p> : null}
+        {state.error ? <FormError>{state.error}</FormError> : null}
 
-        <button type="submit" className={styles.submit} disabled={pending}>
+        <Button variant="primary" block type="submit" disabled={pending}>
           {pending ? 'Submitting…' : 'Submit for review'}
-        </button>
+        </Button>
       </form>
     </main>
-  );
-}
-
-function Field({
-  name,
-  label,
-  type = 'text',
-  placeholder,
-  required,
-}: {
-  name: string;
-  label: string;
-  type?: string;
-  placeholder?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className={styles.field}>
-      <span className={styles.fieldLabel}>{label}</span>
-      <input
-        className={styles.input}
-        type={type}
-        name={name}
-        placeholder={placeholder}
-        required={required}
-        min={type === 'number' ? 0 : undefined}
-      />
-    </label>
   );
 }

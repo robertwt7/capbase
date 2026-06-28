@@ -28,4 +28,8 @@ export const nestJsConfig = [
       "@typescript-eslint/no-unsafe-argument": "warn",
     },
   },
+  {
+    files: ["**/*.spec.ts", "**/*.e2e-spec.ts"],
+    rules: { "@typescript-eslint/no-unsafe-argument": "off" },
+  },
 ];

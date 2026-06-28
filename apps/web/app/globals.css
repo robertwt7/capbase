@@ -20,6 +20,12 @@
   --page-max: 1200px;
   --page-pad: 32px;
 
+  /* Radii (taken from existing component usage) */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
   --background: var(--paper);
   --foreground: var(--ink);
 }

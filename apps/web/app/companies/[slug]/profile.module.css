@@ -44,17 +44,6 @@
   color: var(--ink);
 }
 
-.status {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--graphite-700);
-  border: 1px solid var(--graphite-300);
-  border-radius: 999px;
-  padding: 3px 10px;
-}
-
 .oneLiner {
   margin-top: 12px;
   font-size: 17px;
@@ -67,15 +56,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.tag {
-  font-size: 12px;
-  color: var(--graphite-700);
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 3px 9px;
 }
 
 /* Outbound links (monochrome — emphasis via weight + underline, no accent) */
@@ -134,27 +114,6 @@
   border-bottom: 1px solid var(--line);
 }
 
-.stat {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.statValue {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  font-size: clamp(24px, 3vw, 34px);
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-
-.statLabel {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--graphite-500);
-}
-
 /* About */
 .about {
   padding: 36px 0;
@@ -173,26 +132,13 @@
   border-top: 1px solid var(--line);
 }
 
-.blockHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
-}
-
+/* Standalone block title (the SectionHeader primitive covers titles with a note). */
 .blockTitle {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 20px;
   letter-spacing: -0.02em;
   color: var(--ink);
-}
-
-.blockNote {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--graphite-500);
 }
 
 /* Investors */
@@ -388,41 +334,6 @@
   color: var(--graphite-500);
 }
 
-/* Empty states */
-.empty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 28px 22px;
-  border: 1px dashed var(--graphite-300);
-  border-radius: 10px;
-}
-
-.emptyText {
-  font-size: 14px;
-  color: var(--graphite-500);
-}
-
-.emptyAction {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--ink);
-  border-radius: 999px;
-  padding: 7px 16px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.emptyAction:hover {
-  background: var(--ink);
-  color: var(--paper);
-}
-
 /* Contribution gate */
 .lockNote {
   display: flex;
@@ -448,85 +359,27 @@
   color: var(--ink);
 }
 
-.lockAction {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--ink);
-  border-radius: 999px;
-  padding: 7px 16px;
-}
-.lockAction:hover {
-  background: var(--graphite-900);
+/* Inline "add a round" contribution form. Button/Card/Field primitives supply
+   the chrome; only layout (toggle spacing, the form grid) stays local. */
+.addToggle {
+  margin-top: 16px;
 }
 
-/* Inline "add a round" contribution form */
-.addToggle {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--graphite-300);
-  border-radius: 999px;
-  padding: 8px 16px;
+.addFormWrap {
   margin-top: 16px;
-  cursor: pointer;
-}
-.addToggle:hover {
-  border-color: var(--ink);
 }
 
 .addForm {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 16px;
   padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
 }
 
 .addRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-}
-
-.addField {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.addLabel {
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--graphite-700);
-}
-
-.addInput {
-  font-family: var(--font-body);
-  font-size: 14px;
-  color: var(--ink);
-  padding: 9px 11px;
-  border: 1px solid var(--graphite-300);
-  border-radius: 6px;
-  background: var(--paper);
-}
-.addInput:focus {
-  outline: none;
-  border-color: var(--ink);
-}
-
-.addError {
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--ink);
-  margin: 0;
 }
 
 .addSuccess {
@@ -543,36 +396,6 @@
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.addSubmit {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--ink);
-  border: none;
-  border-radius: 6px;
-  padding: 9px 18px;
-  cursor: pointer;
-}
-.addSubmit:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.addCancel {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--graphite-500);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-.addCancel:hover {
-  color: var(--ink);
 }
 
 /* Footer */

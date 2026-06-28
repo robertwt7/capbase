@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { MyContribution } from '@repo/api';
 
+import { Button, Card, Tag } from '../../../components/ui';
 import { getMyContributions, requireUser } from '../../../lib/auth';
 import { formatDate } from '../../../lib/format';
 import { logout } from '../actions';
@@ -17,18 +18,22 @@ export default async function ProfilePage() {
         <div>
           <h1 className={styles.name}>
             {user.name}
-            {user.role === 'ADMIN' ? <span className={styles.roleTag}>Admin</span> : null}
+            {user.role === 'ADMIN' ? (
+              <Tag variant="pill" mono className={styles.roleTag}>
+                Admin
+              </Tag>
+            ) : null}
           </h1>
           <p className={styles.email}>{user.email}</p>
         </div>
         <div className={styles.identityActions}>
-          <Link href="/contribute" className={styles.primaryBtn}>
+          <Button variant="primary" shape="pill" size="sm" href="/contribute">
             Contribute
-          </Link>
+          </Button>
           <form action={logout}>
-            <button type="submit" className={styles.ghostBtn}>
+            <Button variant="ghost" size="sm" type="submit">
               Sign out
-            </button>
+            </Button>
           </form>
         </div>
       </div>
@@ -60,26 +65,26 @@ function AccessPanel({
 }) {
   if (role === 'ADMIN') {
     return (
-      <div className={`${styles.access} ${styles.accessUnlocked}`}>
+      <Card emphasis className={styles.access}>
         <p className={styles.accessTitle}>Full access</p>
         <p className={styles.accessNote}>Admins always see complete company profiles.</p>
-      </div>
+      </Card>
     );
   }
 
   if (access.unlocked && access.unlockedUntil) {
     return (
-      <div className={`${styles.access} ${styles.accessUnlocked}`}>
+      <Card emphasis className={styles.access}>
         <p className={styles.accessTitle}>Full access — unlocked</p>
         <p className={styles.accessNote}>
           Active until {formatDate(access.unlockedUntil)}. Keep contributing to stay unlocked.
         </p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className={styles.access}>
+    <Card className={styles.access}>
       <p className={styles.accessTitle}>Locked</p>
       <p className={styles.accessNote}>
         {access.unlockedUntil
@@ -87,14 +92,16 @@ function AccessPanel({
           : ''}
         Contribute to unlock full company profiles for the next 30 days.
       </p>
-    </div>
+    </Card>
   );
 }
 
 function ContributionRow({ item }: { item: MyContribution }) {
   return (
     <div className={styles.item}>
-      <span className={styles.itemType}>{item.type}</span>
+      <Tag variant="box" mono className={styles.itemType}>
+        {item.type}
+      </Tag>
       <span className={styles.itemLabel}>
         {item.label}
         {item.companyName && item.companySlug ? (

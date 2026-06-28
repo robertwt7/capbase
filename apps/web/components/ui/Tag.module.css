@@ -1,0 +1,43 @@
+/* Badge / tag — two recurring shapes from the route modules:
+   rounded "pill" (stage, role, status) and boxed (industry, type).
+   `mono` switches to the mono-uppercase meta treatment. */
+
+.tag {
+  display: inline-block;
+  font-family: var(--font-body);
+  font-weight: 500;
+}
+
+.pill {
+  font-size: 12px;
+  color: var(--ink);
+  border: 1px solid var(--graphite-300);
+  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+}
+
+.box {
+  font-size: 12px;
+  color: var(--graphite-700);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 3px 9px;
+}
+
+/* Mono-uppercase meta variant (role / status / type tags). */
+.mono {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--graphite-700);
+}
+.mono.box {
+  padding: 3px 7px;
+  background: none;
+}
+.mono.pill {
+  padding: 2px 8px;
+}

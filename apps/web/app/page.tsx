@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { CompanyLogo } from '../components/CompanyLogo';
+import { Eyebrow, SectionHeader, Stat, Tag } from '../components/ui';
 import { getCompanies, getMarketStats, getMarketTotals } from '../lib/data';
 import { formatCount, formatUsd, signedPct } from '../lib/format';
 
@@ -17,9 +18,9 @@ export default async function Home() {
     <main>
       <section className={styles.hero}>
         <div className={styles.heroInner}>
-          <p className={styles.eyebrow}>
+          <Eyebrow className={styles.eyebrow}>
             {marketTotals.quarter} · private market intelligence
-          </p>
+          </Eyebrow>
           <h1 className={styles.headline}>
             The cap table of the private economy, in the open.
           </h1>
@@ -30,17 +31,14 @@ export default async function Home() {
         </div>
 
         <div className={styles.tape} aria-label={`${marketTotals.quarter} market totals`}>
-          <TapeItem label="Capital deployed" value={formatUsd(marketTotals.totalRaisedUsd)} />
-          <TapeItem label="Disclosed deals" value={formatCount(marketTotals.dealCount)} />
-          <TapeItem label="New unicorns" value={formatCount(marketTotals.newUnicorns)} />
+          <Stat size="lg" label="Capital deployed" value={formatUsd(marketTotals.totalRaisedUsd)} />
+          <Stat size="lg" label="Disclosed deals" value={formatCount(marketTotals.dealCount)} />
+          <Stat size="lg" label="New unicorns" value={formatCount(marketTotals.newUnicorns)} />
         </div>
       </section>
 
       <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.sectionTitle}>Sectors this quarter</h2>
-          <span className={styles.sectionNote}>Deal volume vs. prior quarter</span>
-        </div>
+        <SectionHeader title="Sectors this quarter" note="Deal volume vs. prior quarter" />
         <div className={styles.sectors}>
           {marketStats.map((stat) => (
             <article key={stat.sector} className={styles.sector}>
@@ -60,10 +58,7 @@ export default async function Home() {
       </section>
 
       <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.sectionTitle}>Companies</h2>
-          <span className={styles.sectionNote}>{companies.length} profiles</span>
-        </div>
+        <SectionHeader title="Companies" note={`${companies.length} profiles`} />
 
         <div className={styles.table} role="table" aria-label="Company directory">
           <div className={`${styles.row} ${styles.rowHead}`} role="row">
@@ -92,7 +87,7 @@ export default async function Home() {
                 </span>
               </span>
               <span className={styles.stage} role="cell">
-                <span className={styles.stageTag}>{company.stage}</span>
+                <Tag variant="pill">{company.stage}</Tag>
                 <span className={styles.sectorTag}>
                   {company.primarySector ?? company.industry[0]}
                 </span>
@@ -115,14 +110,5 @@ export default async function Home() {
         </span>
       </footer>
     </main>
-  );
-}
-
-function TapeItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.tapeItem}>
-      <span className={styles.tapeValue}>{value}</span>
-      <span className={styles.tapeLabel}>{label}</span>
-    </div>
   );
 }

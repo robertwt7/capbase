@@ -1,0 +1,35 @@
+/* Section / block heading with an optional mono note on the right.
+   Sourced from .sectionHead/.sectionTitle/.sectionNote (landing) and
+   .blockHead/.blockTitle/.blockNote (profile). */
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.sm {
+  font-size: 18px;
+}
+.md {
+  font-size: 20px;
+}
+.lg {
+  font-size: 22px;
+}
+
+.note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+}

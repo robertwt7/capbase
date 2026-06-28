@@ -2,6 +2,8 @@
 
 import { useActionState, useState } from 'react';
 
+import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+
 import { addRoundAction, type RoundFormState } from './actions';
 
 import styles from './profile.module.css';
@@ -14,9 +16,15 @@ export function AddRoundForm({ slug }: { slug: string }) {
 
   if (!open) {
     return (
-      <button type="button" className={styles.addToggle} onClick={() => setOpen(true)}>
+      <Button
+        variant="outline"
+        shape="pill"
+        size="sm"
+        className={styles.addToggle}
+        onClick={() => setOpen(true)}
+      >
         + Add a funding round
-      </button>
+      </Button>
     );
   }
 
@@ -29,43 +37,40 @@ export function AddRoundForm({ slug }: { slug: string }) {
   }
 
   return (
-    <form className={styles.addForm} action={action}>
-      <input type="hidden" name="slug" value={slug} />
-      <div className={styles.addRow}>
-        <label className={styles.addField}>
-          <span className={styles.addLabel}>Round</span>
-          <input className={styles.addInput} name="name" placeholder="Series A" required />
-        </label>
-        <label className={styles.addField}>
-          <span className={styles.addLabel}>Date</span>
-          <input className={styles.addInput} type="date" name="date" required />
-        </label>
-      </div>
-      <div className={styles.addRow}>
-        <label className={styles.addField}>
-          <span className={styles.addLabel}>Raise (USD)</span>
-          <input className={styles.addInput} type="number" name="amountUsd" min={0} required />
-        </label>
-        <label className={styles.addField}>
-          <span className={styles.addLabel}>Post-money (USD, optional)</span>
-          <input className={styles.addInput} type="number" name="postMoneyUsd" min={0} />
-        </label>
-      </div>
-      <label className={styles.addField}>
-        <span className={styles.addLabel}>Lead investor (optional)</span>
-        <input className={styles.addInput} name="lead" placeholder="Sequoia Capital" />
-      </label>
+    <Card className={styles.addFormWrap}>
+      <form className={styles.addForm} action={action}>
+        <input type="hidden" name="slug" value={slug} />
+        <div className={styles.addRow}>
+          <Field label="Round">
+            <Input name="name" placeholder="Series A" required />
+          </Field>
+          <Field label="Date">
+            <Input type="date" name="date" required />
+          </Field>
+        </div>
+        <div className={styles.addRow}>
+          <Field label="Raise (USD)">
+            <Input type="number" name="amountUsd" min={0} required />
+          </Field>
+          <Field label="Post-money (USD, optional)">
+            <Input type="number" name="postMoneyUsd" min={0} />
+          </Field>
+        </div>
+        <Field label="Lead investor (optional)">
+          <Input name="lead" placeholder="Sequoia Capital" />
+        </Field>
 
-      {state.error ? <p className={styles.addError}>{state.error}</p> : null}
+        {state.error ? <FormError>{state.error}</FormError> : null}
 
-      <div className={styles.addActions}>
-        <button type="submit" className={styles.addSubmit} disabled={pending}>
-          {pending ? 'Submitting…' : 'Submit round'}
-        </button>
-        <button type="button" className={styles.addCancel} onClick={() => setOpen(false)}>
-          Cancel
-        </button>
-      </div>
-    </form>
+        <div className={styles.addActions}>
+          <Button variant="primary" size="sm" type="submit" disabled={pending}>
+            {pending ? 'Submitting…' : 'Submit round'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }

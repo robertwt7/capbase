@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+
 import styles from '../admin.module.css';
 
 export default function AdminLogin() {
@@ -37,38 +39,26 @@ export default function AdminLogin() {
 
   return (
     <main className={styles.loginMain}>
-      <form className={styles.loginCard} onSubmit={onSubmit}>
-        <h1 className={styles.loginTitle}>Admin sign in</h1>
-        <p className={styles.loginSub}>Review and approve crowdsourced submissions.</p>
+      <Card className={styles.loginCard}>
+        <form className={styles.loginForm} onSubmit={onSubmit}>
+          <h1 className={styles.loginTitle}>Admin sign in</h1>
+          <p className={styles.loginSub}>Review and approve crowdsourced submissions.</p>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Email</span>
-          <input
-            className={styles.input}
-            type="email"
-            name="email"
-            autoComplete="username"
-            required
-          />
-        </label>
+          <Field label="Email">
+            <Input type="email" name="email" autoComplete="username" required />
+          </Field>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Password</span>
-          <input
-            className={styles.input}
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            required
-          />
-        </label>
+          <Field label="Password">
+            <Input type="password" name="password" autoComplete="current-password" required />
+          </Field>
 
-        {error ? <p className={styles.error}>{error}</p> : null}
+          {error ? <FormError>{error}</FormError> : null}
 
-        <button type="submit" className={styles.submit} disabled={pending}>
-          {pending ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+          <Button variant="primary" block type="submit" disabled={pending}>
+            {pending ? 'Signing in…' : 'Sign in'}
+          </Button>
+        </form>
+      </Card>
     </main>
   );
 }

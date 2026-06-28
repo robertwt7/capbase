@@ -1,0 +1,28 @@
+/* Figure + uppercase label — the market tape (.tapeItem) and profile stat band
+   (.stat). Mono numerals, quiet label. */
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.value {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.md .value {
+  font-size: clamp(24px, 3vw, 34px);
+}
+.lg .value {
+  font-size: clamp(26px, 3vw, 36px);
+}
+
+.label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--graphite-500);
+}
