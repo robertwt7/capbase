@@ -12,6 +12,7 @@ import {
   Form,
   FormError,
   SelectField,
+  SelectItem,
   TextareaField,
   TextField,
 } from '@/components/ui';
@@ -135,14 +136,16 @@ export function CompanyForm() {
             />
           </div>
 
-          <SelectField control={form.control} name="primarySector" label="Primary sector">
-            <option value="" disabled>
-              Select a sector…
-            </option>
+          <SelectField
+            control={form.control}
+            name="primarySector"
+            label="Primary sector"
+            placeholder="Select a sector…"
+          >
             {SECTORS.map((s) => (
-              <option key={s} value={s}>
+              <SelectItem key={s} value={s}>
                 {s}
-              </option>
+              </SelectItem>
             ))}
           </SelectField>
 
@@ -157,16 +160,16 @@ export function CompanyForm() {
           <div className="grid gap-5 sm:grid-cols-2">
             <SelectField control={form.control} name="status" label="Status">
               {COMPANY_STATUSES.map((s) => (
-                <option key={s} value={s}>
+                <SelectItem key={s} value={s}>
                   {s}
-                </option>
+                </SelectItem>
               ))}
             </SelectField>
             <SelectField control={form.control} name="stage" label="Stage">
               {STAGES.map((s) => (
-                <option key={s} value={s}>
+                <SelectItem key={s} value={s}>
                   {s}
-                </option>
+                </SelectItem>
               ))}
             </SelectField>
           </div>

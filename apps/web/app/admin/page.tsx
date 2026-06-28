@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { ReviewStatus } from '@repo/api';
 
-import { Button, Tag } from '../../components/ui';
+import { Badge, Button } from '../../components/ui';
 import { getSubmissions } from '../../lib/admin';
 import { requireAdmin } from '../../lib/auth';
 import { formatDate } from '../../lib/format';
@@ -65,9 +65,9 @@ export default async function AdminQueue({
           {queue.items.map((item) => (
             <div key={`${item.type}-${item.id}`} className={styles.row} role="row">
               <span role="cell">
-                <Tag variant="box" mono>
+                <Badge variant="box" mono>
                   {item.type}
-                </Tag>
+                </Badge>
               </span>
               <span role="cell" className={styles.subject}>
                 <span className={styles.label}>{item.label}</span>

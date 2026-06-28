@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
-import { Button, Eyebrow, SectionHeader, Stat, Tag } from '@/components/ui';
+import { Badge, Button, Eyebrow, SectionHeader, Stat } from '@/components/ui';
 import { getCompanies, getMarketStats, getMarketTotals } from '@/lib/data';
 import { formatCount, formatUsd, signedPct } from '@/lib/format';
 
@@ -108,7 +108,7 @@ export default async function Home() {
                 className="flex flex-col items-start gap-1.5 max-[700px]:flex-row max-[700px]:items-center max-[700px]:gap-2"
                 role="cell"
               >
-                <Tag variant="pill">{company.stage}</Tag>
+                <Badge variant="pill">{company.stage}</Badge>
                 <span className="text-xs text-graphite-500">
                   {company.primarySector ?? company.industry[0]}
                 </span>

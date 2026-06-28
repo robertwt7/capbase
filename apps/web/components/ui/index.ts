@@ -1,19 +1,39 @@
-// App primitives (monochrome, Tailwind).
-export { Button } from './Button';
-export { Card } from './Card';
+// App primitives — real shadcn/ui components, re-themed monochrome. Lowercase
+// filenames (shadcn convention); the capitalised exports keep the public API stable.
+export { Button, buttonVariants } from './button';
+export {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardAction,
+  CardContent,
+  CardFooter,
+} from './card';
+export { Badge, badgeVariants } from './badge';
 export { Eyebrow } from './Eyebrow';
 export { EmptyState } from './EmptyState';
 export { PageContainer } from './PageContainer';
 export { SectionHeader } from './SectionHeader';
 export { Stat } from './Stat';
-export { Tag } from './Tag';
 export { Separator } from './separator';
 
 // Form controls.
-export { Field, FormError } from './Field';
+export { FormError } from './FormError';
 export { Input } from './input';
 export { Textarea } from './textarea';
-export { Select } from './select';
+export {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectScrollDownButton,
+  SelectScrollUpButton,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from './select';
 export { Label } from './label';
 
 // react-hook-form integration.

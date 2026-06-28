@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { MyContribution } from '@repo/api';
 
-import { Button, Card, Tag } from '../../../components/ui';
+import { Badge, Button, Card } from '../../../components/ui';
 import { getMyContributions, requireUser } from '../../../lib/auth';
 import { formatDate } from '../../../lib/format';
 import { logout } from '../actions';
@@ -19,9 +19,9 @@ export default async function ProfilePage() {
           <h1 className={styles.name}>
             {user.name}
             {user.role === 'ADMIN' ? (
-              <Tag variant="pill" mono className={styles.roleTag}>
+              <Badge variant="pill" mono className={styles.roleTag}>
                 Admin
-              </Tag>
+              </Badge>
             ) : null}
           </h1>
           <p className={styles.email}>{user.email}</p>
@@ -99,9 +99,9 @@ function AccessPanel({
 function ContributionRow({ item }: { item: MyContribution }) {
   return (
     <div className={styles.item}>
-      <Tag variant="box" mono className={styles.itemType}>
+      <Badge variant="box" mono className={styles.itemType}>
         {item.type}
-      </Tag>
+      </Badge>
       <span className={styles.itemLabel}>
         {item.label}
         {item.companyName && item.companySlug ? (

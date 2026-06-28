@@ -51,23 +51,32 @@ gradients. Emphasis comes from weight, size, and the mono numerals — not hue.
 
 #### Components (`components/ui/`)
 
-Tailwind-based primitives re-exported from `index.ts` (token-pure, usable in server and
-client components). `components.json` configures shadcn (`@/*` alias, new-york style);
-add more shadcn primitives with `npx shadcn@latest add <name>` then theme monochrome.
+`Button`, `Card`, `Badge`, `Input`, `Textarea`, `Select`, `Label`, `Separator`, `Form` are
+**real shadcn/ui components** (CLI-generated, then re-themed monochrome onto the existing CSS
+variables — no accent, no red destructive). Files are lowercase (`button.tsx`, `card.tsx`,
+`badge.tsx`, …) per shadcn convention; the barrel `index.ts` re-exports the capitalised
+public API (`Button`, `Card`, `Badge`, …). `components.json` is wired (`@/*` alias, new-york,
+`cssVariables`); add more primitives with `npx shadcn@latest add <name>` then theme monochrome.
+The generated files import the unified `radix-ui` package — rewrite those to the individual
+`@radix-ui/react-*` packages (already deps) to stay consistent and avoid a redundant dep.
 
-- **`Button`** — `variant` `primary` (filled ink) / `ghost` (chrome-less text) /
-  `outline`; `shape` `pill` | `box`; `size` `sm` | `md`; `block`; renders `next/link`
-  when given `href`, else a `<button>`. (cva-based.)
-- **Form controls** — `Input` / `Textarea` / `Select` (native, styled, forward all
-  native props), `Label`. Legacy `Field` + `FormError` (label+control+error wrapper)
-  remain for the auth/admin pages.
-- **`Tag`** — `variant` `pill` | `box`, optional `mono` for the mono-uppercase meta
-  treatment. **`Card`** — surface + `border-line` panel; `emphasis` → `border-ink`.
-  **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`**,
-  **`Separator`** — same roles as before, now Tailwind.
+- **`Button`** — keeps the project API (not shadcn's default variants): `variant` `primary`
+  (filled `bg-primary`) / `ghost` (chrome-less text) / `outline`; `shape` `pill` | `box`;
+  `size` `sm` | `md`; `block`; renders `next/link` when given `href`, else a `<button>`. (cva.)
+- **`Badge`** (was `Tag`) — `variant` `pill` | `box`, optional `mono` for the mono-uppercase
+  meta treatment (via `badgeVariants`).
+- **`Card`** — single-panel shadcn `Card` re-themed to `surface` + `border-line`; `emphasis`
+  → `border-ink`. Padding comes from the caller's `className` (the `CardHeader`/`CardContent`
+  sub-parts are exported but not yet used).
+- **Form controls** — `Input` / `Textarea` (share one `controlClass` surface, exported from
+  `input.tsx`), `Label`, and `Select` is shadcn's **Radix Select** (`SelectTrigger` /
+  `SelectContent` / `SelectItem` / `SelectValue` / …). **`FormError`** (`FormError.tsx`) is
+  the form-level (non-field) error box, used by both the RHF forms and the auth/admin pages.
+- **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`** stay
+  bespoke Tailwind role components (no shadcn equivalent), as does `FundingLadder`.
 
 **Build new UI from these primitives + Tailwind utilities.** Never re-inline a button,
-tag, card, etc. — extend the primitive. Bespoke layout (grids, the Funding Ladder spine)
+badge, card, etc. — extend the primitive. Bespoke layout (grids, the Funding Ladder spine)
 is just Tailwind utilities in the component/page, no CSS Modules.
 
 #### Forms — react-hook-form + zod
@@ -81,6 +90,8 @@ Forms use **react-hook-form** with **zod** validation (shadcn `Form` pattern):
 - Client: `useForm({ resolver: zodResolver(schema), defaultValues })` inside `<Form>`,
   with the generic `TextField` / `TextareaField` / `SelectField` wrappers
   (`components/ui/fields.tsx`) — label + control + inline `FormMessage` per field.
+  `SelectField` drives the Radix Select via the `FormField` `Controller` (`onValueChange`);
+  pass `<SelectItem>` children and an optional `placeholder` for the empty state.
 - Server stays authoritative: the server action re-runs `schema.safeParse` (never trust
   the client), maps with `to*Input`, and returns an `ActionResult`
   (`{ ok } | { ok:false, formError?, fieldErrors? }`, see `lib/validation/utils.ts`).

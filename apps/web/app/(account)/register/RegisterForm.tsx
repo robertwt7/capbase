@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+import { Button, Card, FormError, Input, Label } from '../../../components/ui';
 
 import styles from '../account.module.css';
 
@@ -46,23 +46,27 @@ export function RegisterForm({ next }: { next?: string }) {
           <h1 className={styles.title}>Create your account</h1>
           <p className={styles.sub}>Join the open company database and start contributing.</p>
 
-          <Field label="Name">
-            <Input type="text" name="name" autoComplete="name" required />
-          </Field>
+          <div className="grid gap-1.5">
+            <Label htmlFor="name">Name</Label>
+            <Input id="name" type="text" name="name" autoComplete="name" required />
+          </div>
 
-          <Field label="Email">
-            <Input type="email" name="email" autoComplete="username" required />
-          </Field>
+          <div className="grid gap-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" name="email" autoComplete="username" required />
+          </div>
 
-          <Field label="Password">
+          <div className="grid gap-1.5">
+            <Label htmlFor="password">Password</Label>
             <Input
+              id="password"
               type="password"
               name="password"
               autoComplete="new-password"
               minLength={8}
               required
             />
-          </Field>
+          </div>
 
           {error ? <FormError>{error}</FormError> : null}
 

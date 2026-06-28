@@ -4,7 +4,7 @@ import type { CompanyAccess } from '@repo/api';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { FundingLadder } from '@/components/FundingLadder';
-import { Button, EmptyState, SectionHeader, Stat, Tag } from '@/components/ui';
+import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '@/lib/format';
@@ -41,16 +41,16 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             <h1 className="font-display text-[clamp(1.875rem,4vw,2.75rem)] leading-none font-extrabold tracking-[-0.035em] text-ink">
               {company.name}
             </h1>
-            <Tag variant="pill" mono>
+            <Badge variant="pill" mono>
               {company.status}
-            </Tag>
+            </Badge>
           </div>
           <p className="mt-3 max-w-[48ch] text-[17px] text-graphite-700">{company.oneLiner}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {company.industry.map((tag) => (
-              <Tag key={tag} variant="box">
+              <Badge key={tag} variant="box">
                 {tag}
-              </Tag>
+              </Badge>
             ))}
           </div>
           {(company.websiteUrl || company.linkedinUrl || company.twitterUrl) && (

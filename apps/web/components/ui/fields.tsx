@@ -5,7 +5,7 @@ import type { Control, FieldPath, FieldValues } from 'react-hook-form';
 
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from './form';
 import { Input } from './input';
-import { Select } from './select';
+import { Select, SelectContent, SelectTrigger, SelectValue } from './select';
 import { Textarea } from './textarea';
 
 type BaseProps<T extends FieldValues> = {
@@ -67,15 +67,16 @@ export function TextareaField<T extends FieldValues>({
   );
 }
 
-/** Native <select> bound to react-hook-form. Pass <option>s as children. */
+/** Radix <Select> bound to react-hook-form via the FormField Controller. Pass
+    <SelectItem>s as children and an optional placeholder for the empty state. */
 export function SelectField<T extends FieldValues>({
   control,
   name,
   label,
   description,
+  placeholder,
   children,
-  ...selectProps
-}: BaseProps<T> & Omit<ComponentProps<typeof Select>, 'name'>) {
+}: BaseProps<T> & { placeholder?: string; children: ReactNode }) {
   return (
     <FormField
       control={control}
@@ -83,11 +84,14 @@ export function SelectField<T extends FieldValues>({
       render={({ field }) => (
         <FormItem>
           <FormLabel>{label}</FormLabel>
-          <FormControl>
-            <Select {...field} {...selectProps}>
-              {children}
-            </Select>
-          </FormControl>
+          <Select value={field.value || undefined} onValueChange={field.onChange}>
+            <FormControl>
+              <SelectTrigger>
+                <SelectValue placeholder={placeholder} />
+              </SelectTrigger>
+            </FormControl>
+            <SelectContent>{children}</SelectContent>
+          </Select>
           {description ? <FormDescription>{description}</FormDescription> : null}
           <FormMessage />
         </FormItem>

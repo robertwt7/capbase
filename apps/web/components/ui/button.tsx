@@ -4,16 +4,17 @@ import type { ComponentProps, ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
-const button = cva(
+const buttonVariants = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap font-sans font-medium ' +
-    'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ' +
+    'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
     'disabled:pointer-events-none disabled:opacity-50 cursor-pointer',
   {
     variants: {
       variant: {
-        primary: 'bg-ink text-paper hover:bg-graphite-900',
-        outline: 'border border-ink text-ink hover:bg-ink hover:text-paper',
-        ghost: 'text-ink hover:text-graphite-500',
+        primary: 'bg-primary text-primary-foreground hover:bg-graphite-900',
+        outline:
+          'border border-primary text-primary hover:bg-primary hover:text-primary-foreground',
+        ghost: 'text-primary hover:text-graphite-500',
       },
       shape: {
         pill: 'rounded-full',
@@ -35,9 +36,9 @@ const button = cva(
   },
 );
 
-type Variant = NonNullable<VariantProps<typeof button>['variant']>;
-type Shape = NonNullable<VariantProps<typeof button>['shape']>;
-type Size = NonNullable<VariantProps<typeof button>['size']>;
+type Variant = NonNullable<VariantProps<typeof buttonVariants>['variant']>;
+type Shape = NonNullable<VariantProps<typeof buttonVariants>['shape']>;
+type Size = NonNullable<VariantProps<typeof buttonVariants>['size']>;
 
 type CommonProps = {
   variant: Variant;
@@ -56,7 +57,7 @@ type ButtonAsLink = CommonProps &
 
 type ButtonProps = ButtonAsButton | ButtonAsLink;
 
-export function Button({
+function Button({
   variant,
   shape = 'box',
   size = 'md',
@@ -65,11 +66,11 @@ export function Button({
   children,
   ...rest
 }: ButtonProps) {
-  const cls = cn(button({ variant, shape, size, block: !!block }), className);
+  const cls = cn(buttonVariants({ variant, shape, size, block: !!block }), className);
 
   if (typeof rest.href === 'string') {
     return (
-      <Link className={cls} {...(rest as ComponentProps<typeof Link>)}>
+      <Link data-slot="button" className={cls} {...(rest as ComponentProps<typeof Link>)}>
         {children}
       </Link>
     );
@@ -77,8 +78,10 @@ export function Button({
 
   const { type, ...buttonProps } = rest as ComponentProps<'button'>;
   return (
-    <button type={type ?? 'button'} className={cls} {...buttonProps}>
+    <button type={type ?? 'button'} data-slot="button" className={cls} {...buttonProps}>
       {children}
     </button>
   );
 }
+
+export { Button, buttonVariants };

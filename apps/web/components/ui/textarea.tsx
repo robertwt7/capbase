@@ -1,9 +1,9 @@
-import type { ComponentProps } from 'react';
+import * as React from 'react';
 
 import { cn } from '@/lib/utils';
-import { controlClass } from './control';
+import { controlClass } from './input';
 
-export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
+function Textarea({ className, ...props }: React.ComponentProps<'textarea'>) {
   return (
     <textarea
       data-slot="textarea"
@@ -12,3 +12,5 @@ export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
     />
   );
 }
+
+export { Textarea };

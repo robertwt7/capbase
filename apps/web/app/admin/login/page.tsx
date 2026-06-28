@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+import { Button, Card, FormError, Input, Label } from '../../../components/ui';
 
 import styles from '../admin.module.css';
 
@@ -44,13 +44,21 @@ export default function AdminLogin() {
           <h1 className={styles.loginTitle}>Admin sign in</h1>
           <p className={styles.loginSub}>Review and approve crowdsourced submissions.</p>
 
-          <Field label="Email">
-            <Input type="email" name="email" autoComplete="username" required />
-          </Field>
+          <div className="grid gap-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" name="email" autoComplete="username" required />
+          </div>
 
-          <Field label="Password">
-            <Input type="password" name="password" autoComplete="current-password" required />
-          </Field>
+          <div className="grid gap-1.5">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
 
           {error ? <FormError>{error}</FormError> : null}
 
