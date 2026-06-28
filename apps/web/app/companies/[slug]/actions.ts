@@ -5,7 +5,13 @@ import type { CreateFundingRoundInput } from '@repo/api';
 
 import { submitRound } from '../../../lib/contribute';
 
-export type RoundFormState = { error?: string; success?: boolean };
+type FieldKey = 'name' | 'date' | 'amountUsd' | 'postMoneyUsd' | 'lead';
+
+export type RoundFormState = {
+  errors?: Partial<Record<FieldKey, string>>;
+  formError?: string;
+  success?: boolean;
+};
 
 export async function addRoundAction(
   _prev: RoundFormState,
@@ -21,11 +27,19 @@ export async function addRoundAction(
   const postRaw = str('postMoneyUsd');
   const lead = str('lead');
 
-  if (!slug || !name || !date) {
-    return { error: 'Round name and date are required.' };
+  const errors: Partial<Record<FieldKey, string>> = {};
+
+  if (!name) errors.name = 'Round name is required.';
+  if (!date) errors.date = 'Round date is required.';
+
+  const isWholeNonNegative = (n: number) => Number.isInteger(n) && n >= 0;
+  if (!isWholeNonNegative(amountUsd)) errors.amountUsd = 'Enter a valid raise amount.';
+  if (postRaw && !isWholeNonNegative(Number(postRaw))) {
+    errors.postMoneyUsd = 'Enter a whole number.';
   }
-  if (!Number.isInteger(amountUsd) || amountUsd < 0) {
-    return { error: 'Enter a valid raise amount.' };
+
+  if (!slug || Object.keys(errors).length > 0) {
+    return { errors, formError: 'Please fix the highlighted fields.' };
   }
 
   const input: CreateFundingRoundInput = {
@@ -40,7 +54,7 @@ export async function addRoundAction(
   try {
     await submitRound(slug, input);
   } catch {
-    return { error: 'Submission failed. Please check your inputs and try again.' };
+    return { formError: 'Submission failed. Please check your inputs and try again.' };
   }
 
   revalidatePath(`/companies/${slug}`);

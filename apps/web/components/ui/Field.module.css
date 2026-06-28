@@ -28,9 +28,19 @@
   outline: none;
   border-color: var(--ink);
 }
+.control[aria-invalid='true'] {
+  border-color: var(--ink);
+}
 
 .textarea {
   resize: vertical;
+}
+
+.fieldError {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .error {

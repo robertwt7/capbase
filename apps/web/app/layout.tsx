@@ -1,19 +1,13 @@
 import type { Metadata } from 'next';
-import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
+import { IBM_Plex_Mono, Inter } from 'next/font/google';
 
 import { SiteHeader } from '../components/SiteHeader';
 import './globals.css';
 
-const archivo = Archivo({
+const inter = Inter({
   subsets: ['latin'],
-  weight: ['500', '600', '700', '800'],
-  variable: '--font-archivo',
-});
-
-const plexSans = IBM_Plex_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-plex-sans',
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-inter',
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -35,9 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${archivo.variable} ${plexSans.variable} ${plexMono.variable}`}
-      >
+      <body className={`${inter.variable} ${plexMono.variable}`}>
         <SiteHeader />
         {children}
       </body>

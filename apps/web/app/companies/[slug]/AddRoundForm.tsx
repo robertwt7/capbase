@@ -41,26 +41,42 @@ export function AddRoundForm({ slug }: { slug: string }) {
       <form className={styles.addForm} action={action}>
         <input type="hidden" name="slug" value={slug} />
         <div className={styles.addRow}>
-          <Field label="Round">
-            <Input name="name" placeholder="Series A" required />
+          <Field label="Round" error={state.errors?.name}>
+            <Input
+              name="name"
+              placeholder="Series A"
+              aria-invalid={!!state.errors?.name}
+              required
+            />
           </Field>
-          <Field label="Date">
-            <Input type="date" name="date" required />
+          <Field label="Date" error={state.errors?.date}>
+            <Input type="date" name="date" aria-invalid={!!state.errors?.date} required />
           </Field>
         </div>
         <div className={styles.addRow}>
-          <Field label="Raise (USD)">
-            <Input type="number" name="amountUsd" min={0} required />
+          <Field label="Raise (USD)" error={state.errors?.amountUsd}>
+            <Input
+              type="number"
+              name="amountUsd"
+              min={0}
+              aria-invalid={!!state.errors?.amountUsd}
+              required
+            />
           </Field>
-          <Field label="Post-money (USD, optional)">
-            <Input type="number" name="postMoneyUsd" min={0} />
+          <Field label="Post-money (USD, optional)" error={state.errors?.postMoneyUsd}>
+            <Input
+              type="number"
+              name="postMoneyUsd"
+              min={0}
+              aria-invalid={!!state.errors?.postMoneyUsd}
+            />
           </Field>
         </div>
-        <Field label="Lead investor (optional)">
-          <Input name="lead" placeholder="Sequoia Capital" />
+        <Field label="Lead investor (optional)" error={state.errors?.lead}>
+          <Input name="lead" placeholder="Sequoia Capital" aria-invalid={!!state.errors?.lead} />
         </Field>
 
-        {state.error ? <FormError>{state.error}</FormError> : null}
+        {state.formError ? <FormError>{state.formError}</FormError> : null}
 
         <div className={styles.addActions}>
           <Button variant="primary" size="sm" type="submit" disabled={pending}>

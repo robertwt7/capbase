@@ -3,15 +3,36 @@
 import { revalidatePath } from 'next/cache';
 import {
   COMPANY_STATUSES,
+  SECTORS,
   STAGES,
   type CompanyStatus,
   type CreateCompanyInput,
+  type Sector,
   type Stage,
 } from '@repo/api';
 
 import { submitCompany } from '../../lib/contribute';
 
-export type CompanyFormState = { error?: string; success?: boolean };
+type FieldKey =
+  | 'name'
+  | 'domain'
+  | 'oneLiner'
+  | 'description'
+  | 'hq'
+  | 'founded'
+  | 'headcount'
+  | 'totalRaisedUsd'
+  | 'industry'
+  | 'primarySector'
+  | 'status'
+  | 'stage'
+  | 'lastValuationUsd';
+
+export type CompanyFormState = {
+  errors?: Partial<Record<FieldKey, string>>;
+  formError?: string;
+  success?: boolean;
+};
 
 export async function createCompanyAction(
   _prev: CompanyFormState,
@@ -32,20 +53,40 @@ export async function createCompanyAction(
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  const primarySector = str('primarySector') as Sector;
   const status = str('status') as CompanyStatus;
   const stage = str('stage') as Stage;
   const lastValuationRaw = str('lastValuationUsd');
 
-  if (!name || !domain || !oneLiner || !description || !hq) {
-    return { error: 'Please fill in all required fields.' };
-  }
+  const errors: Partial<Record<FieldKey, string>> = {};
+
+  if (!name) errors.name = 'Company name is required.';
+  if (!domain) errors.domain = 'Website domain is required.';
+  if (!oneLiner) errors.oneLiner = 'A one-liner is required.';
+  if (!description) errors.description = 'A description is required.';
+  if (!hq) errors.hq = 'Headquarters is required.';
+
+  const isWholeNonNegative = (n: number) => Number.isInteger(n) && n >= 0;
+  if (!isWholeNonNegative(founded)) errors.founded = 'Enter a valid year.';
+  if (!isWholeNonNegative(headcount)) errors.headcount = 'Enter a whole number.';
+  if (!isWholeNonNegative(totalRaisedUsd)) errors.totalRaisedUsd = 'Enter a whole number.';
+
   if (industry.length === 0) {
-    return { error: 'Add at least one industry tag (comma-separated).' };
+    errors.industry = 'Add at least one industry tag (comma-separated).';
   }
-  if (!COMPANY_STATUSES.includes(status)) return { error: 'Pick a valid status.' };
-  if (!STAGES.includes(stage)) return { error: 'Pick a valid stage.' };
-  if ([founded, headcount, totalRaisedUsd].some((n) => !Number.isInteger(n) || n < 0)) {
-    return { error: 'Founded, headcount, and total raised must be whole numbers.' };
+  if (!SECTORS.includes(primarySector)) errors.primarySector = 'Pick a valid sector.';
+  if (!COMPANY_STATUSES.includes(status)) errors.status = 'Pick a valid status.';
+  if (!STAGES.includes(stage)) errors.stage = 'Pick a valid stage.';
+
+  if (lastValuationRaw) {
+    const lastValuation = Number(lastValuationRaw);
+    if (!isWholeNonNegative(lastValuation)) {
+      errors.lastValuationUsd = 'Enter a whole number.';
+    }
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors, formError: 'Please fix the highlighted fields.' };
   }
 
   const input: CreateCompanyInput = {
@@ -57,6 +98,7 @@ export async function createCompanyAction(
     founded,
     headcount,
     industry,
+    primarySector,
     status,
     stage,
     totalRaisedUsd,
@@ -66,7 +108,7 @@ export async function createCompanyAction(
   try {
     await submitCompany(input);
   } catch {
-    return { error: 'Submission failed. Please check your inputs and try again.' };
+    return { formError: 'Submission failed. Please check your inputs and try again.' };
   }
 
   revalidatePath('/');
