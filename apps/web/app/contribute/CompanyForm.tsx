@@ -1,9 +1,10 @@
 'use client';
 
 import { useActionState } from 'react';
-import { COMPANY_STATUSES, STAGES } from '@repo/api';
+import { COMPANY_STATUSES, SECTORS, STAGES } from '@repo/api';
 
 import { Button, Card, Field, FormError, Input, Select, Textarea } from '../../components/ui';
+import { CITIES } from '../../lib/cities';
 
 import { createCompanyAction, type CompanyFormState } from './actions';
 
@@ -47,45 +48,112 @@ export function CompanyForm() {
           </p>
         </header>
 
-        <Field label="Company name">
-          <Input name="name" required />
+        <Field label="Company name" error={state.errors?.name}>
+          <Input name="name" aria-invalid={!!state.errors?.name} required />
         </Field>
-        <Field label="Website domain">
-          <Input name="domain" placeholder="acme.com" required />
+        <Field label="Website domain" error={state.errors?.domain}>
+          <Input
+            name="domain"
+            placeholder="acme.com"
+            aria-invalid={!!state.errors?.domain}
+            required
+          />
         </Field>
-        <Field label="One-liner">
-          <Input name="oneLiner" required />
+        <Field label="One-liner" error={state.errors?.oneLiner}>
+          <Input name="oneLiner" aria-invalid={!!state.errors?.oneLiner} required />
         </Field>
 
-        <Field label="Description">
-          <Textarea name="description" rows={4} required />
+        <Field label="Description" error={state.errors?.description}>
+          <Textarea
+            name="description"
+            rows={4}
+            aria-invalid={!!state.errors?.description}
+            required
+          />
         </Field>
 
         <div className={styles.row}>
-          <Field label="Headquarters">
-            <Input name="hq" placeholder="San Francisco, CA" required />
+          <Field label="Headquarters" error={state.errors?.hq}>
+            <Input
+              name="hq"
+              list="hq-cities"
+              placeholder="San Francisco, CA"
+              aria-invalid={!!state.errors?.hq}
+              required
+            />
           </Field>
-          <Field label="Founded (year)">
-            <Input name="founded" type="number" min={0} required />
+          <Field label="Founded (year)" error={state.errors?.founded}>
+            <Input
+              name="founded"
+              type="number"
+              min={0}
+              aria-invalid={!!state.errors?.founded}
+              required
+            />
+          </Field>
+        </div>
+        <datalist id="hq-cities">
+          {CITIES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+
+        <div className={styles.row}>
+          <Field label="Headcount" error={state.errors?.headcount}>
+            <Input
+              name="headcount"
+              type="number"
+              min={0}
+              aria-invalid={!!state.errors?.headcount}
+              required
+            />
+          </Field>
+          <Field label="Total raised (USD)" error={state.errors?.totalRaisedUsd}>
+            <Input
+              name="totalRaisedUsd"
+              type="number"
+              min={0}
+              aria-invalid={!!state.errors?.totalRaisedUsd}
+              required
+            />
           </Field>
         </div>
 
-        <div className={styles.row}>
-          <Field label="Headcount">
-            <Input name="headcount" type="number" min={0} required />
-          </Field>
-          <Field label="Total raised (USD)">
-            <Input name="totalRaisedUsd" type="number" min={0} required />
-          </Field>
-        </div>
+        <Field label="Primary sector" error={state.errors?.primarySector}>
+          <Select
+            name="primarySector"
+            defaultValue=""
+            aria-invalid={!!state.errors?.primarySector}
+            required
+          >
+            <option value="" disabled>
+              Select a sector…
+            </option>
+            {SECTORS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
-        <Field label="Industries">
-          <Input name="industry" placeholder="Fintech, Payments, Infrastructure" required />
+        <Field label="Industries" error={state.errors?.industry}>
+          <Input
+            name="industry"
+            placeholder="Fintech, Payments, Infrastructure"
+            aria-invalid={!!state.errors?.industry}
+            required
+          />
         </Field>
 
         <div className={styles.row}>
-          <Field label="Status">
-            <Select name="status" defaultValue="Private" required>
+          <Field label="Status" error={state.errors?.status}>
+            <Select
+              name="status"
+              defaultValue="Private"
+              aria-invalid={!!state.errors?.status}
+              required
+            >
               {COMPANY_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -93,8 +161,13 @@ export function CompanyForm() {
               ))}
             </Select>
           </Field>
-          <Field label="Stage">
-            <Select name="stage" defaultValue="Seed" required>
+          <Field label="Stage" error={state.errors?.stage}>
+            <Select
+              name="stage"
+              defaultValue="Seed"
+              aria-invalid={!!state.errors?.stage}
+              required
+            >
               {STAGES.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -104,11 +177,16 @@ export function CompanyForm() {
           </Field>
         </div>
 
-        <Field label="Last valuation (USD, optional)">
-          <Input name="lastValuationUsd" type="number" min={0} />
+        <Field label="Last valuation (USD, optional)" error={state.errors?.lastValuationUsd}>
+          <Input
+            name="lastValuationUsd"
+            type="number"
+            min={0}
+            aria-invalid={!!state.errors?.lastValuationUsd}
+          />
         </Field>
 
-        {state.error ? <FormError>{state.error}</FormError> : null}
+        {state.formError ? <FormError>{state.formError}</FormError> : null}
 
         <Button variant="primary" block type="submit" disabled={pending}>
           {pending ? 'Submitting…' : 'Submit for review'}

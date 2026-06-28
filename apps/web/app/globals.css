@@ -12,8 +12,8 @@
   --line: #e6e6ea;
 
   /* Type roles */
-  --font-display: var(--font-archivo), 'Archivo', sans-serif;
-  --font-body: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --font-display: var(--font-inter), 'Inter', sans-serif;
+  --font-body: var(--font-inter), 'Inter', sans-serif;
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', monospace;
 
   /* Layout */
