@@ -1,0 +1,88 @@
+/* Monochrome button — filled "ink", quiet "ghost" text, and "outline" pill/box.
+   Sourced from the inline .cta/.submit/.primaryBtn/.decision/.addToggle rules
+   across the route modules; deduplicated into variant + shape + size. */
+
+.button {
+  font-family: var(--font-body);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+.block {
+  width: 100%;
+}
+
+/* ---- Sizes ------------------------------------------------------------- */
+.sizeSm {
+  font-size: 13px;
+}
+.sizeMd {
+  font-size: 14px;
+}
+
+/* ---- Shapes (radius + padding) ---------------------------------------- */
+.pill {
+  border-radius: var(--radius-pill);
+}
+.box {
+  border-radius: var(--radius-sm);
+}
+
+.pill.sizeSm {
+  padding: 7px 16px;
+}
+.pill.sizeMd {
+  padding: 10px 20px;
+}
+.box.sizeSm {
+  padding: 7px 14px;
+}
+.box.sizeMd {
+  padding: 11px 16px;
+}
+
+/* ---- Variants --------------------------------------------------------- */
+.primary {
+  color: var(--paper);
+  background: var(--ink);
+}
+.primary:hover:not(:disabled) {
+  background: var(--graphite-900);
+}
+
+.outline {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--graphite-300);
+}
+.outline:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+/* Ghost is a chrome-less text button (the old .accountLink / .ghostBtn / .linkBtn). */
+.ghost {
+  color: var(--graphite-700);
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: 500;
+}
+.ghost:hover:not(:disabled) {
+  color: var(--ink);
+}

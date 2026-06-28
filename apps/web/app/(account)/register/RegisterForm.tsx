@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+
 import styles from '../account.module.css';
 
 export function RegisterForm({ next }: { next?: string }) {
@@ -39,48 +41,46 @@ export function RegisterForm({ next }: { next?: string }) {
 
   return (
     <main className={styles.main}>
-      <form className={styles.card} onSubmit={onSubmit}>
-        <h1 className={styles.title}>Create your account</h1>
-        <p className={styles.sub}>Join the open company database and start contributing.</p>
+      <Card className={styles.card}>
+        <form className={styles.cardForm} onSubmit={onSubmit}>
+          <h1 className={styles.title}>Create your account</h1>
+          <p className={styles.sub}>Join the open company database and start contributing.</p>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Name</span>
-          <input className={styles.input} type="text" name="name" autoComplete="name" required />
-        </label>
+          <Field label="Name">
+            <Input type="text" name="name" autoComplete="name" required />
+          </Field>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Email</span>
-          <input className={styles.input} type="email" name="email" autoComplete="username" required />
-        </label>
+          <Field label="Email">
+            <Input type="email" name="email" autoComplete="username" required />
+          </Field>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Password</span>
-          <input
-            className={styles.input}
-            type="password"
-            name="password"
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
-        </label>
+          <Field label="Password">
+            <Input
+              type="password"
+              name="password"
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          </Field>
 
-        {error ? <p className={styles.error}>{error}</p> : null}
+          {error ? <FormError>{error}</FormError> : null}
 
-        <button type="submit" className={styles.submit} disabled={pending}>
-          {pending ? 'Creating…' : 'Create account'}
-        </button>
+          <Button variant="primary" block type="submit" disabled={pending}>
+            {pending ? 'Creating…' : 'Create account'}
+          </Button>
 
-        <p className={styles.altLine}>
-          Already have an account?{' '}
-          <Link
-            className={styles.altLink}
-            href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}
-          >
-            Sign in
-          </Link>
-        </p>
-      </form>
+          <p className={styles.altLine}>
+            Already have an account?{' '}
+            <Link
+              className={styles.altLink}
+              href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}
+            >
+              Sign in
+            </Link>
+          </p>
+        </form>
+      </Card>
     </main>
   );
 }

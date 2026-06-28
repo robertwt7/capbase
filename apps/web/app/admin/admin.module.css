@@ -22,13 +22,8 @@
   text-decoration: none;
 }
 
+/* Eyebrow primitive supplies the label styling; only spacing stays local. */
 .brandTag {
-  font-family: var(--font-body);
-  font-weight: 500;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--graphite-500);
   margin-left: 6px;
 }
 
@@ -42,20 +37,6 @@
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--graphite-500);
-}
-
-.linkBtn {
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--graphite-700);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: none;
-}
-.linkBtn:hover {
-  color: var(--ink);
 }
 
 /* ---- Queue ------------------------------------------------------------ */
@@ -144,17 +125,6 @@
   color: var(--graphite-500);
 }
 
-.typeTag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--graphite-700);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 3px 7px;
-}
-
 .subject {
   display: flex;
   flex-direction: column;
@@ -187,33 +157,6 @@
   justify-content: flex-end;
 }
 
-.decision {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 6px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  border: 1px solid var(--graphite-700);
-  background: var(--surface);
-  color: var(--ink);
-}
-.decision:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.approve {
-  background: var(--ink);
-  color: var(--paper);
-  border-color: var(--ink);
-}
-.approve:hover:not(:disabled) {
-  background: var(--graphite-900);
-}
-.reject:hover:not(:disabled) {
-  background: var(--paper);
-}
-
 /* ---- Login ------------------------------------------------------------ */
 .loginMain {
   display: flex;
@@ -222,16 +165,17 @@
   padding: 80px var(--page-pad);
 }
 
+/* Card primitive supplies the chrome; layout stays local. */
 .loginCard {
   width: 100%;
   max-width: 360px;
+}
+
+.loginForm {
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 32px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
 }
 
 .loginTitle {
@@ -246,59 +190,6 @@
   font-size: 13px;
   color: var(--graphite-500);
   margin: 0 0 8px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.fieldLabel {
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--graphite-700);
-}
-.input {
-  font-family: var(--font-body);
-  font-size: 14px;
-  color: var(--ink);
-  padding: 10px 12px;
-  border: 1px solid var(--graphite-300);
-  border-radius: 6px;
-  background: var(--paper);
-}
-.input:focus {
-  outline: none;
-  border-color: var(--ink);
-}
-
-.error {
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--graphite-300);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0;
-}
-
-.submit {
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--ink);
-  border: none;
-  border-radius: 6px;
-  padding: 11px;
-  cursor: pointer;
-  margin-top: 4px;
-}
-.submit:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 @media (max-width: 760px) {

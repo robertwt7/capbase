@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReviewStatus } from '@repo/api';
 
+import { Button, Tag } from '../../components/ui';
 import { getSubmissions } from '../../lib/admin';
 import { requireAdmin } from '../../lib/auth';
 import { formatDate } from '../../lib/format';
@@ -64,7 +65,9 @@ export default async function AdminQueue({
           {queue.items.map((item) => (
             <div key={`${item.type}-${item.id}`} className={styles.row} role="row">
               <span role="cell">
-                <span className={styles.typeTag}>{item.type}</span>
+                <Tag variant="box" mono>
+                  {item.type}
+                </Tag>
               </span>
               <span role="cell" className={styles.subject}>
                 <span className={styles.label}>{item.label}</span>
@@ -80,22 +83,24 @@ export default async function AdminQueue({
               </span>
               <span role="cell" className={styles.actions}>
                 <form action={moderateAction.bind(null, item.type, item.id, 'APPROVED')}>
-                  <button
+                  <Button
+                    variant="primary"
+                    size="sm"
                     type="submit"
-                    className={`${styles.decision} ${styles.approve}`}
                     disabled={item.moderationStatus === 'APPROVED'}
                   >
                     Approve
-                  </button>
+                  </Button>
                 </form>
                 <form action={moderateAction.bind(null, item.type, item.id, 'REJECTED')}>
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     type="submit"
-                    className={`${styles.decision} ${styles.reject}`}
                     disabled={item.moderationStatus === 'REJECTED'}
                   >
                     Reject
-                  </button>
+                  </Button>
                 </form>
               </span>
             </div>

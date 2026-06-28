@@ -8,16 +8,17 @@
   padding: 80px var(--page-pad);
 }
 
+/* Card chrome comes from the Card primitive; layout stays local. */
 .card {
   width: 100%;
   max-width: 380px;
+}
+
+.cardForm {
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 32px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
 }
 
 .title {
@@ -33,61 +34,6 @@
   font-size: 13px;
   color: var(--graphite-500);
   margin: 0 0 8px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.fieldLabel {
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--graphite-700);
-}
-
-.input {
-  font-family: var(--font-body);
-  font-size: 14px;
-  color: var(--ink);
-  padding: 10px 12px;
-  border: 1px solid var(--graphite-300);
-  border-radius: 6px;
-  background: var(--paper);
-}
-.input:focus {
-  outline: none;
-  border-color: var(--ink);
-}
-
-.error {
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--graphite-300);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0;
-}
-
-.submit {
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--ink);
-  border: none;
-  border-radius: 6px;
-  padding: 11px;
-  cursor: pointer;
-  margin-top: 4px;
-}
-.submit:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .altLine {
@@ -136,15 +82,8 @@
   margin: 6px 0 0;
 }
 
+/* Tag chrome comes from the Tag primitive; only spacing stays local. */
 .roleTag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--graphite-700);
-  border: 1px solid var(--graphite-300);
-  border-radius: 999px;
-  padding: 2px 8px;
   margin-left: 10px;
 }
 
@@ -154,44 +93,10 @@
   gap: 12px;
 }
 
-.primaryBtn {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--ink);
-  border: none;
-  border-radius: 999px;
-  padding: 9px 18px;
-  cursor: pointer;
-}
-.primaryBtn:hover {
-  background: var(--graphite-900);
-}
-
-.ghostBtn {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--graphite-700);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-.ghostBtn:hover {
-  color: var(--ink);
-}
-
+/* Card chrome comes from the Card primitive; layout stays local. */
 .access {
   margin: 28px 0;
   padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-}
-.accessUnlocked {
-  border-color: var(--ink);
 }
 .accessTitle {
   font-family: var(--font-display);
@@ -240,15 +145,8 @@
   border-bottom: none;
 }
 
+/* Tag chrome comes from the Tag primitive; grid placement stays local. */
 .itemType {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--graphite-700);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 3px 7px;
   justify-self: start;
 }
 

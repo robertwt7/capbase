@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { logout } from '../app/(account)/actions';
 import { getSession } from '../lib/auth';
+import { Button } from './ui';
 
 import styles from './SiteHeader.module.css';
 
@@ -44,26 +45,26 @@ export async function SiteHeader() {
         <div className={styles.account}>
           {session ? (
             <>
-              <Link href="/contribute" className={styles.cta}>
+              <Button variant="primary" shape="pill" size="sm" href="/contribute">
                 Contribute
-              </Link>
-              <Link href="/profile" className={styles.accountLink}>
+              </Button>
+              <Button variant="ghost" size="sm" href="/profile">
                 {session.name}
-              </Link>
+              </Button>
               <form action={logout}>
-                <button type="submit" className={styles.accountLink}>
+                <Button variant="ghost" size="sm" type="submit">
                   Sign out
-                </button>
+                </Button>
               </form>
             </>
           ) : (
             <>
-              <Link href="/login" className={styles.accountLink}>
+              <Button variant="ghost" size="sm" href="/login">
                 Sign in
-              </Link>
-              <Link href="/register" className={styles.cta}>
+              </Button>
+              <Button variant="primary" shape="pill" size="sm" href="/register">
                 Join
-              </Link>
+              </Button>
             </>
           )}
         </div>

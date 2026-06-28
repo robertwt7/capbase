@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "yarn build --watch",
     "build": "tsc -b -v",
-    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\""
+    "lint": "eslint . --max-warnings 0"
   },
   "main": "./dist/entry.js",
   "types": "./dist/entry.d.ts",
@@ -30,6 +30,7 @@
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",
     "@types/node": "^22.10.7",
+    "eslint": "^9.39.2",
     "ts-loader": "^9.4.3",
     "ts-node": "^10.9.2",
     "typescript": "5.5.4"

@@ -2384,6 +2384,7 @@ __metadata:
     "@repo/eslint-config": "npm:*"
     "@repo/typescript-config": "npm:*"
     "@types/node": "npm:^22.10.7"
+    eslint: "npm:^9.39.2"
     ts-loader: "npm:^9.4.3"
     ts-node: "npm:^10.9.2"
     typescript: "npm:5.5.4"
@@ -2419,7 +2420,6 @@ __metadata:
     "@next/eslint-plugin-next": "npm:^16.2.0"
     eslint: "npm:^9.31.0"
     eslint-config-prettier: "npm:^10.1.1"
-    eslint-plugin-only-warn: "npm:^1.1.0"
     eslint-plugin-react: "npm:^7.37.5"
     eslint-plugin-react-hooks: "npm:^5.2.0"
     eslint-plugin-turbo: "npm:^2.5.0"
@@ -5243,13 +5243,6 @@ __metadata:
   bin:
     eslint-config-prettier: bin/cli.js
   checksum: 10c0/e1bcfadc9eccd526c240056b1e59c5cd26544fe59feb85f38f4f1f116caed96aea0b3b87868e68b3099e55caaac3f2e5b9f58110f85db893e83a332751192682
-  languageName: node
-  linkType: hard
-
-"eslint-plugin-only-warn@npm:^1.1.0":
-  version: 1.2.1
-  resolution: "eslint-plugin-only-warn@npm:1.2.1"
-  checksum: 10c0/4eacc41105b57fdf27f873c7395b3fdaf80d4c8a8c2217d9dd7ce25bd09c8ffc24895080efabf65109113bc80e1ba0cad33ab6819e4e4965781bdf3e968a9de5
   languageName: node
   linkType: hard
 

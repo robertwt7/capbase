@@ -187,15 +187,15 @@ noisier and repeated across files.)
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Web lint runs on source only and passes: `yarn workspace web lint`
-- [ ] `packages/api` lint resolves the binary and passes: `yarn workspace @repo/api lint`
-- [ ] API lint passes: `yarn workspace api lint`
-- [ ] Jobs lint passes: `yarn workspace jobs lint`
-- [ ] UI lint passes: `yarn workspace @repo/ui lint`
-- [ ] Root lint is green across all workspaces: `yarn lint`
-- [ ] Lint actually fails on a planted error (sanity): add an unused var, confirm
+- [x] Web lint runs on source only and passes: `yarn workspace web lint`
+- [x] `packages/api` lint resolves the binary and passes: `yarn workspace @repo/api lint`
+- [x] API lint passes: `yarn workspace api lint`
+- [x] Jobs lint passes: `yarn workspace jobs lint`
+- [x] UI lint passes: `yarn workspace @repo/ui lint`
+- [x] Root lint is green across all workspaces: `yarn lint`
+- [x] Lint actually fails on a planted error (sanity): add an unused var, confirm
       `yarn workspace web lint` exits non-zero, then revert
-- [ ] Types still pass: `yarn workspace web check-types`
+- [x] Types still pass: `yarn workspace web check-types`
 
 #### Manual Verification:
 - [ ] Confirm no real source files were silenced by an over-broad ignore (spot-check that
@@ -260,9 +260,9 @@ is visually identical; only deduplicate and tokenize radii.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `yarn workspace web check-types`
-- [ ] Lint passes on the new files: `yarn workspace web lint`
-- [ ] App builds: `yarn workspace web build`
+- [x] Type check passes: `yarn workspace web check-types`
+- [x] Lint passes on the new files: `yarn workspace web lint`
+- [x] App builds: `yarn workspace web build`
 
 #### Manual Verification:
 - [ ] Each primitive renders correctly in isolation (temporarily drop them on a scratch
@@ -317,12 +317,12 @@ orphaned — per surgical-changes rule).
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `yarn workspace web check-types`
-- [ ] Lint passes (no unused CSS-module import warnings, no unused vars): `yarn workspace web lint`
-- [ ] App builds: `yarn workspace web build`
-- [ ] No remaining duplicate button/field/tag definitions: `sg --lang css -p 'background: var(--ink)'`
-      across `apps/web/app/**/*.module.css` returns only intentional non-button uses
-      (spine/bar/mark), not buttons
+- [x] Type check passes: `yarn workspace web check-types`
+- [x] Lint passes (no unused CSS-module import warnings, no unused vars): `yarn workspace web lint`
+- [x] App builds: `yarn workspace web build`
+- [x] No remaining duplicate button/field/tag definitions: `grep -rn 'background: var(--ink)'`
+      across `apps/web/**/*.module.css` returns only intentional non-button uses
+      (brand `.mark`, FundingLadder bars), not buttons (used grep; `sg` not installed)
 
 #### Manual Verification:
 - [ ] `yarn workspace web dev` — landing, company profile, contribute, login/register,
@@ -357,7 +357,7 @@ shared configs live in `@repo/eslint-config`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Full repo still green: `yarn lint && yarn workspace web check-types && yarn workspace web build`
+- [x] Full repo still green: `yarn lint && yarn workspace web check-types && yarn workspace web build`
 
 #### Manual Verification:
 - [ ] CLAUDE.md accurately lists the shipped primitives and the lint behavior

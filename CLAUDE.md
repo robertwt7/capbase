@@ -37,6 +37,34 @@ gradients. Emphasis comes from weight, size, and the mono numerals — not hue.
 - The signature element is the **Funding Ladder** (`components/FundingLadder.tsx`):
   rounds as a vertical ledger with bar widths encoding round size. Keep it as the
   one bold element; surrounding sections stay quiet.
+- Radii are tokens too (`--radius-sm` 6px, `--radius-md` 10px, `--radius-lg` 12px,
+  `--radius-pill` 999px) — use them, don't hardcode pixel radii.
+
+#### Components (`components/ui/`)
+
+The monochrome language is extracted into a presentational primitive library in
+`apps/web/components/ui/` (each a `.tsx` + co-located `.module.css`, re-exported from
+`index.ts`; all token-pure, usable in both server and client components):
+
+- **`Button`** — `variant` `primary` (filled ink) / `ghost` (chrome-less text) /
+  `outline`; `shape` `pill` | `box`; `size` `sm` | `md`; `block`; renders `next/link`
+  when given `href`, else a `<button>`.
+- **`Field` / `Input` / `Textarea` / `Select` / `FormError`** — the label + control +
+  error cluster. `Input`/`Textarea`/`Select` forward all native props.
+- **`Tag`** — `variant` `pill` | `box`, optional `mono` for the mono-uppercase meta
+  treatment (role/status/type badges).
+- **`Card`** — surface + `--line` border panel; `emphasis` switches the border to
+  `--ink`. Layout (padding/width) stays on the consumer via `className`.
+- **`SectionHeader`** — title + optional mono `note`; `size` `sm`/`md`/`lg`, `as`.
+- **`Eyebrow`** — mono-uppercase label. **`Stat`** — mono figure + uppercase label
+  (`size` `md`/`lg`). **`EmptyState`** — dashed "invite contribution" panel with an
+  optional `action`. **`PageContainer`** — the centered `--page-max` column.
+
+**Build new UI from these primitives.** Only add page-local CSS for bespoke layout
+(grids, the Funding Ladder spine, page-specific spacing). Never re-inline a button,
+field, tag, card, section header, stat, or empty state — extend the primitive instead.
+A few genuinely-borderless muted text labels (e.g. the directory `sectorTag`, the
+profile `itemStatus`) intentionally stay as small local rules rather than `Tag`.
 
 ### Data
 
@@ -115,3 +143,15 @@ Each app has a multi-stage `Dockerfile` (`turbo prune --docker`). `apps/web` use
 api container runs `prisma migrate deploy` on boot, and a one-shot `seed` profile loads
 demo data. Use the `Makefile`: `make up` (prod stack), `make dev` (local dev servers),
 `make ingest` (run a backfill), `make help` for the full list.
+
+## Lint & tooling
+
+`yarn lint` runs flat-config ESLint per workspace via turbo. There is **no `next lint`**
+(removed in Next 16); `apps/web` lints with `eslint .` and ignores `.next/**`. Shared
+configs live in `@repo/eslint-config` (`base`/`next-js`/`nest-js` + prettier). The lint
+gate is **strict**: every script passes `--max-warnings 0`, so any warning fails the run
+(the `only-warn` downgrade plugin was removed — recommended-set problems are real errors).
+The `lint` turbo task `dependsOn: ["^build"]` because the type-aware rules need workspace
+dependency types (`@repo/db`/`@repo/api` `dist`); run `yarn build` first on a fresh
+checkout, or just use `yarn lint` (turbo builds deps for you). `packages/db` is excluded
+(Prisma + generated client).

@@ -5,6 +5,7 @@ import type { CompanyAccess } from '@repo/api';
 import { AddRoundForm } from './AddRoundForm';
 import { CompanyLogo } from '../../../components/CompanyLogo';
 import { FundingLadder } from '../../../components/FundingLadder';
+import { Button, EmptyState, SectionHeader, Stat, Tag } from '../../../components/ui';
 import { getSession } from '../../../lib/auth';
 import { getCompanyDetail } from '../../../lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '../../../lib/format';
@@ -37,14 +38,16 @@ export default async function CompanyProfile({
         <div className={styles.headerBody}>
           <div className={styles.titleRow}>
             <h1 className={styles.name}>{company.name}</h1>
-            <span className={styles.status}>{company.status}</span>
+            <Tag variant="pill" mono>
+              {company.status}
+            </Tag>
           </div>
           <p className={styles.oneLiner}>{company.oneLiner}</p>
           <div className={styles.tags}>
             {company.industry.map((tag) => (
-              <span key={tag} className={styles.tag}>
+              <Tag key={tag} variant="box">
                 {tag}
-              </span>
+              </Tag>
             ))}
           </div>
           {(company.websiteUrl || company.linkedinUrl || company.twitterUrl) && (
@@ -267,12 +270,14 @@ function LockNote({
         Showing <span className={styles.lockCount}>{shown}</span> of{' '}
         <span className={styles.lockCount}>{total}</span> — contribute to unlock the rest.
       </span>
-      <Link
+      <Button
+        variant="primary"
+        shape="pill"
+        size="sm"
         href={signedIn ? '/contribute' : `/login?next=${encodeURIComponent(`/companies/${slug}`)}`}
-        className={styles.lockAction}
       >
         {signedIn ? 'Contribute to unlock' : 'Sign in to unlock'}
-      </Link>
+      </Button>
     </div>
   );
 }
@@ -294,15 +299,6 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.stat}>
-      <span className={styles.statValue}>{value}</span>
-      <span className={styles.statLabel}>{label}</span>
-    </div>
-  );
-}
-
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className={styles.blockTitle}>{children}</h2>;
 }
@@ -318,10 +314,7 @@ function Block({
 }) {
   return (
     <section className={styles.block}>
-      <div className={styles.blockHead}>
-        <h2 className={styles.blockTitle}>{title}</h2>
-        {note && <span className={styles.blockNote}>{note}</span>}
-      </div>
+      <SectionHeader title={title} note={note} size="md" />
       {children}
     </section>
   );
@@ -335,13 +328,16 @@ function Empty({
   action?: string;
 }) {
   return (
-    <div className={styles.empty}>
-      <p className={styles.emptyText}>{children}</p>
-      {action && (
-        <button type="button" className={styles.emptyAction}>
-          {action}
-        </button>
-      )}
-    </div>
+    <EmptyState
+      action={
+        action ? (
+          <Button variant="outline" shape="pill" size="sm">
+            {action}
+          </Button>
+        ) : undefined
+      }
+    >
+      {children}
+    </EmptyState>
   );
 }

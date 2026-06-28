@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+
 import styles from '../account.module.css';
 
 export function LoginForm({ next }: { next?: string }) {
@@ -35,42 +37,36 @@ export function LoginForm({ next }: { next?: string }) {
 
   return (
     <main className={styles.main}>
-      <form className={styles.card} onSubmit={onSubmit}>
-        <h1 className={styles.title}>Sign in</h1>
-        <p className={styles.sub}>Contribute company and funding data to unlock full profiles.</p>
+      <Card className={styles.card}>
+        <form className={styles.cardForm} onSubmit={onSubmit}>
+          <h1 className={styles.title}>Sign in</h1>
+          <p className={styles.sub}>Contribute company and funding data to unlock full profiles.</p>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Email</span>
-          <input className={styles.input} type="email" name="email" autoComplete="username" required />
-        </label>
+          <Field label="Email">
+            <Input type="email" name="email" autoComplete="username" required />
+          </Field>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>Password</span>
-          <input
-            className={styles.input}
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            required
-          />
-        </label>
+          <Field label="Password">
+            <Input type="password" name="password" autoComplete="current-password" required />
+          </Field>
 
-        {error ? <p className={styles.error}>{error}</p> : null}
+          {error ? <FormError>{error}</FormError> : null}
 
-        <button type="submit" className={styles.submit} disabled={pending}>
-          {pending ? 'Signing in…' : 'Sign in'}
-        </button>
+          <Button variant="primary" block type="submit" disabled={pending}>
+            {pending ? 'Signing in…' : 'Sign in'}
+          </Button>
 
-        <p className={styles.altLine}>
-          New here?{' '}
-          <Link
-            className={styles.altLink}
-            href={next ? `/register?next=${encodeURIComponent(next)}` : '/register'}
-          >
-            Create an account
-          </Link>
-        </p>
-      </form>
+          <p className={styles.altLine}>
+            New here?{' '}
+            <Link
+              className={styles.altLink}
+              href={next ? `/register?next=${encodeURIComponent(next)}` : '/register'}
+            >
+              Create an account
+            </Link>
+          </p>
+        </form>
+      </Card>
     </main>
   );
 }
