@@ -1,12 +1,43 @@
 import Link from 'next/link';
+import { cva, type VariantProps } from 'class-variance-authority';
 import type { ComponentProps, ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './Button.module.css';
+import { cn } from '@/lib/utils';
 
-type Variant = 'primary' | 'ghost' | 'outline';
-type Shape = 'pill' | 'box';
-type Size = 'sm' | 'md';
+const button = cva(
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap font-sans font-medium ' +
+    'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ' +
+    'disabled:pointer-events-none disabled:opacity-50 cursor-pointer',
+  {
+    variants: {
+      variant: {
+        primary: 'bg-ink text-paper hover:bg-graphite-900',
+        outline: 'border border-ink text-ink hover:bg-ink hover:text-paper',
+        ghost: 'text-ink hover:text-graphite-500',
+      },
+      shape: {
+        pill: 'rounded-full',
+        box: 'rounded-md',
+      },
+      size: {
+        sm: 'h-9 text-sm',
+        md: 'h-11 text-sm',
+      },
+      block: { true: 'w-full', false: '' },
+    },
+    compoundVariants: [
+      // Ghost is chrome-less: no shape, no horizontal padding.
+      { variant: 'ghost', class: 'h-auto px-0' },
+      { variant: ['primary', 'outline'], size: 'sm', class: 'px-4' },
+      { variant: ['primary', 'outline'], size: 'md', class: 'px-6' },
+    ],
+    defaultVariants: { variant: 'primary', shape: 'box', size: 'md', block: false },
+  },
+);
+
+type Variant = NonNullable<VariantProps<typeof button>['variant']>;
+type Shape = NonNullable<VariantProps<typeof button>['shape']>;
+type Size = NonNullable<VariantProps<typeof button>['size']>;
 
 type CommonProps = {
   variant: Variant;
@@ -34,15 +65,7 @@ export function Button({
   children,
   ...rest
 }: ButtonProps) {
-  const cls = cx(
-    styles.button,
-    styles[variant],
-    // Ghost is chrome-less, so shape padding doesn't apply.
-    variant !== 'ghost' && styles[shape],
-    styles[size === 'sm' ? 'sizeSm' : 'sizeMd'],
-    block && styles.block,
-    className,
-  );
+  const cls = cn(button({ variant, shape, size, block: !!block }), className);
 
   if (typeof rest.href === 'string') {
     return (

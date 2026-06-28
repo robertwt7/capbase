@@ -1,9 +1,14 @@
 import type { ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './SectionHeader.module.css';
+import { cn } from '@/lib/utils';
 
 type HeadingLevel = 'h1' | 'h2' | 'h3';
+
+const sizes = {
+  sm: 'text-base',
+  md: 'text-xl',
+  lg: 'text-2xl',
+} as const;
 
 export function SectionHeader({
   title,
@@ -19,9 +24,15 @@ export function SectionHeader({
   className?: string;
 }) {
   return (
-    <div className={cx(styles.head, className)}>
-      <Heading className={cx(styles.title, styles[size])}>{title}</Heading>
-      {note ? <span className={styles.note}>{note}</span> : null}
+    <div className={cn('flex items-baseline justify-between gap-4 border-b border-line pb-3', className)}>
+      <Heading className={cn('font-display font-semibold tracking-tight text-ink', sizes[size])}>
+        {title}
+      </Heading>
+      {note ? (
+        <span className="shrink-0 font-mono text-[11px] uppercase tracking-[0.08em] text-graphite-500">
+          {note}
+        </span>
+      ) : null}
     </div>
   );
 }

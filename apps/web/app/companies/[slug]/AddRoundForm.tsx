@@ -1,92 +1,94 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 
-import { Button, Card, Field, FormError, Input } from '../../../components/ui';
+import { Button, Card, Form, FormError, TextField } from '@/components/ui';
+import { roundFormDefaults, roundFormSchema, type RoundFormValues } from '@/lib/validation/round';
+import { applyServerErrors } from '@/lib/validation/utils';
 
-import { addRoundAction, type RoundFormState } from './actions';
-
-import styles from './profile.module.css';
-
-const initial: RoundFormState = {};
+import { addRoundAction } from './actions';
 
 export function AddRoundForm({ slug }: { slug: string }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(addRoundAction, initial);
+  const [submitted, setSubmitted] = useState(false);
+  const [formError, setFormError] = useState<string>();
 
-  if (!open) {
-    return (
-      <Button
-        variant="outline"
-        shape="pill"
-        size="sm"
-        className={styles.addToggle}
-        onClick={() => setOpen(true)}
-      >
-        + Add a funding round
-      </Button>
-    );
-  }
+  const form = useForm<RoundFormValues>({
+    resolver: zodResolver(roundFormSchema),
+    defaultValues: roundFormDefaults,
+    mode: 'onBlur',
+  });
 
-  if (state.success) {
+  const onSubmit = form.handleSubmit(async (values) => {
+    setFormError(undefined);
+    const result = await addRoundAction(slug, values);
+    if (result.ok) {
+      setSubmitted(true);
+      return;
+    }
+    if (result.fieldErrors) applyServerErrors(form.setError, result.fieldErrors);
+    setFormError(result.formError ?? 'Something went wrong. Please try again.');
+  });
+
+  if (submitted) {
     return (
-      <p className={styles.addSuccess}>
+      <p className="text-sm text-graphite-500">
         Round submitted for review. It will appear here once an admin approves it.
       </p>
     );
   }
 
+  if (!open) {
+    return (
+      <Button variant="outline" shape="pill" size="sm" onClick={() => setOpen(true)}>
+        + Add a funding round
+      </Button>
+    );
+  }
+
   return (
-    <Card className={styles.addFormWrap}>
-      <form className={styles.addForm} action={action}>
-        <input type="hidden" name="slug" value={slug} />
-        <div className={styles.addRow}>
-          <Field label="Round" error={state.errors?.name}>
-            <Input
-              name="name"
-              placeholder="Series A"
-              aria-invalid={!!state.errors?.name}
-              required
-            />
-          </Field>
-          <Field label="Date" error={state.errors?.date}>
-            <Input type="date" name="date" aria-invalid={!!state.errors?.date} required />
-          </Field>
-        </div>
-        <div className={styles.addRow}>
-          <Field label="Raise (USD)" error={state.errors?.amountUsd}>
-            <Input
-              type="number"
+    <Card className="p-5">
+      <Form {...form}>
+        <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField control={form.control} name="name" label="Round" placeholder="Series A" />
+            <TextField control={form.control} name="date" label="Date" type="date" />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              control={form.control}
               name="amountUsd"
-              min={0}
-              aria-invalid={!!state.errors?.amountUsd}
-              required
+              label="Raise (USD)"
+              inputMode="numeric"
             />
-          </Field>
-          <Field label="Post-money (USD, optional)" error={state.errors?.postMoneyUsd}>
-            <Input
-              type="number"
+            <TextField
+              control={form.control}
               name="postMoneyUsd"
-              min={0}
-              aria-invalid={!!state.errors?.postMoneyUsd}
+              label="Post-money (USD, optional)"
+              inputMode="numeric"
             />
-          </Field>
-        </div>
-        <Field label="Lead investor (optional)" error={state.errors?.lead}>
-          <Input name="lead" placeholder="Sequoia Capital" aria-invalid={!!state.errors?.lead} />
-        </Field>
+          </div>
+          <TextField
+            control={form.control}
+            name="lead"
+            label="Lead investor (optional)"
+            placeholder="Sequoia Capital"
+          />
 
-        {state.formError ? <FormError>{state.formError}</FormError> : null}
+          {formError ? <FormError>{formError}</FormError> : null}
 
-        <div className={styles.addActions}>
-          <Button variant="primary" size="sm" type="submit" disabled={pending}>
-            {pending ? 'Submitting…' : 'Submit round'}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-        </div>
-      </form>
+          <div className="flex items-center gap-3">
+            <Button variant="primary" size="sm" type="submit" disabled={form.formState.isSubmitting}>
+              {form.formState.isSubmitting ? 'Submitting…' : 'Submit round'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </Form>
     </Card>
   );
 }

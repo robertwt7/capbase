@@ -1,30 +1,64 @@
 'use client';
 
-import { useActionState } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { COMPANY_STATUSES, SECTORS, STAGES } from '@repo/api';
 
-import { Button, Card, Field, FormError, Input, Select, Textarea } from '../../components/ui';
-import { CITIES } from '../../lib/cities';
+import {
+  Button,
+  Card,
+  Eyebrow,
+  Form,
+  FormError,
+  SelectField,
+  TextareaField,
+  TextField,
+} from '@/components/ui';
+import { CITIES } from '@/lib/cities';
+import {
+  companyFormDefaults,
+  companyFormSchema,
+  type CompanyFormValues,
+} from '@/lib/validation/company';
+import { applyServerErrors } from '@/lib/validation/utils';
 
-import { createCompanyAction, type CompanyFormState } from './actions';
-
-import styles from './contribute.module.css';
-
-const initial: CompanyFormState = {};
+import { createCompanyAction } from './actions';
 
 export function CompanyForm() {
-  const [state, action, pending] = useActionState(createCompanyAction, initial);
+  const [submitted, setSubmitted] = useState(false);
+  const [formError, setFormError] = useState<string>();
 
-  if (state.success) {
+  const form = useForm<CompanyFormValues>({
+    resolver: zodResolver(companyFormSchema),
+    defaultValues: companyFormDefaults,
+    mode: 'onBlur',
+  });
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    setFormError(undefined);
+    const result = await createCompanyAction(values);
+    if (result.ok) {
+      setSubmitted(true);
+      return;
+    }
+    if (result.fieldErrors) applyServerErrors(form.setError, result.fieldErrors);
+    setFormError(result.formError ?? 'Something went wrong. Please try again.');
+  });
+
+  if (submitted) {
     return (
-      <main className={styles.main}>
-        <Card emphasis className={styles.success}>
-          <h1 className={styles.title}>Submitted for review</h1>
-          <p className={styles.sub}>
-            Thanks for contributing. Your company is now pending moderation — it will appear once an
-            admin approves it. Contributing has unlocked full company profiles for you.
+      <main className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+        <Card emphasis className="p-9">
+          <Eyebrow>Submitted</Eyebrow>
+          <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">
+            Pending review
+          </h1>
+          <p className="mt-3 max-w-prose text-sm text-graphite-500">
+            Thanks for contributing. Your company is now in the moderation queue — it goes live once
+            an admin approves it. Contributing has unlocked full company profiles for you.
           </p>
-          <div className={styles.successActions}>
+          <div className="mt-6 flex items-center gap-4">
             <Button variant="primary" shape="pill" href="/profile">
               View your contributions
             </Button>
@@ -38,94 +72,70 @@ export function CompanyForm() {
   }
 
   return (
-    <main className={styles.main}>
-      <form className={styles.form} action={action}>
-        <header className={styles.head}>
-          <h1 className={styles.title}>Add a company</h1>
-          <p className={styles.sub}>
-            Submit a private company to the open database. All submissions are reviewed before they
-            go live.
-          </p>
-        </header>
+    <main className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+      <header className="mb-8">
+        <Eyebrow>Contribute</Eyebrow>
+        <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">
+          Add a company
+        </h1>
+        <p className="mt-2 text-sm text-graphite-500">
+          Submit a private company to the open database. Every submission is reviewed before it goes
+          live.
+        </p>
+      </header>
 
-        <Field label="Company name" error={state.errors?.name}>
-          <Input name="name" aria-invalid={!!state.errors?.name} required />
-        </Field>
-        <Field label="Website domain" error={state.errors?.domain}>
-          <Input
+      <Form {...form}>
+        <form onSubmit={onSubmit} noValidate className="flex flex-col gap-5">
+          <TextField control={form.control} name="name" label="Company name" autoComplete="off" />
+          <TextField
+            control={form.control}
             name="domain"
+            label="Website domain"
             placeholder="acme.com"
-            aria-invalid={!!state.errors?.domain}
-            required
+            autoComplete="off"
           />
-        </Field>
-        <Field label="One-liner" error={state.errors?.oneLiner}>
-          <Input name="oneLiner" aria-invalid={!!state.errors?.oneLiner} required />
-        </Field>
+          <TextField control={form.control} name="oneLiner" label="One-liner" />
+          <TextareaField control={form.control} name="description" label="Description" rows={4} />
 
-        <Field label="Description" error={state.errors?.description}>
-          <Textarea
-            name="description"
-            rows={4}
-            aria-invalid={!!state.errors?.description}
-            required
-          />
-        </Field>
-
-        <div className={styles.row}>
-          <Field label="Headquarters" error={state.errors?.hq}>
-            <Input
+          <div className="grid gap-5 sm:grid-cols-2">
+            <TextField
+              control={form.control}
               name="hq"
+              label="Headquarters"
               list="hq-cities"
               placeholder="San Francisco, CA"
-              aria-invalid={!!state.errors?.hq}
-              required
+              autoComplete="off"
             />
-          </Field>
-          <Field label="Founded (year)" error={state.errors?.founded}>
-            <Input
+            <TextField
+              control={form.control}
               name="founded"
-              type="number"
-              min={0}
-              aria-invalid={!!state.errors?.founded}
-              required
+              label="Founded (year)"
+              inputMode="numeric"
+              placeholder="2019"
             />
-          </Field>
-        </div>
-        <datalist id="hq-cities">
-          {CITIES.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
+          </div>
+          <datalist id="hq-cities">
+            {CITIES.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
 
-        <div className={styles.row}>
-          <Field label="Headcount" error={state.errors?.headcount}>
-            <Input
+          <div className="grid gap-5 sm:grid-cols-2">
+            <TextField
+              control={form.control}
               name="headcount"
-              type="number"
-              min={0}
-              aria-invalid={!!state.errors?.headcount}
-              required
+              label="Headcount"
+              inputMode="numeric"
             />
-          </Field>
-          <Field label="Total raised (USD)" error={state.errors?.totalRaisedUsd}>
-            <Input
+            <TextField
+              control={form.control}
               name="totalRaisedUsd"
-              type="number"
-              min={0}
-              aria-invalid={!!state.errors?.totalRaisedUsd}
-              required
+              label="Total raised (USD)"
+              inputMode="numeric"
             />
-          </Field>
-        </div>
+          </div>
 
-        <Field label="Primary sector" error={state.errors?.primarySector}>
-          <Select
-            name="primarySector"
-            defaultValue=""
-            aria-invalid={!!state.errors?.primarySector}
-            required
-          >
+          <SelectField control={form.control} name="primarySector" label="Primary sector">
             <option value="" disabled>
               Select a sector…
             </option>
@@ -134,64 +144,47 @@ export function CompanyForm() {
                 {s}
               </option>
             ))}
-          </Select>
-        </Field>
+          </SelectField>
 
-        <Field label="Industries" error={state.errors?.industry}>
-          <Input
+          <TextField
+            control={form.control}
             name="industry"
+            label="Industries"
             placeholder="Fintech, Payments, Infrastructure"
-            aria-invalid={!!state.errors?.industry}
-            required
+            description="Comma-separated tags."
           />
-        </Field>
 
-        <div className={styles.row}>
-          <Field label="Status" error={state.errors?.status}>
-            <Select
-              name="status"
-              defaultValue="Private"
-              aria-invalid={!!state.errors?.status}
-              required
-            >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <SelectField control={form.control} name="status" label="Status">
               {COMPANY_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
-            </Select>
-          </Field>
-          <Field label="Stage" error={state.errors?.stage}>
-            <Select
-              name="stage"
-              defaultValue="Seed"
-              aria-invalid={!!state.errors?.stage}
-              required
-            >
+            </SelectField>
+            <SelectField control={form.control} name="stage" label="Stage">
               {STAGES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
-            </Select>
-          </Field>
-        </div>
+            </SelectField>
+          </div>
 
-        <Field label="Last valuation (USD, optional)" error={state.errors?.lastValuationUsd}>
-          <Input
+          <TextField
+            control={form.control}
             name="lastValuationUsd"
-            type="number"
-            min={0}
-            aria-invalid={!!state.errors?.lastValuationUsd}
+            label="Last valuation (USD, optional)"
+            inputMode="numeric"
           />
-        </Field>
 
-        {state.formError ? <FormError>{state.formError}</FormError> : null}
+          {formError ? <FormError>{formError}</FormError> : null}
 
-        <Button variant="primary" block type="submit" disabled={pending}>
-          {pending ? 'Submitting…' : 'Submit for review'}
-        </Button>
-      </form>
+          <Button variant="primary" block type="submit" disabled={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Submitting…' : 'Submit for review'}
+          </Button>
+        </form>
+      </Form>
     </main>
   );
 }

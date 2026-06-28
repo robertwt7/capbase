@@ -1,9 +1,9 @@
-import type { ComponentProps, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './Field.module.css';
+import { cn } from '@/lib/utils';
 
-/** Label + control wrapper. Render the control (Input/Textarea/Select) as children. */
+/** Legacy label + control + error wrapper. Still used by the auth/admin pages.
+    New forms use the react-hook-form <Form>/<FormField> primitives instead. */
 export function Field({
   label,
   error,
@@ -16,26 +16,25 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <label className={cx(styles.field, className)}>
-      <span className={styles.label}>{label}</span>
+    <label className={cn('grid gap-1.5', className)}>
+      <span className="font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-graphite-700">
+        {label}
+      </span>
       {children}
-      {error ? <span className={styles.fieldError}>{error}</span> : null}
+      {error ? <span className="font-sans text-[13px] font-semibold text-ink">{error}</span> : null}
     </label>
   );
 }
 
-export function Input({ className, ...rest }: ComponentProps<'input'>) {
-  return <input className={cx(styles.control, className)} {...rest} />;
-}
-
-export function Textarea({ className, ...rest }: ComponentProps<'textarea'>) {
-  return <textarea className={cx(styles.control, styles.textarea, className)} {...rest} />;
-}
-
-export function Select({ className, ...rest }: ComponentProps<'select'>) {
-  return <select className={cx(styles.control, className)} {...rest} />;
-}
-
 export function FormError({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cx(styles.error, className)}>{children}</p>;
+  return (
+    <p
+      className={cn(
+        'rounded-md border border-line bg-surface px-3 py-2.5 font-sans text-sm text-ink',
+        className,
+      )}
+    >
+      {children}
+    </p>
+  );
 }

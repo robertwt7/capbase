@@ -16,9 +16,14 @@ dev/prod commands (`make help`).
 
 ## Frontend (apps/web)
 
-Next.js 16 (App Router, React 19). Styling is plain CSS Modules + design tokens in
-`app/globals.css` — there is no Tailwind. Keep that convention; do not add a CSS
-framework without being asked.
+Next.js 16 (App Router, React 19). Styling is **Tailwind CSS v4 + shadcn/ui**, themed
+to a monochrome design system. Tokens are declared in `app/globals.css` (`:root` for
+the raw values, `@theme inline` to expose them as utilities); `lib/utils.ts` exports
+`cn` (clsx + tailwind-merge). Style with Tailwind utilities and the `components/ui`
+primitives — don't add CSS Module files for new UI. (Two legacy CSS Modules remain for
+the not-yet-redesigned `admin` and `(account)` auth pages; back-compat token aliases
+`--font-body`/`--page-max`/`--page-pad` exist only for them and will go when those
+routes are redesigned.)
 
 ### Design system — "monochrome terminal ledger"
 
@@ -26,45 +31,60 @@ The interface is deliberately monochrome (graphite ramp) so that company logos a
 the only color on screen. When adding UI, hold this line: no accent colors, no
 gradients. Emphasis comes from weight, size, and the mono numerals — not hue.
 
-- Tokens live in `app/globals.css` (`:root`). Use `--ink`, `--paper`, `--surface`,
-  the `--graphite-*` ramp, and `--line`. Never hardcode hex values in components.
-- Type roles (loaded via `next/font/google` in `app/layout.tsx`):
-  - `--font-display` → Archivo. Headlines, company names, big figures.
-  - `--font-body` → IBM Plex Sans. Body text and labels.
-  - `--font-mono` → IBM Plex Mono. Every financial figure / number, tabular.
+- The graphite ramp is exposed as Tailwind colors via `@theme`: use `text-ink`,
+  `bg-paper`, `bg-surface`, `text-graphite-{200..900}`, `border-line`, plus the shadcn
+  semantic colors (`bg-primary`, `text-muted-foreground`, `border-border`, …) which all
+  map onto the ramp. Never hardcode hex values. Destructive is monochrome too —
+  emphasis is weight/border, never red.
+- Type roles (next/font in `app/layout.tsx`, exposed as `@theme` font utilities):
+  - `font-display` → Archivo. Headlines, company names, big figures.
+  - `font-sans` (default `body`) → IBM Plex Sans. Body text.
+  - `font-mono` → IBM Plex Mono. Every financial figure / number (tabular) **and**
+    every meta label (uppercase, tracked) — the mono carries the "terminal" identity.
 - All money/number formatting goes through `lib/format.ts` (`formatUsd`,
   `formatCount`, `formatDate`, `signedPct`). Don't format inline.
 - The signature element is the **Funding Ladder** (`components/FundingLadder.tsx`):
   rounds as a vertical ledger with bar widths encoding round size. Keep it as the
   one bold element; surrounding sections stay quiet.
-- Radii are tokens too (`--radius-sm` 6px, `--radius-md` 10px, `--radius-lg` 12px,
-  `--radius-pill` 999px) — use them, don't hardcode pixel radii.
+- Radii: `rounded-sm` 6px, `rounded-md` 10px, `rounded-lg` 12px, `rounded-full` for
+  pills (set via `@theme`). Use them, don't hardcode pixel radii.
 
 #### Components (`components/ui/`)
 
-The monochrome language is extracted into a presentational primitive library in
-`apps/web/components/ui/` (each a `.tsx` + co-located `.module.css`, re-exported from
-`index.ts`; all token-pure, usable in both server and client components):
+Tailwind-based primitives re-exported from `index.ts` (token-pure, usable in server and
+client components). `components.json` configures shadcn (`@/*` alias, new-york style);
+add more shadcn primitives with `npx shadcn@latest add <name>` then theme monochrome.
 
 - **`Button`** — `variant` `primary` (filled ink) / `ghost` (chrome-less text) /
   `outline`; `shape` `pill` | `box`; `size` `sm` | `md`; `block`; renders `next/link`
-  when given `href`, else a `<button>`.
-- **`Field` / `Input` / `Textarea` / `Select` / `FormError`** — the label + control +
-  error cluster. `Input`/`Textarea`/`Select` forward all native props.
+  when given `href`, else a `<button>`. (cva-based.)
+- **Form controls** — `Input` / `Textarea` / `Select` (native, styled, forward all
+  native props), `Label`. Legacy `Field` + `FormError` (label+control+error wrapper)
+  remain for the auth/admin pages.
 - **`Tag`** — `variant` `pill` | `box`, optional `mono` for the mono-uppercase meta
-  treatment (role/status/type badges).
-- **`Card`** — surface + `--line` border panel; `emphasis` switches the border to
-  `--ink`. Layout (padding/width) stays on the consumer via `className`.
-- **`SectionHeader`** — title + optional mono `note`; `size` `sm`/`md`/`lg`, `as`.
-- **`Eyebrow`** — mono-uppercase label. **`Stat`** — mono figure + uppercase label
-  (`size` `md`/`lg`). **`EmptyState`** — dashed "invite contribution" panel with an
-  optional `action`. **`PageContainer`** — the centered `--page-max` column.
+  treatment. **`Card`** — surface + `border-line` panel; `emphasis` → `border-ink`.
+  **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`**,
+  **`Separator`** — same roles as before, now Tailwind.
 
-**Build new UI from these primitives.** Only add page-local CSS for bespoke layout
-(grids, the Funding Ladder spine, page-specific spacing). Never re-inline a button,
-field, tag, card, section header, stat, or empty state — extend the primitive instead.
-A few genuinely-borderless muted text labels (e.g. the directory `sectorTag`, the
-profile `itemStatus`) intentionally stay as small local rules rather than `Tag`.
+**Build new UI from these primitives + Tailwind utilities.** Never re-inline a button,
+tag, card, etc. — extend the primitive. Bespoke layout (grids, the Funding Ladder spine)
+is just Tailwind utilities in the component/page, no CSS Modules.
+
+#### Forms — react-hook-form + zod
+
+Forms use **react-hook-form** with **zod** validation (shadcn `Form` pattern):
+
+- zod schemas live in `lib/validation/` (`company.ts`, `round.ts`), with a
+  `*FormSchema`, `*FormDefaults`, and a `to*Input` mapper to the `@repo/api` payload.
+  Form values are string-only; numeric fields validate as digit-strings and convert in
+  the mapper. Aligns field names with `@repo/api` `Create*Input`.
+- Client: `useForm({ resolver: zodResolver(schema), defaultValues })` inside `<Form>`,
+  with the generic `TextField` / `TextareaField` / `SelectField` wrappers
+  (`components/ui/fields.tsx`) — label + control + inline `FormMessage` per field.
+- Server stays authoritative: the server action re-runs `schema.safeParse` (never trust
+  the client), maps with `to*Input`, and returns an `ActionResult`
+  (`{ ok } | { ok:false, formError?, fieldErrors? }`, see `lib/validation/utils.ts`).
+  `applyServerErrors` pushes server `fieldErrors` back into RHF via `setError`.
 
 ### Data
 

@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './EmptyState.module.css';
+import { cn } from '@/lib/utils';
 
 export function EmptyState({
   children,
@@ -13,8 +12,13 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cx(styles.empty, className)}>
-      <p className={styles.text}>{children}</p>
+    <div
+      className={cn(
+        'flex flex-col items-start gap-3 rounded-lg border border-dashed border-graphite-300 bg-paper px-5 py-6',
+        className,
+      )}
+    >
+      <p className="font-sans text-sm text-graphite-500">{children}</p>
       {action}
     </div>
   );

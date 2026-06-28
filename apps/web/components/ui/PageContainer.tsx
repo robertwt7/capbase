@@ -1,7 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './PageContainer.module.css';
+import { cn } from '@/lib/utils';
 
 type ContainerTag = 'div' | 'main' | 'section' | 'header' | 'footer';
 
@@ -16,7 +15,7 @@ export function PageContainer({
   children: ReactNode;
 } & Omit<ComponentProps<'div'>, 'className' | 'children'>) {
   return (
-    <Tag className={cx(styles.container, className)} {...rest}>
+    <Tag className={cn('mx-auto w-full max-w-(--page-max) px-(--page-pad)', className)} {...rest}>
       {children}
     </Tag>
   );

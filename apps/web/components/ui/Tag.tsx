@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './Tag.module.css';
+import { cn } from '@/lib/utils';
 
 export function Tag({
   variant,
@@ -15,7 +14,16 @@ export function Tag({
   children: ReactNode;
 }) {
   return (
-    <span className={cx(styles.tag, styles[variant], mono && styles.mono, className)}>
+    <span
+      className={cn(
+        'inline-flex items-center border border-line text-graphite-700',
+        variant === 'pill' ? 'rounded-full px-2.5 py-0.5' : 'rounded-md px-2 py-0.5',
+        mono
+          ? 'font-mono text-[11px] font-medium uppercase tracking-[0.08em]'
+          : 'font-sans text-xs',
+        className,
+      )}
+    >
       {children}
     </span>
   );

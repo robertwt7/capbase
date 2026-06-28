@@ -2,8 +2,6 @@
 
 import { useState } from 'react';
 
-import styles from './CompanyLogo.module.css';
-
 interface CompanyLogoProps {
   name: string;
   domain: string;
@@ -20,18 +18,21 @@ export function CompanyLogo({ name, domain, size = 44 }: CompanyLogoProps) {
 
   return (
     <span
-      className={styles.chip}
+      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-line bg-surface"
       style={{ width: size, height: size }}
       aria-hidden={failed ? undefined : true}
     >
       {failed ? (
-        <span className={styles.monogram} style={{ fontSize: size * 0.4 }}>
+        <span
+          className="font-display font-bold leading-none tracking-tight text-graphite-700"
+          style={{ fontSize: size * 0.4 }}
+        >
           {monogram}
         </span>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          className={styles.img}
+          className="size-full object-contain p-[18%]"
           src={`https://logo.clearbit.com/${domain}`}
           alt={`${name} logo`}
           width={size}

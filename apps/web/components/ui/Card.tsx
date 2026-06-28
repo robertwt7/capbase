@@ -1,7 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 
-import { cx } from './cx';
-import styles from './Card.module.css';
+import { cn } from '@/lib/utils';
 
 export function Card({
   emphasis = false,
@@ -14,7 +13,14 @@ export function Card({
   children: ReactNode;
 } & Omit<ComponentProps<'div'>, 'className' | 'children'>) {
   return (
-    <div className={cx(styles.card, emphasis && styles.emphasis, className)} {...rest}>
+    <div
+      className={cn(
+        'rounded-lg border bg-surface',
+        emphasis ? 'border-ink' : 'border-line',
+        className,
+      )}
+      {...rest}
+    >
       {children}
     </div>
   );
