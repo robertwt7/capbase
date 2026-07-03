@@ -21,13 +21,13 @@ export async function SiteHeader() {
         </Link>
 
         <nav className="flex gap-[22px] max-md:hidden" aria-label="Primary">
-          <Link href="/" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
+          <Link href="/companies" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
             Companies
           </Link>
-          <Link href="/" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
+          <Link href="/investors" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
             Investors
           </Link>
-          <Link href="/" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
+          <Link href="/markets" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
             Markets
           </Link>
         </nav>
@@ -35,7 +35,7 @@ export async function SiteHeader() {
         <form
           className="ml-auto flex h-[38px] w-80 max-w-[38vw] items-center gap-2 rounded-[9px] border border-line bg-surface px-3 transition-colors focus-within:border-graphite-500 max-md:w-auto max-md:max-w-none max-md:flex-1"
           role="search"
-          action="/"
+          action="/companies"
         >
           <span className="grid size-[18px] shrink-0 place-items-center rounded border border-line font-mono text-xs text-graphite-500" aria-hidden="true">
             /

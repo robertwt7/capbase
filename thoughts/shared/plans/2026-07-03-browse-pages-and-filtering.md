@@ -183,8 +183,8 @@ the exact Tailwind classes and `CompanyLogo`/`Badge`/`formatUsd` usage. Landing 
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 #### Manual Verification
 - [ ] Landing page company table looks identical to before the extraction.
 
@@ -224,8 +224,8 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 #### Manual Verification
 - [ ] Typing narrows the table live; selecting a sector/stage/status filters correctly.
 - [ ] URL updates (`?q=&sector=…`); reloading that URL restores the same filtered view.
@@ -256,8 +256,8 @@ Fetch `getInvestors()`, read `searchParams`, render `<SectionHeader title="Inves
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 #### Manual Verification
 - [ ] `/investors` lists unique investors; search + Type filter + sort work and update the URL.
 - [ ] With the API down, the page still renders from the fallback list.
@@ -297,8 +297,8 @@ Add `export function generateStaticParams()` returning `SECTORS.map((s) => ({ se
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 - [ ] Unknown sector 404s: `curl -s -o /dev/null -w "%{http_code}" localhost:3001/markets/not-a-sector` → `404`
 #### Manual Verification
 - [ ] `/markets` table sorts by each column; totals render.
@@ -328,8 +328,8 @@ Point the nav and search at the real routes and make the landing page an overvie
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 #### Manual Verification
 - [ ] Each nav link routes to its own page (no more everything-on-`/`).
 - [ ] Header search from any page lands on `/companies` pre-filtered by the typed query.

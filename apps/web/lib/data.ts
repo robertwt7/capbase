@@ -12,6 +12,7 @@ import {
   PREVIEW_LIMIT,
   type Company,
   type CompanyDetailResponse,
+  type InvestorSummary,
   type MarketStat,
   type MarketTotals,
 } from '@repo/api';
@@ -33,6 +34,7 @@ export type {
   DiversitySignal,
   CompanyFinancials,
   Company,
+  InvestorSummary,
   MarketStat,
   MarketTotals,
 } from '@repo/api';
@@ -318,6 +320,35 @@ const fallbackMarketTotals: MarketTotals = {
   quarter: 'Q2 2026',
 };
 
+// Illustrative offline fallback for the investor directory (mirrors the shape the
+// API's /investors aggregate returns). Not verified — demo figures only.
+const fallbackInvestors: InvestorSummary[] = [
+  {
+    name: 'Sequoia Capital',
+    type: 'Venture',
+    portfolioCount: 2,
+    sectors: ['Artificial intelligence', 'Fintech'],
+    companies: [
+      { slug: 'helia', name: 'Helia', domain: 'stripe.com' },
+      { slug: 'sable-labs', name: 'Sable Labs', domain: 'anthropic.com' },
+    ],
+  },
+  {
+    name: 'Founders Fund',
+    type: 'Venture',
+    portfolioCount: 1,
+    sectors: ['Fintech'],
+    companies: [{ slug: 'helia', name: 'Helia', domain: 'stripe.com' }],
+  },
+  {
+    name: 'Tiger Global',
+    type: 'Growth',
+    portfolioCount: 1,
+    sectors: ['Fintech'],
+    companies: [{ slug: 'helia', name: 'Helia', domain: 'stripe.com' }],
+  },
+];
+
 export async function getCompanies(): Promise<Company[]> {
   try {
     return await apiFetch<Company[]>('/companies');
@@ -359,6 +390,15 @@ export async function getCompanyDetail(
         },
       },
     };
+  }
+}
+
+export async function getInvestors(): Promise<InvestorSummary[]> {
+  try {
+    return await apiFetch<InvestorSummary[]>('/investors');
+  } catch (err) {
+    console.warn('[data] getInvestors fell back to mock data:', err);
+    return fallbackInvestors;
   }
 }
 
