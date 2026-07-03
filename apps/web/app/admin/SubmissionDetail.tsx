@@ -30,9 +30,13 @@ function extLink(url: string | null | undefined): ReactNode {
   );
 }
 
-// USD that participates in the "skip null" rule: null → omitted, not "Undisclosed".
-function usd(value: number | null | undefined): string | null {
-  return value === null || value === undefined ? null : formatUsd(value);
+// Money always renders — a null amount is *undisclosed*, not skipped. `formatUsd(null)`
+// yields "Undisclosed" (the app-wide convention), so a blank/undisclosed figure reads the
+// same here as on the public profile, and a future "submit as undisclosed" frontend just
+// sends null. (Optional links/metadata below still skip when empty — those are "not
+// provided", a different thing from "undisclosed".)
+function usd(value: number | null | undefined): string {
+  return formatUsd(value ?? null);
 }
 
 function companyFields(c: Company): Field[] {
