@@ -252,7 +252,7 @@ async function main() {
   const adminPassword = process.env.ADMIN_PASSWORD ?? 'admin12345';
   const admin = await prisma.user.create({
     data: {
-      email: process.env.ADMIN_EMAIL ?? 'admin@capbase.dev',
+      email: process.env.ADMIN_EMAIL ?? 'admin@capbase.fyi',
       name: process.env.ADMIN_NAME ?? 'Capbase Admin',
       passwordHash: await bcrypt.hash(adminPassword, 10),
       role: 'ADMIN',
@@ -261,7 +261,7 @@ async function main() {
 
   await prisma.user.create({
     data: {
-      email: 'contributor@capbase.dev',
+      email: 'contributor@capbase.fyi',
       name: 'Demo Contributor',
       passwordHash: await bcrypt.hash('contributor12345', 10),
       role: 'USER',

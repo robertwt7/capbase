@@ -58,7 +58,7 @@ make dev            # run web (:3001), api (:3000), jobs (:3002) with hot reload
 ```
 
 Then open <http://localhost:3001>. Admin portal: <http://localhost:3001/admin>
-(default seeded admin — `admin@capbase.dev` / `admin12345`).
+(default seeded admin — `admin@capbase.fyi` / `admin12345`).
 
 Run a one-off ingestion of recent SEC Form D filings into your dev DB:
 

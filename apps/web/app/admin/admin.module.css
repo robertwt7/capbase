@@ -127,8 +127,16 @@
 
 .subject {
   display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.subjectText {
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 .label {
   font-family: var(--font-body);
@@ -155,6 +163,98 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Submitter cell — name over email, both mono. */
+.submitter {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.submitterName {
+  color: var(--ink);
+}
+.submitterEmail {
+  font-size: 11px;
+  color: var(--graphite-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Queue rows as disclosures ---------------------------------------- */
+/* The border moves from .row up to the disclosure wrapper so it wraps both
+   the summary and the (open) detail panel. */
+.rowDetails {
+  border-bottom: 1px solid var(--line);
+}
+.rowDetails:last-child {
+  border-bottom: none;
+}
+
+summary.row {
+  cursor: pointer;
+  list-style: none;
+  border-bottom: none;
+}
+summary.row::-webkit-details-marker {
+  display: none;
+}
+summary.row:hover {
+  background: var(--paper);
+}
+
+.chevron {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--graphite-500);
+  transition: transform 0.15s ease;
+}
+.rowDetails[open] .chevron {
+  transform: rotate(90deg);
+}
+
+.detailPanel {
+  padding: 4px 18px 18px;
+  background: var(--paper);
+  border-top: 1px dashed var(--line);
+}
+
+/* Two-column label/value grid — labels are the mono meta treatment. */
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 8px 18px;
+  margin: 12px 0 0;
+}
+.detailLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--graphite-500);
+  margin: 0;
+  align-self: baseline;
+}
+.detailValue {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detailLink {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.detailFoot {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+  margin: 16px 0 0;
 }
 
 /* ---- Login ------------------------------------------------------------ */
@@ -202,5 +302,15 @@
   }
   .rowHead {
     display: none;
+  }
+  .detailGrid {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .detailLabel {
+    margin-top: 8px;
+  }
+  .detailLabel:first-of-type {
+    margin-top: 0;
   }
 }

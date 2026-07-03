@@ -6,6 +6,7 @@ import { getSubmissions } from '../../lib/admin';
 import { requireAdmin } from '../../lib/auth';
 import { formatDate } from '../../lib/format';
 import { moderateAction } from './actions';
+import { SubmissionDetail } from './SubmissionDetail';
 
 import styles from './admin.module.css';
 
@@ -51,59 +52,72 @@ export default async function AdminQueue({
       {queue.items.length === 0 ? (
         <p className={styles.empty}>Nothing {active.toLowerCase()} right now.</p>
       ) : (
-        <div className={styles.table} role="table" aria-label="Moderation queue">
-          <div className={`${styles.row} ${styles.rowHead}`} role="row">
-            <span role="columnheader">Type</span>
-            <span role="columnheader">Submission</span>
-            <span role="columnheader">Submitted by</span>
-            <span role="columnheader">Date</span>
-            <span role="columnheader" className={styles.actionsHead}>
-              Decision
-            </span>
+        <div className={styles.table} aria-label="Moderation queue">
+          <div className={`${styles.row} ${styles.rowHead}`}>
+            <span>Type</span>
+            <span>Submission</span>
+            <span>Submitted by</span>
+            <span>Date</span>
+            <span className={styles.actionsHead}>Decision</span>
           </div>
 
           {queue.items.map((item) => (
-            <div key={`${item.type}-${item.id}`} className={styles.row} role="row">
-              <span role="cell">
-                <Badge variant="box" mono>
-                  {item.type}
-                </Badge>
-              </span>
-              <span role="cell" className={styles.subject}>
-                <span className={styles.label}>{item.label}</span>
-                {item.companyName ? (
-                  <span className={styles.company}>{item.companyName}</span>
-                ) : null}
-              </span>
-              <span role="cell" className={styles.meta}>
-                {item.submittedBy ? item.submittedBy.name : '—'}
-              </span>
-              <span role="cell" className={styles.meta}>
-                {formatDate(item.createdAt)}
-              </span>
-              <span role="cell" className={styles.actions}>
-                <form action={moderateAction.bind(null, item.type, item.id, 'APPROVED')}>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    type="submit"
-                    disabled={item.moderationStatus === 'APPROVED'}
-                  >
-                    Approve
-                  </Button>
-                </form>
-                <form action={moderateAction.bind(null, item.type, item.id, 'REJECTED')}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="submit"
-                    disabled={item.moderationStatus === 'REJECTED'}
-                  >
-                    Reject
-                  </Button>
-                </form>
-              </span>
-            </div>
+            <details key={`${item.type}-${item.id}`} className={styles.rowDetails}>
+              <summary className={styles.row}>
+                <span>
+                  <Badge variant="box" mono>
+                    {item.type}
+                  </Badge>
+                </span>
+                <span className={styles.subject}>
+                  <span className={styles.chevron} aria-hidden="true">
+                    ▸
+                  </span>
+                  <span className={styles.subjectText}>
+                    <span className={styles.label}>{item.label}</span>
+                    {item.companyName ? (
+                      <span className={styles.company}>{item.companyName}</span>
+                    ) : null}
+                  </span>
+                </span>
+                <span className={styles.meta}>
+                  {item.submittedBy ? (
+                    <span className={styles.submitter}>
+                      <span className={styles.submitterName}>{item.submittedBy.name}</span>
+                      <span className={styles.submitterEmail}>{item.submittedBy.email}</span>
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </span>
+                <span className={styles.meta}>{formatDate(item.createdAt)}</span>
+                <span className={styles.actions}>
+                  <form action={moderateAction.bind(null, item.type, item.id, 'APPROVED')}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      type="submit"
+                      disabled={item.moderationStatus === 'APPROVED'}
+                    >
+                      Approve
+                    </Button>
+                  </form>
+                  <form action={moderateAction.bind(null, item.type, item.id, 'REJECTED')}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="submit"
+                      disabled={item.moderationStatus === 'REJECTED'}
+                    >
+                      Reject
+                    </Button>
+                  </form>
+                </span>
+              </summary>
+              <div className={styles.detailPanel}>
+                <SubmissionDetail item={item} />
+              </div>
+            </details>
           ))}
         </div>
       )}

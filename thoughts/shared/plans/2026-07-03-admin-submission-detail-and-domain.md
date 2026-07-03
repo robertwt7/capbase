@@ -116,10 +116,10 @@ Demo credentials line → `admin@capbase.fyi`.
 ### Success Criteria
 
 #### Automated Verification
-- [ ] No stale references: `grep -rn "capbase\.dev" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.next --exclude-dir=dist --exclude-dir=thoughts` returns nothing
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
-- [ ] Re-seed succeeds: `yarn workspace @repo/db seed`
+- [x] No stale references: `grep -rn "capbase\.dev" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.next --exclude-dir=dist --exclude-dir=thoughts` returns nothing
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
+- [ ] Re-seed succeeds: `yarn workspace @repo/db seed` (destructive — left for the user's verification pass)
 
 #### Manual Verification
 - [ ] After re-seeding, `/admin/login` accepts `admin@capbase.fyi` / `admin12345` and rejects the old email.
@@ -205,9 +205,9 @@ CSS-module island for admin)
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
-- [ ] Web unit/type checks pass via the build (no dedicated web test suite exists)
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
+- [x] Web unit/type checks pass via the build (no dedicated web test suite exists)
 
 #### Manual Verification
 - [ ] `/admin` (Pending tab): clicking a company row expands it and shows the submitted

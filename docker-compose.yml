@@ -32,7 +32,7 @@ services:
       <<: *db-url
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.dev}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.fyi}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
       ADMIN_NAME: ${ADMIN_NAME:-Capbase Admin}
     ports:
@@ -91,7 +91,7 @@ services:
     profiles: ['seed']
     environment:
       <<: *db-url
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.dev}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.fyi}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
       ADMIN_NAME: ${ADMIN_NAME:-Capbase Admin}
     depends_on:

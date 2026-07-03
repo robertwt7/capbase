@@ -37,7 +37,7 @@ describe('Submissions & moderation (e2e)', () => {
 
     const login = await request(app.getHttpServer())
       .post('/auth/login')
-      .send({ email: 'admin@capbase.dev', password: 'admin12345' })
+      .send({ email: 'admin@capbase.fyi', password: 'admin12345' })
       .expect(201);
     expect(login.body.user.role).toBe('ADMIN');
     adminToken = login.body.accessToken;
