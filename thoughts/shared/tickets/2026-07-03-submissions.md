@@ -1,0 +1,4 @@
+at the moment we're only able to submit companies. what about other things? like seedfunding round, investors, people. we need some other things right? like acquisition as well, diversity data. i see all the buttons but i don't see any forms when i click it
+
+also it seems like when some data are already there we're not able to add more, we need to be able to add more no? maybe add just 1 button on the top right or something to propose change or to add something. then there should be a drop down of different forms within a company, like the investors, or the people, or the acquisitions and the funding round
+don't create a button for everything it looks bad. we need to make it easy for user to contribute, propose changes or add submission. this also needs some change on the capbase admin too!

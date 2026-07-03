@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { CompaniesModule } from './companies/companies.module';
+import { InvestorsModule } from './investors/investors.module';
 import { MarketModule } from './market/market.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
@@ -18,6 +19,7 @@ import { AppController } from './app.controller';
     UsersModule,
     AuthModule,
     CompaniesModule,
+    InvestorsModule,
     MarketModule,
     AdminModule,
   ],
