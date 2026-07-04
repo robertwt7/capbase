@@ -1,5 +1,6 @@
 import type {
   CreateAcquisitionInput,
+  CreateChangeProposalInput,
   CreateCompanyInput,
   CreateDiversityInput,
   CreateExitInput,
@@ -81,6 +82,17 @@ export async function submitExit(slug: string, input: CreateExitInput) {
 export async function submitDiversity(slug: string, input: CreateDiversityInput) {
   const token = await getToken();
   return apiFetch<{ id: string; moderationStatus: string }>(`/companies/${slug}/diversity`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    body: JSON.stringify(input),
+    cache: 'no-store',
+  });
+}
+
+/** Propose a field-level correction to an existing company (created as PENDING). */
+export async function submitProposal(slug: string, input: CreateChangeProposalInput) {
+  const token = await getToken();
+  return apiFetch<{ id: string; moderationStatus: string }>(`/companies/${slug}/proposals`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token ?? ''}` },
     body: JSON.stringify(input),

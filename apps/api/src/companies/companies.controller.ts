@@ -14,6 +14,7 @@ import {
   CreateInvestorDto,
   CreatePersonDto,
 } from './dto/contributions.dto';
+import { CreateChangeProposalDto } from './dto/create-proposal.dto';
 
 @Controller('companies')
 export class CompaniesController {
@@ -101,5 +102,15 @@ export class CompaniesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.companies.addDiversity(slug, dto, user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':slug/proposals')
+  propose(
+    @Param('slug') slug: string,
+    @Body() dto: CreateChangeProposalDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.companies.proposeChange(slug, dto, user.id);
   }
 }

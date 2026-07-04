@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 import type {
   AcquisitionDeal,
+  ChangeProposalReview,
   Company,
+  CompanyEditFields,
   DiversitySignal,
   ExitEvent,
   FundingRound,
@@ -159,12 +161,72 @@ function buildFields(item: PendingSubmission): Field[] {
   }
 }
 
+const EDIT_FIELD_LABELS: Record<keyof CompanyEditFields, string> = {
+  name: 'Name',
+  domain: 'Domain',
+  oneLiner: 'One-liner',
+  description: 'Description',
+  hq: 'HQ',
+  founded: 'Founded',
+  headcount: 'Headcount',
+  industry: 'Industry',
+  status: 'Status',
+  stage: 'Stage',
+  totalRaisedUsd: 'Total raised',
+  lastValuationUsd: 'Last valuation',
+  websiteUrl: 'Website',
+  linkedinUrl: 'LinkedIn',
+  twitterUrl: 'Twitter',
+  legalName: 'Legal name',
+  operatingStatus: 'Operating status',
+  companyType: 'Company type',
+  primarySector: 'Sector',
+};
+
+// Renders one side of a diff cell. Unlike the row payloads above, a proposal
+// value can legitimately be absent/null — that renders as "—", not skipped.
+function formatEditValue(key: keyof CompanyEditFields, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (key === 'totalRaisedUsd' || key === 'lastValuationUsd') return usd(value as number);
+  if (key === 'headcount') return formatCount(value as number);
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value);
+}
+
+/** Field / current → proposed rows for an edit proposal, one per changed field. */
+function ProposalDiff({ review }: { review: ChangeProposalReview }) {
+  const keys = Object.keys(review.changes) as (keyof CompanyEditFields)[];
+  return (
+    <>
+      <div className={styles.diffGrid}>
+        {keys.map((key) => (
+          <Fragment key={key}>
+            <span className={styles.detailLabel}>{EDIT_FIELD_LABELS[key] ?? key}</span>
+            <span className={styles.diffCurrent}>{formatEditValue(key, review.current[key])}</span>
+            <span className={styles.diffArrow} aria-hidden="true">
+              →
+            </span>
+            <span className={styles.diffProposed}>{formatEditValue(key, review.changes[key])}</span>
+          </Fragment>
+        ))}
+      </div>
+      {review.note ? (
+        <p className={styles.detailNote}>
+          <span className={styles.detailNoteLabel}>Submitter&apos;s note</span>
+          {review.note}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function isEmpty(value: ReactNode): boolean {
   return value === null || value === undefined || value === '';
 }
 
 export function SubmissionDetail({ item }: { item: PendingSubmission }) {
-  const fields = buildFields(item).filter((f) => !isEmpty(f.value));
+  const isProposal = item.type === 'proposal';
+  const fields = isProposal ? [] : buildFields(item).filter((f) => !isEmpty(f.value));
 
   // Child submissions carry their parent company; link it to the public profile.
   const companyLink =
@@ -190,6 +252,7 @@ export function SubmissionDetail({ item }: { item: PendingSubmission }) {
           </Fragment>
         ))}
       </dl>
+      {isProposal ? <ProposalDiff review={item.data as ChangeProposalReview} /> : null}
       <p className={styles.detailFoot}>
         {item.submittedBy
           ? `Submitted by ${item.submittedBy.name} <${item.submittedBy.email}> · ${formatDate(item.createdAt)}`

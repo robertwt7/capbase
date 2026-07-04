@@ -5,3 +5,4 @@ export * from './domain/inputs';
 export * from './domain/auth';
 export * from './domain/moderation';
 export * from './domain/contributions';
+export * from './domain/proposals';

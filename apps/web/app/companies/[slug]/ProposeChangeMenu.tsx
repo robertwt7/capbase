@@ -7,13 +7,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui';
 
 import { CONTRIBUTION_TYPES, TYPE_LABELS } from './contribute/types';
 
 /** Single entry point into the contribution hub: one dropdown listing every
-    child entity type. Auth is handled by the hub page itself (login redirect). */
+    child entity type, plus the whole-company edit proposal. Auth is handled by
+    the hub page itself (login redirect). */
 export function ProposeChangeMenu({ slug }: { slug: string }) {
   return (
     <DropdownMenu>
@@ -28,6 +30,10 @@ export function ProposeChangeMenu({ slug }: { slug: string }) {
             <Link href={`/companies/${slug}/contribute?type=${type}`}>{TYPE_LABELS[type]}</Link>
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href={`/companies/${slug}/contribute?type=edit`}>Edit company details</Link>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

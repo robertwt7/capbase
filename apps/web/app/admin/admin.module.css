@@ -286,6 +286,49 @@ summary.row:hover {
   margin: 16px 0 0;
 }
 
+/* Edit-proposal diff: label / current → proposed, one row per changed field.
+   Emphasis is weight only — the proposed value carries the ink. */
+.diffGrid {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr auto 1fr;
+  gap: 8px 18px;
+  align-items: baseline;
+  margin: 12px 0 0;
+}
+.diffCurrent {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--graphite-500);
+  overflow-wrap: anywhere;
+}
+.diffArrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--graphite-500);
+}
+.diffProposed {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.detailNote {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink);
+  margin: 14px 0 0;
+}
+.detailNoteLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--graphite-500);
+  margin-right: 8px;
+}
+
 /* ---- Login ------------------------------------------------------------ */
 .loginMain {
   display: flex;
@@ -340,6 +383,17 @@ summary.row:hover {
     margin-top: 8px;
   }
   .detailLabel:first-of-type {
+    margin-top: 0;
+  }
+  /* Diff rows stack: label, current, arrow, proposed. */
+  .diffGrid {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .diffGrid .detailLabel {
+    margin-top: 8px;
+  }
+  .diffGrid .detailLabel:first-of-type {
     margin-top: 0;
   }
 }

@@ -50,6 +50,7 @@ export class UsersService {
       this.prisma.acquisitionDeal.findFirst(opts),
       this.prisma.exitEvent.findFirst(opts),
       this.prisma.diversitySignal.findFirst(opts),
+      this.prisma.changeProposal.findFirst(opts),
     ]);
     const dates = rows
       .map((r) => r?.createdAt)
@@ -76,7 +77,7 @@ export class UsersService {
     const order = { orderBy: { createdAt: 'desc' as const } };
     const withCompany = { include: { company: { select: { slug: true, name: true } } }, ...order };
 
-    const [companies, rounds, people, investors, acquisitions, exits, diversity] =
+    const [companies, rounds, people, investors, acquisitions, exits, diversity, proposals] =
       await Promise.all([
         this.prisma.company.findMany({ where, ...order }),
         this.prisma.fundingRound.findMany({ where, ...withCompany }),
@@ -85,6 +86,7 @@ export class UsersService {
         this.prisma.acquisitionDeal.findMany({ where, ...withCompany }),
         this.prisma.exitEvent.findMany({ where, ...withCompany }),
         this.prisma.diversitySignal.findMany({ where, ...withCompany }),
+        this.prisma.changeProposal.findMany({ where, ...withCompany }),
       ]);
 
     const items: MyContribution[] = [
@@ -95,6 +97,9 @@ export class UsersService {
       ...acquisitions.map((a) => this.toItem('acquisition', a, a.company, `Acquired ${a.target}`)),
       ...exits.map((e) => this.toItem('exit', e, e.company, `${e.type} exit`)),
       ...diversity.map((d) => this.toItem('diversity', d, d.company, d.label)),
+      ...proposals.map((p) =>
+        this.toItem('proposal', p, p.company, `Edit: ${Object.keys(p.changes as object).join(', ')}`),
+      ),
     ];
     return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }

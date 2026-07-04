@@ -7,6 +7,7 @@ import { requireUser } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
 import { cn } from '@/lib/utils';
 
+import { EditCompanyForm } from './EditCompanyForm';
 import {
   AcquisitionForm,
   DiversityForm,
@@ -16,7 +17,7 @@ import {
   RoundForm,
   type ContributionFormProps,
 } from './forms';
-import { CONTRIBUTION_TYPES, TYPE_LABELS, type ContributionType } from './types';
+import { HUB_TYPES, TYPE_LABELS, type ContributionType, type HubType } from './types';
 
 const FORMS = {
   round: RoundForm,
@@ -36,8 +37,8 @@ export default async function ContributeToCompanyPage({
 }) {
   const { slug } = await params;
   const { type: requested } = await searchParams;
-  const type: ContributionType = CONTRIBUTION_TYPES.includes(requested as ContributionType)
-    ? (requested as ContributionType)
+  const type: HubType = HUB_TYPES.includes(requested as HubType)
+    ? (requested as HubType)
     : 'round';
 
   await requireUser(`/companies/${slug}/contribute?type=${type}`);
@@ -48,7 +49,9 @@ export default async function ContributeToCompanyPage({
   }
   const { company } = result;
 
-  const ActiveForm = FORMS[type];
+  // 'edit' is the whole-company proposal form (needs the live company); the
+  // rest are the child-entity contribution forms.
+  const ActiveForm = type === 'edit' ? null : FORMS[type];
 
   return (
     <PageContainer as="main" className="pt-8 pb-20">
@@ -74,7 +77,7 @@ export default async function ContributeToCompanyPage({
           aria-label="Contribution type"
           className="mt-7 flex flex-wrap gap-x-5 gap-y-1 border-b border-line"
         >
-          {CONTRIBUTION_TYPES.map((t) => (
+          {HUB_TYPES.map((t) => (
             <Link
               key={t}
               href={`/companies/${company.slug}/contribute?type=${t}`}
@@ -91,7 +94,11 @@ export default async function ContributeToCompanyPage({
         </nav>
 
         <div className="mt-7">
-          <ActiveForm slug={company.slug} companyName={company.name} />
+          {ActiveForm ? (
+            <ActiveForm slug={company.slug} companyName={company.name} />
+          ) : (
+            <EditCompanyForm slug={company.slug} companyName={company.name} company={company} />
+          )}
         </div>
       </div>
     </PageContainer>

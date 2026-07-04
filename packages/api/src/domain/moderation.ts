@@ -10,7 +10,8 @@ export type ReviewableType =
   | 'investor'
   | 'acquisition'
   | 'exit'
-  | 'diversity';
+  | 'diversity'
+  | 'proposal';
 
 /** A single row awaiting (or having undergone) moderation. */
 export interface PendingSubmission {

@@ -1,15 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
+  ChangeProposalReview,
+  CompanyEditFields,
   PendingSubmission,
   PendingSubmissionsResponse,
   ReviewableType,
   ReviewStatus,
 } from '@repo/api';
+import type { Company as DbCompany } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
   toAcquisition,
   toCompany,
+  toCompanyEditFields,
   toDiversity,
   toExit,
   toFundingRound,
@@ -22,6 +26,30 @@ const submittedBy = { select: { id: true, name: true, email: true } } as const;
 type Submitter = { id: string; name: string; email: string } | null;
 type CompanyRef = { slug: string; name: string } | null;
 
+/** The company's live values for exactly the keys a proposal touches, so the
+    reviewer diffs against what the row says now (not at submit time). */
+function pickCurrent(company: DbCompany, changes: CompanyEditFields): CompanyEditFields {
+  const view = toCompanyEditFields(company);
+  const current: CompanyEditFields = {};
+  for (const key of Object.keys(changes) as (keyof CompanyEditFields)[]) {
+    (current as Record<string, unknown>)[key] = view[key];
+  }
+  return current;
+}
+
+/** Company update payload from a proposal diff: BigInt money conversions, all
+    other whitelisted fields verbatim. */
+function companyDataFromChanges(changes: CompanyEditFields) {
+  const { totalRaisedUsd, lastValuationUsd, ...rest } = changes;
+  return {
+    ...rest,
+    ...(totalRaisedUsd !== undefined ? { totalRaisedUsd: BigInt(totalRaisedUsd) } : {}),
+    ...(lastValuationUsd !== undefined
+      ? { lastValuationUsd: lastValuationUsd === null ? null : BigInt(lastValuationUsd) }
+      : {}),
+  };
+}
+
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
@@ -30,7 +58,7 @@ export class AdminService {
     const where = { moderationStatus: status };
     const order = { orderBy: { createdAt: 'desc' as const } };
 
-    const [companies, rounds, people, investors, acquisitions, exits, diversity] =
+    const [companies, rounds, people, investors, acquisitions, exits, diversity, proposals] =
       await Promise.all([
         this.prisma.company.findMany({ where, include: { submittedBy }, ...order }),
         this.prisma.fundingRound.findMany({
@@ -55,6 +83,11 @@ export class AdminService {
           include: { submittedBy, company: true },
           ...order,
         }),
+        this.prisma.changeProposal.findMany({
+          where,
+          include: { submittedBy, company: true },
+          ...order,
+        }),
       ]);
 
     const items: PendingSubmission[] = [
@@ -71,6 +104,21 @@ export class AdminService {
       ),
       ...exits.map((e) => this.item('exit', e, e.company, `${e.type} exit`, toExit(e))),
       ...diversity.map((d) => this.item('diversity', d, d.company, d.label, toDiversity(d))),
+      ...proposals.map((p) => {
+        const changes = p.changes as CompanyEditFields;
+        const review: ChangeProposalReview = {
+          changes,
+          current: pickCurrent(p.company, changes),
+          note: p.note,
+        };
+        return this.item(
+          'proposal',
+          p,
+          p.company,
+          `Edit ${Object.keys(changes).join(', ')}`,
+          review,
+        );
+      }),
     ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
     return {
@@ -83,6 +131,7 @@ export class AdminService {
         acquisition: acquisitions.length,
         exit: exits.length,
         diversity: diversity.length,
+        proposal: proposals.length,
       },
       items,
     };
@@ -127,11 +176,34 @@ export class AdminService {
             data: { moderationStatus: status },
           });
           break;
+        case 'proposal':
+          if (status === 'APPROVED') {
+            await this.applyProposal(id);
+          } else {
+            await this.prisma.changeProposal.update({
+              where: { id },
+              data: { moderationStatus: status },
+            });
+          }
+          break;
       }
     } catch {
       throw new NotFoundException(`${type} "${id}" not found`);
     }
     return { id, type, moderationStatus: status };
+  }
+
+  /** Approving a proposal applies its diff to the Company row and flips the
+      proposal's status, atomically. Re-approving re-applies the same values. */
+  private async applyProposal(id: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const proposal = await tx.changeProposal.findUniqueOrThrow({ where: { id } });
+      await tx.company.update({
+        where: { id: proposal.companyId },
+        data: companyDataFromChanges(proposal.changes as CompanyEditFields),
+      });
+      await tx.changeProposal.update({ where: { id }, data: { moderationStatus: 'APPROVED' } });
+    });
   }
 
   private item(

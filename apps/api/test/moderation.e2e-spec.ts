@@ -35,9 +35,14 @@ describe('Submissions & moderation (e2e)', () => {
     expect(reg.body.user.role).toBe('USER');
     userToken = reg.body.accessToken;
 
+    // The seeded admin credentials come from env (see packages/db/prisma/seed.ts),
+    // loaded into process.env by ConfigModule during app.init().
     const login = await request(app.getHttpServer())
       .post('/auth/login')
-      .send({ email: 'admin@capbase.fyi', password: 'admin12345' })
+      .send({
+        email: process.env.ADMIN_EMAIL ?? 'admin@capbase.fyi',
+        password: process.env.ADMIN_PASSWORD ?? 'admin12345',
+      })
       .expect(201);
     expect(login.body.user.role).toBe('ADMIN');
     adminToken = login.body.accessToken;
@@ -107,5 +112,85 @@ describe('Submissions & moderation (e2e)', () => {
     expect(after.body.company.rounds.some((r: { name: string }) => r.name === roundName)).toBe(
       true,
     );
+  });
+
+  it('applies an approved edit proposal to the company', async () => {
+    // Read the live values so the proposal is a real diff.
+    const before = await request(app.getHttpServer())
+      .get('/companies/helia')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    const newHq = `E2E City ${Date.now()}`;
+    const newHeadcount = before.body.company.headcount + 1;
+
+    // A no-op diff is rejected outright.
+    await request(app.getHttpServer())
+      .post('/companies/helia/proposals')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ changes: { hq: before.body.company.hq } })
+      .expect(400);
+
+    // Submit a real proposal (PENDING).
+    const submit = await request(app.getHttpServer())
+      .post('/companies/helia/proposals')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({
+        changes: { hq: newHq, headcount: newHeadcount },
+        note: 'e2e correction',
+      })
+      .expect(201);
+    expect(submit.body.moderationStatus).toBe('PENDING');
+    const proposalId = submit.body.id;
+
+    // The queue carries the diff plus the company's current values.
+    const queue = await request(app.getHttpServer())
+      .get('/admin/submissions?status=PENDING')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const item = queue.body.items.find((i: { id: string }) => i.id === proposalId);
+    expect(item.type).toBe('proposal');
+    expect(item.data.changes).toEqual({ hq: newHq, headcount: newHeadcount });
+    expect(item.data.current.hq).toBe(before.body.company.hq);
+    expect(item.data.note).toBe('e2e correction');
+    expect(queue.body.countsByType.proposal).toBeGreaterThanOrEqual(1);
+
+    // Approve — the company row is updated in the same stroke.
+    await request(app.getHttpServer())
+      .patch(`/admin/submissions/proposal/${proposalId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'APPROVED' })
+      .expect(200);
+
+    const after = await request(app.getHttpServer())
+      .get('/companies/helia')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(after.body.company.hq).toBe(newHq);
+    expect(after.body.company.headcount).toBe(newHeadcount);
+  });
+
+  it('leaves the company untouched when a proposal is rejected', async () => {
+    const before = await request(app.getHttpServer())
+      .get('/companies/helia')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+
+    const submit = await request(app.getHttpServer())
+      .post('/companies/helia/proposals')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ changes: { oneLiner: 'Rejected e2e one-liner' } })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/admin/submissions/proposal/${submit.body.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'REJECTED' })
+      .expect(200);
+
+    const after = await request(app.getHttpServer())
+      .get('/companies/helia')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(after.body.company.oneLiner).toBe(before.body.company.oneLiner);
   });
 });

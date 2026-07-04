@@ -51,13 +51,17 @@ import {
 export type ContributionFormProps = { slug: string; companyName: string };
 
 /** Shared chrome for every contribution form: submit plumbing, form-level
-    errors, and the post-submit success panel with an "Add another" reset. */
-function ContributionShell<T extends FieldValues>({
+    errors, and the post-submit success panel with an "Add another" reset.
+    Also used by EditCompanyForm.tsx, which overrides the success copy. */
+export function ContributionShell<T extends FieldValues>({
   form,
   action,
   slug,
   companyName,
   submitLabel,
+  successTitle = 'Submitted for review',
+  successBody = 'Thanks for contributing — it will appear on the profile once an admin approves it.',
+  resetLabel = 'Add another',
   children,
 }: {
   form: UseFormReturn<T>;
@@ -65,6 +69,9 @@ function ContributionShell<T extends FieldValues>({
   slug: string;
   companyName: string;
   submitLabel: string;
+  successTitle?: string;
+  successBody?: string;
+  resetLabel?: string;
   children: ReactNode;
 }) {
   const [submitted, setSubmitted] = useState(false);
@@ -84,12 +91,8 @@ function ContributionShell<T extends FieldValues>({
   if (submitted) {
     return (
       <Card emphasis className="p-6">
-        <p className="font-display text-lg font-bold tracking-tight text-ink">
-          Submitted for review
-        </p>
-        <p className="mt-2 text-sm text-graphite-500">
-          Thanks for contributing — it will appear on the profile once an admin approves it.
-        </p>
+        <p className="font-display text-lg font-bold tracking-tight text-ink">{successTitle}</p>
+        <p className="mt-2 text-sm text-graphite-500">{successBody}</p>
         <div className="mt-5 flex items-center gap-4">
           <Button variant="primary" shape="pill" size="sm" href={`/companies/${slug}`}>
             Back to {companyName}
@@ -102,7 +105,7 @@ function ContributionShell<T extends FieldValues>({
               setSubmitted(false);
             }}
           >
-            Add another
+            {resetLabel}
           </Button>
         </div>
       </Card>

@@ -9,8 +9,11 @@ import {
   submitExit,
   submitInvestor,
   submitPerson,
+  submitProposal,
   submitRound,
 } from '@/lib/contribute';
+import { getCompanyDetail } from '@/lib/data';
+import { editFormSchema, toProposalInput } from '@/lib/validation/proposal';
 import { acquisitionFormSchema, toAcquisitionInput } from '@/lib/validation/acquisition';
 import { diversityFormSchema, toDiversityInput } from '@/lib/validation/diversity';
 import { exitFormSchema, toExitInput } from '@/lib/validation/exit';
@@ -82,4 +85,41 @@ export async function addDiversityAction(slug: string, values: unknown): Promise
   return handleContribution(slug, diversityFormSchema.safeParse(values), (data) =>
     submitDiversity(slug, toDiversityInput(data)),
   );
+}
+
+/** Edit proposal: diff the submitted values against the company's *current*
+    values (server-authoritative — the client never sends "old" state) and
+    submit only the changed fields. */
+export async function proposeEditAction(slug: string, values: unknown): Promise<ActionResult> {
+  if (!slug) {
+    return { ok: false, formError: 'Missing company reference. Reload and try again.' };
+  }
+
+  const parsed = editFormSchema.safeParse(values);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      fieldErrors: fieldErrorsFromZod(parsed.error),
+      formError: 'Please fix the highlighted fields.',
+    };
+  }
+
+  const detail = await getCompanyDetail(slug);
+  if (!detail) {
+    return { ok: false, formError: 'Company not found. Reload and try again.' };
+  }
+
+  const input = toProposalInput(parsed.data, detail.company);
+  if (!input) {
+    return { ok: false, formError: "You haven't changed anything yet." };
+  }
+
+  try {
+    await submitProposal(slug, input);
+  } catch {
+    return { ok: false, formError: 'Submission failed. Please check your inputs and try again.' };
+  }
+
+  revalidatePath(`/companies/${slug}`);
+  return { ok: true };
 }

@@ -125,12 +125,12 @@ block) and on `User` (`schema.prisma:31-37` block).
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Migration applies cleanly on the dev DB: `yarn workspace @repo/db migrate`
-- [ ] Client regenerates and everything still builds: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Migration applies cleanly on the dev DB: `yarn workspace @repo/db migrate`
+- [x] Client regenerates and everything still builds: `yarn build`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
-- [ ] None (schema only).
+- [x] None (schema only).
 
 ---
 
@@ -264,10 +264,10 @@ Service `proposeChange(slug, dto, userId)`:
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes (type-check finds all `ReviewableType` consumers): `yarn build`
-- [ ] API unit tests pass: `yarn workspace api test`
-- [ ] E2E passes (with a test DB configured): `yarn workspace api test:e2e`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes (type-check finds all `ReviewableType` consumers): `yarn build`
+- [x] API unit tests pass: `yarn workspace api test`
+- [x] E2E passes (with a test DB configured): `yarn workspace api test:e2e`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
 - [ ] `curl` a proposal as a signed-in user → 201 PENDING; empty/no-op diff → 400.
@@ -327,8 +327,8 @@ note, and a server action that diffs against current values and submits only the
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
 - [ ] `?type=edit` shows every field pre-filled with live values.
@@ -370,8 +370,8 @@ stacked label/current/proposed under 760px) extending the `.detailGrid` treatmen
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
 - [ ] Expanding a proposal row shows only the changed fields, current vs proposed, with

@@ -35,6 +35,7 @@ model User {
   acquisitions AcquisitionDeal[]
   exits        ExitEvent[]
   diversity    DiversitySignal[]
+  proposals    ChangeProposal[]
 }
 
 model Company {
@@ -84,8 +85,29 @@ model Company {
   acquisitions AcquisitionDeal[]
   exits        ExitEvent[]
   diversity    DiversitySignal[]
+  proposals    ChangeProposal[]
 
   @@unique([externalSource, externalId])
+  @@index([moderationStatus])
+}
+
+// A proposed correction to an existing Company's fields. `changes` holds only
+// the edited fields ({ field: newValue }, whitelisted in the API DTO). Applied
+// to the Company row when moderation approves it.
+model ChangeProposal {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  changes   Json
+  note      String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([companyId])
   @@index([moderationStatus])
 }
 

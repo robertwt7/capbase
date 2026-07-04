@@ -1,14 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   CONTRIBUTION_WINDOW_DAYS,
   PREVIEW_LIMIT,
   type Company,
   type CompanyDetailResponse,
+  type CompanyEditFields,
   type Role,
 } from '@repo/api';
+import type { Prisma } from '@repo/db';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
-import { toCompany } from './company.mapper';
+import { toCompany, toCompanyEditFields } from './company.mapper';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
   CreateAcquisitionDto,
@@ -18,6 +20,7 @@ import {
   CreateInvestorDto,
   CreatePersonDto,
 } from './dto/contributions.dto';
+import { CreateChangeProposalDto } from './dto/create-proposal.dto';
 
 const approvedChildren = {
   rounds: {
@@ -40,6 +43,12 @@ const approvedChildren = {
 
 const money = (v: number | null | undefined): bigint | null =>
   v === null || v === undefined ? null : BigInt(v);
+
+// Field-level equality for proposal diffs (arrays = element-wise, i.e. `industry`).
+const sameValue = (a: unknown, b: unknown): boolean =>
+  Array.isArray(a) && Array.isArray(b)
+    ? a.length === b.length && a.every((v, i) => v === b[i])
+    : a === b;
 
 const WINDOW_MS = CONTRIBUTION_WINDOW_DAYS * 86_400_000;
 
@@ -229,6 +238,35 @@ export class CompaniesService {
         label: dto.label,
         value: dto.value,
         note: dto.note,
+        moderationStatus: 'PENDING',
+        submittedById: userId,
+      },
+    });
+    return { id: created.id, moderationStatus: created.moderationStatus };
+  }
+
+  /** Store a field-level edit proposal (PENDING). Keys equal to the company's
+      current values are stripped server-side; an empty diff is rejected. */
+  async proposeChange(slug: string, dto: CreateChangeProposalDto, userId: string) {
+    const company = await this.requireCompany(slug);
+    const current = toCompanyEditFields(company);
+
+    const cleaned: CompanyEditFields = {};
+    for (const key of Object.keys(dto.changes) as (keyof CompanyEditFields)[]) {
+      const value = dto.changes[key];
+      if (value === undefined) continue;
+      if (sameValue(value, current[key])) continue;
+      (cleaned as Record<string, unknown>)[key] = value;
+    }
+    if (Object.keys(cleaned).length === 0) {
+      throw new BadRequestException('No changes proposed');
+    }
+
+    const created = await this.prisma.changeProposal.create({
+      data: {
+        companyId: company.id,
+        changes: cleaned as Prisma.InputJsonValue,
+        note: dto.note ?? null,
         moderationStatus: 'PENDING',
         submittedById: userId,
       },

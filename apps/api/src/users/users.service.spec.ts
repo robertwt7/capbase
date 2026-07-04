@@ -11,6 +11,7 @@ const MODELS = [
   'acquisitionDeal',
   'exitEvent',
   'diversitySignal',
+  'changeProposal',
 ] as const;
 
 function prismaWith(findFirsts: Partial<Record<(typeof MODELS)[number], unknown>>) {
@@ -42,5 +43,10 @@ describe('UsersService.hasRecentContribution', () => {
   it('is false when the user has no contributions at all', async () => {
     const service = new UsersService(prismaWith({}));
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(false);
+  });
+
+  it('counts an edit proposal as a contribution', async () => {
+    const service = new UsersService(prismaWith({ changeProposal: { createdAt: new Date() } }));
+    await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
   });
 });

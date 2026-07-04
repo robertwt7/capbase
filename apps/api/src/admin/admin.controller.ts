@@ -25,6 +25,7 @@ const REVIEWABLE_TYPES: ReviewableType[] = [
   'acquisition',
   'exit',
   'diversity',
+  'proposal',
 ];
 
 @UseGuards(JwtAuthGuard, RolesGuard)

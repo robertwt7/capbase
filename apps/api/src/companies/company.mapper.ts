@@ -1,6 +1,7 @@
 import type {
   AcquisitionDeal,
   Company,
+  CompanyEditFields,
   CompanyStatus,
   CompanyType,
   DiversitySignal,
@@ -98,6 +99,33 @@ export function toExit(row: DbExitEvent): ExitEvent {
 
 export function toDiversity(row: DbDiversitySignal): DiversitySignal {
   return { label: row.label, value: row.value, note: row.note };
+}
+
+/** The proposal-editable view of a Company row, in `CompanyEditFields` value
+    shapes (BigInt → number). Used to strip no-op changes at submit time and to
+    show reviewers the current values at list time. */
+export function toCompanyEditFields(row: DbCompany): Required<CompanyEditFields> {
+  return {
+    name: row.name,
+    domain: row.domain,
+    oneLiner: row.oneLiner,
+    description: row.description,
+    hq: row.hq,
+    founded: row.founded,
+    headcount: row.headcount,
+    industry: row.industry,
+    status: row.status as CompanyStatus,
+    stage: row.stage as Stage,
+    totalRaisedUsd: Number(row.totalRaisedUsd),
+    lastValuationUsd: numN(row.lastValuationUsd),
+    websiteUrl: row.websiteUrl,
+    linkedinUrl: row.linkedinUrl,
+    twitterUrl: row.twitterUrl,
+    legalName: row.legalName,
+    operatingStatus: row.operatingStatus as OperatingStatus | null,
+    companyType: row.companyType as CompanyType | null,
+    primarySector: row.primarySector as Sector | null,
+  };
 }
 
 /** Maps a Company row (optionally with relations) to the shared Company type. */
