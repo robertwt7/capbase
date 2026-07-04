@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   CONTRIBUTION_WINDOW_DAYS,
   type MyContribution,
   type ReviewableType,
   type ReviewStatus,
   type Role,
+  type SavedCompanyItem,
+  type SavedStatus,
 } from '@repo/api';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,6 +35,69 @@ export class UsersService {
 
   create(data: { email: string; name: string; passwordHash: string; role?: Role }) {
     return this.prisma.user.create({ data });
+  }
+
+  update(id: string, data: { name?: string; email?: string; passwordHash?: string }) {
+    return this.prisma.user.update({ where: { id }, data });
+  }
+
+  /** The user's saved companies (approved only), newest first. */
+  async listSavedCompanies(userId: string): Promise<SavedCompanyItem[]> {
+    const rows = await this.prisma.savedCompany.findMany({
+      where: { userId, company: { moderationStatus: 'APPROVED' } },
+      include: {
+        company: {
+          select: {
+            slug: true,
+            name: true,
+            domain: true,
+            oneLiner: true,
+            stage: true,
+            totalRaisedUsd: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((r) => ({
+      slug: r.company.slug,
+      name: r.company.name,
+      domain: r.company.domain,
+      oneLiner: r.company.oneLiner,
+      stage: r.company.stage as SavedCompanyItem['stage'],
+      totalRaisedUsd: Number(r.company.totalRaisedUsd),
+      savedAt: r.createdAt.toISOString(),
+    }));
+  }
+
+  /** Idempotently save an approved company by slug. */
+  async saveCompany(userId: string, slug: string): Promise<SavedStatus> {
+    const company = await this.prisma.company.findFirst({
+      where: { slug, moderationStatus: 'APPROVED' },
+      select: { id: true },
+    });
+    if (!company) throw new NotFoundException('Company not found');
+    await this.prisma.savedCompany.upsert({
+      where: { userId_companyId: { userId, companyId: company.id } },
+      create: { userId, companyId: company.id },
+      update: {},
+    });
+    return { saved: true };
+  }
+
+  /** Idempotently remove a saved company by slug. */
+  async unsaveCompany(userId: string, slug: string): Promise<SavedStatus> {
+    await this.prisma.savedCompany.deleteMany({
+      where: { userId, company: { slug } },
+    });
+    return { saved: false };
+  }
+
+  async isCompanySaved(userId: string, slug: string): Promise<boolean> {
+    const count = await this.prisma.savedCompany.count({
+      where: { userId, company: { slug } },
+    });
+    return count > 0;
   }
 
   /** Most recent contribution timestamp across all contributable models, or null. */

@@ -4,10 +4,12 @@ import type { CompanyAccess } from '@repo/api';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { FundingLadder } from '@/components/FundingLadder';
+import { SaveCompanyButton } from '@/components/SaveCompanyButton';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '@/lib/format';
+import { getSavedStatus } from '@/lib/watchlist';
 
 import { ProposeChangeMenu } from './ProposeChangeMenu';
 
@@ -24,6 +26,9 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
   const { company, access } = result;
   const signedIn = session !== null;
+  const saved = signedIn
+    ? (await getSavedStatus(slug).catch(() => ({ saved: false }))).saved
+    : false;
 
   return (
     <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
@@ -34,7 +39,18 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         >
           ← All companies
         </Link>
-        <ProposeChangeMenu slug={company.slug} />
+        <div className="flex items-center gap-2.5">
+          {signedIn && <SaveCompanyButton slug={company.slug} saved={saved} />}
+          <Button
+            variant="outline"
+            shape="pill"
+            size="sm"
+            href={`/compare?companies=${company.slug}`}
+          >
+            Compare
+          </Button>
+          <ProposeChangeMenu slug={company.slug} />
+        </div>
       </div>
 
       <header className="grid grid-cols-[auto_1fr_auto] items-start gap-7 border-b border-ink pt-7 pb-9 max-[860px]:grid-cols-[auto_1fr] max-[600px]:grid-cols-1">

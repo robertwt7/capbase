@@ -28,14 +28,15 @@ model User {
   role         Role     @default(USER)
   createdAt    DateTime @default(now())
 
-  companies    Company[]
-  rounds       FundingRound[]
-  people       Person[]
-  investors    InvestorHolding[]
-  acquisitions AcquisitionDeal[]
-  exits        ExitEvent[]
-  diversity    DiversitySignal[]
-  proposals    ChangeProposal[]
+  companies      Company[]
+  rounds         FundingRound[]
+  people         Person[]
+  investors      InvestorHolding[]
+  acquisitions   AcquisitionDeal[]
+  exits          ExitEvent[]
+  diversity      DiversitySignal[]
+  proposals      ChangeProposal[]
+  savedCompanies SavedCompany[]
 }
 
 model Company {
@@ -86,9 +87,23 @@ model Company {
   exits        ExitEvent[]
   diversity    DiversitySignal[]
   proposals    ChangeProposal[]
+  savedBy      SavedCompany[]
 
   @@unique([externalSource, externalId])
   @@index([moderationStatus])
+}
+
+// A company pinned to a user's personal watchlist.
+model SavedCompany {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, companyId])
+  @@index([userId])
 }
 
 // A proposed correction to an existing Company's fields. `changes` holds only

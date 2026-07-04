@@ -1,0 +1,1 @@
+our user can't self serve, when they click the profile they can't change the password, name and everything. also we might want to add some more features like save company to the user's list. then unrelated as well but user also need to be able to compare companies too. like add companies to comparison and compare the data side by side

@@ -4,13 +4,18 @@ import type { MyContribution } from '@repo/api';
 import { Badge, Button, Card } from '../../../components/ui';
 import { getMyContributions, requireUser } from '../../../lib/auth';
 import { formatDate } from '../../../lib/format';
+import { getSavedCompanies } from '../../../lib/watchlist';
 import { logout } from '../actions';
+import { SavedCompanies } from './SavedCompanies';
 
 import styles from '../account.module.css';
 
 export default async function ProfilePage() {
   const user = await requireUser('/profile');
-  const { access, items } = await getMyContributions();
+  const [{ access, items }, savedCompanies] = await Promise.all([
+    getMyContributions(),
+    getSavedCompanies(),
+  ]);
 
   return (
     <main className={styles.profileMain}>
@@ -30,6 +35,9 @@ export default async function ProfilePage() {
           <Button variant="primary" shape="pill" size="sm" href="/contribute">
             Contribute
           </Button>
+          <Button variant="outline" shape="pill" size="sm" href="/profile/settings">
+            Account settings
+          </Button>
           <form action={logout}>
             <Button variant="ghost" size="sm" type="submit">
               Sign out
@@ -39,6 +47,8 @@ export default async function ProfilePage() {
       </div>
 
       <AccessPanel access={access} role={user.role} />
+
+      <SavedCompanies items={savedCompanies} />
 
       <h2 className={styles.sectionTitle}>Your contributions</h2>
       {items.length === 0 ? (
