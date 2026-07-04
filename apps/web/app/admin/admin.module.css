@@ -90,6 +90,35 @@
   font-weight: 600;
 }
 
+/* Per-type filter chips under the status tabs. Strictly monochrome: the active
+   chip is signalled by border + weight, never hue. */
+.typeFilter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -8px 0 24px;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--graphite-500);
+  text-decoration: none;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.chip:hover {
+  color: var(--ink);
+}
+.chipActive {
+  color: var(--ink);
+  border-color: var(--ink);
+  font-weight: 600;
+}
+
 .empty {
   font-family: var(--font-body);
   color: var(--graphite-500);

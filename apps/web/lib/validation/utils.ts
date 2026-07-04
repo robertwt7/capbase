@@ -1,5 +1,11 @@
 import type { FieldValues, Path, UseFormSetError } from 'react-hook-form';
-import type { z } from 'zod';
+import { z } from 'zod';
+
+/** Optional URL field: empty string or a full http(s) URL. */
+export const urlOrEmpty = z
+  .string()
+  .trim()
+  .refine((v) => v === '' || /^https?:\/\/\S+\.\S+/.test(v), 'Enter a full URL (https://…).');
 
 /** Collapse a ZodError into a flat { field: firstMessage } map, keyed by the
     dotted field path. Used by server actions to report validation failures in

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ReviewStatus } from '@repo/api';
+import type { ReviewableType, ReviewStatus } from '@repo/api';
 
 import { Badge, Button } from '../../components/ui';
 import { getSubmissions } from '../../lib/admin';
@@ -17,23 +17,34 @@ export const dynamic = 'force-dynamic';
 export default async function AdminQueue({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; type?: string }>;
 }) {
   await requireAdmin();
 
-  const { status } = await searchParams;
+  const { status, type } = await searchParams;
   const active: ReviewStatus = STATUSES.includes(status as ReviewStatus)
     ? (status as ReviewStatus)
     : 'PENDING';
 
   const queue = await getSubmissions(active);
 
+  // Chip list comes from the response itself so future reviewable types appear
+  // automatically; an unknown ?type= is ignored.
+  const typeKeys = Object.keys(queue.countsByType) as ReviewableType[];
+  const activeType = typeKeys.includes(type as ReviewableType)
+    ? (type as ReviewableType)
+    : undefined;
+  const items = activeType ? queue.items.filter((i) => i.type === activeType) : queue.items;
+  const shownCount = activeType ? items.length : queue.total;
+  const typeParam = activeType ? `&type=${activeType}` : '';
+
   return (
     <main className={styles.main}>
       <div className={styles.head}>
         <h1 className={styles.title}>Submission queue</h1>
         <p className={styles.sub}>
-          {queue.total} {active.toLowerCase()} {queue.total === 1 ? 'item' : 'items'}
+          {shownCount} {active.toLowerCase()} {activeType ? `${activeType} ` : ''}
+          {shownCount === 1 ? 'item' : 'items'}
         </p>
       </div>
 
@@ -41,7 +52,7 @@ export default async function AdminQueue({
         {STATUSES.map((s) => (
           <Link
             key={s}
-            href={`/admin?status=${s}`}
+            href={`/admin?status=${s}${typeParam}`}
             className={`${styles.tab} ${s === active ? styles.tabActive : ''}`}
           >
             {s.charAt(0) + s.slice(1).toLowerCase()}
@@ -49,7 +60,27 @@ export default async function AdminQueue({
         ))}
       </nav>
 
-      {queue.items.length === 0 ? (
+      <nav className={styles.typeFilter} aria-label="Filter by type">
+        <Link
+          href={`/admin?status=${active}`}
+          className={`${styles.chip} ${!activeType ? styles.chipActive : ''}`}
+        >
+          All ({queue.total})
+        </Link>
+        {typeKeys
+          .filter((t) => queue.countsByType[t] > 0 || t === activeType)
+          .map((t) => (
+            <Link
+              key={t}
+              href={`/admin?status=${active}&type=${t}`}
+              className={`${styles.chip} ${t === activeType ? styles.chipActive : ''}`}
+            >
+              {t} ({queue.countsByType[t]})
+            </Link>
+          ))}
+      </nav>
+
+      {items.length === 0 ? (
         <p className={styles.empty}>Nothing {active.toLowerCase()} right now.</p>
       ) : (
         <div className={styles.table} aria-label="Moderation queue">
@@ -61,7 +92,7 @@ export default async function AdminQueue({
             <span className={styles.actionsHead}>Decision</span>
           </div>
 
-          {queue.items.map((item) => (
+          {items.map((item) => (
             <details key={`${item.type}-${item.id}`} className={styles.rowDetails}>
               <summary className={styles.row}>
                 <span>

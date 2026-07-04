@@ -9,7 +9,7 @@ import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '@/lib/format';
 
-import { AddRoundForm } from './AddRoundForm';
+import { ProposeChangeMenu } from './ProposeChangeMenu';
 
 const panel = 'grid gap-px overflow-hidden rounded-[10px] border border-line bg-line';
 const cell = 'bg-surface';
@@ -27,12 +27,15 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
   return (
     <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
-      <Link
-        href="/"
-        className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
-      >
-        ← All companies
-      </Link>
+      <div className="flex items-center justify-between gap-4">
+        <Link
+          href="/"
+          className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
+        >
+          ← All companies
+        </Link>
+        <ProposeChangeMenu slug={company.slug} />
+      </div>
 
       <header className="grid grid-cols-[auto_1fr_auto] items-start gap-7 border-b border-ink pt-7 pb-9 max-[860px]:grid-cols-[auto_1fr] max-[600px]:grid-cols-1">
         <CompanyLogo name={company.name} domain={company.domain} size={72} />
@@ -101,7 +104,12 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         {company.rounds && company.rounds.length > 0 ? (
           <FundingLadder rounds={company.rounds} />
         ) : (
-          <Empty action="Add a funding round">No rounds recorded yet for {company.name}.</Empty>
+          <Empty
+            action="Add a funding round"
+            href={`/companies/${company.slug}/contribute?type=round`}
+          >
+            No rounds recorded yet for {company.name}.
+          </Empty>
         )}
         <LockNote
           shown={company.rounds?.length ?? 0}
@@ -110,11 +118,6 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           slug={company.slug}
           signedIn={signedIn}
         />
-        {signedIn ? (
-          <div className="mt-4">
-            <AddRoundForm slug={company.slug} />
-          </div>
-        ) : null}
       </Block>
 
       <Block
@@ -150,7 +153,12 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             ))}
           </div>
         ) : (
-          <Empty action="Add an investor">No investors recorded yet for {company.name}.</Empty>
+          <Empty
+            action="Add an investor"
+            href={`/companies/${company.slug}/contribute?type=investor`}
+          >
+            No investors recorded yet for {company.name}.
+          </Empty>
         )}
         <LockNote
           shown={company.investors?.length ?? 0}
@@ -184,7 +192,9 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             ))}
           </div>
         ) : (
-          <Empty action="Add a team member">No people recorded yet for {company.name}.</Empty>
+          <Empty action="Add a team member" href={`/companies/${company.slug}/contribute?type=person`}>
+            No people recorded yet for {company.name}.
+          </Empty>
         )}
         <LockNote
           shown={company.people?.length ?? 0}
@@ -213,7 +223,12 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               ))}
             </ul>
           ) : (
-            <Empty action="Add an acquisition">{company.name} has no recorded acquisitions.</Empty>
+            <Empty
+              action="Add an acquisition"
+              href={`/companies/${company.slug}/contribute?type=acquisition`}
+            >
+              {company.name} has no recorded acquisitions.
+            </Empty>
           )}
           <LockNote
             shown={company.acquisitions?.length ?? 0}
@@ -238,7 +253,9 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               ))}
             </ul>
           ) : (
-            <Empty>Still private — no exit on record.</Empty>
+            <Empty action="Record an exit" href={`/companies/${company.slug}/contribute?type=exit`}>
+              Still private — no exit on record.
+            </Empty>
           )}
           <LockNote
             shown={company.exits?.length ?? 0}
@@ -264,7 +281,10 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             ))}
           </div>
         ) : (
-          <Empty action="Add diversity data">
+          <Empty
+            action="Add diversity data"
+            href={`/companies/${company.slug}/contribute?type=diversity`}
+          >
             No diversity signals recorded yet for {company.name}.
           </Empty>
         )}
@@ -309,7 +329,11 @@ function LockNote({
         variant="primary"
         shape="pill"
         size="sm"
-        href={signedIn ? '/contribute' : `/login?next=${encodeURIComponent(`/companies/${slug}`)}`}
+        href={
+          signedIn
+            ? `/companies/${slug}/contribute`
+            : `/login?next=${encodeURIComponent(`/companies/${slug}`)}`
+        }
       >
         {signedIn ? 'Contribute to unlock' : 'Sign in to unlock'}
       </Button>
@@ -379,12 +403,20 @@ function Block({
   );
 }
 
-function Empty({ children, action }: { children: React.ReactNode; action?: string }) {
+function Empty({
+  children,
+  action,
+  href,
+}: {
+  children: React.ReactNode;
+  action?: string;
+  href?: string;
+}) {
   return (
     <EmptyState
       action={
-        action ? (
-          <Button variant="outline" shape="pill" size="sm">
+        action && href ? (
+          <Button variant="outline" shape="pill" size="sm" href={href}>
             {action}
           </Button>
         ) : undefined

@@ -146,8 +146,8 @@ clones of `submitRound` (`lib/contribute.ts:18-26`) hitting
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
 - [ ] None (exercised in Phase 2).
@@ -230,8 +230,8 @@ otherwise both in one commit. Simplest: delete file + its `page.tsx` usages in P
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
 - [ ] Signed out, `/companies/<slug>/contribute?type=investor` redirects to login and
@@ -297,9 +297,9 @@ form goes away; `LockNote` points at this company's hub.
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
-- [ ] No orphan references: `grep -rn "AddRoundForm" apps/web` returns nothing
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
+- [x] No orphan references: `grep -rn "AddRoundForm" apps/web` returns nothing
 
 #### Manual Verification
 - [ ] "Propose a change ▾" renders top-right on desktop and doesn't wreck the mobile
@@ -347,8 +347,8 @@ uppercase, `border: 1px solid var(--line)`, pill radius; active = `border-color:
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Build passes: `yarn build`
-- [ ] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
 
 #### Manual Verification
 - [ ] Chips show correct per-type counts for the active status; clicking one narrows the
