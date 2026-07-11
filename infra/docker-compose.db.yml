@@ -1,0 +1,27 @@
+# Postgres — runs on the DB VPS (`make deploy-db`) or, on a single box, as the
+# base of the all-in-one stack (`make deploy-all`). Env: infra/env/db.env
+# (single VPS uses infra/env/all.env instead).
+services:
+  postgres:
+    image: postgres:16
+    container_name: capbase-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-capbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your env file}
+      POSTGRES_DB: ${POSTGRES_DB:-capbase}
+    # Split VPS: after you set up the private network, set POSTGRES_BIND to the
+    # DB VPS's PRIVATE ip (e.g. 10.0.0.2) and firewall this port to the App VPS.
+    # Single VPS: 127.0.0.1 is fine (nothing external connects). See infra/README.md.
+    ports:
+      - '${POSTGRES_BIND:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - capbase-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-capbase} -d ${POSTGRES_DB:-capbase}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  capbase-pgdata:

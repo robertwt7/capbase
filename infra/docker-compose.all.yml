@@ -1,0 +1,12 @@
+# Single-VPS override (merged AFTER db.yml + app.yml by `make deploy-all`).
+# Makes api/jobs wait for the co-located Postgres. With this topology,
+# DATABASE_URL (infra/env/all.env) uses host `postgres`, not a remote VPS.
+services:
+  api:
+    depends_on:
+      postgres:
+        condition: service_healthy
+  jobs:
+    depends_on:
+      postgres:
+        condition: service_healthy

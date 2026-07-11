@@ -108,6 +108,60 @@ ps: ## Show status of the stack
 	$(COMPOSE) ps
 
 # ---------------------------------------------------------------------------
+# Production deployment (split VPS, or single-VPS all-in-one).
+# Run these ON the target VPS after `git pull`. See infra/README.md.
+# ---------------------------------------------------------------------------
+
+# Shared app-stack targets (tls/seed/logs/down) work on either topology:
+# app.env when present (split VPS), else all.env (single VPS).
+DEPLOY_ENVF := $(if $(wildcard infra/env/app.env),infra/env/app.env,infra/env/all.env)
+
+COMPOSE_DB  := $(COMPOSE) -p capbase -f infra/docker-compose.db.yml --env-file infra/env/db.env
+COMPOSE_APP := $(COMPOSE) -p capbase -f infra/docker-compose.app.yml --env-file $(DEPLOY_ENVF)
+COMPOSE_ALL := $(COMPOSE) -p capbase -f infra/docker-compose.db.yml -f infra/docker-compose.app.yml -f infra/docker-compose.all.yml --env-file infra/env/all.env
+
+.PHONY: deploy-db
+deploy-db: ENVF := infra/env/db.env
+deploy-db: check-env ## [DB VPS] Start Postgres (reads infra/env/db.env)
+	$(COMPOSE_DB) up -d --wait postgres
+
+.PHONY: deploy-app
+deploy-app: ENVF := infra/env/app.env
+deploy-app: check-env ## [App VPS] Build + start web/api/jobs/nginx (reads infra/env/app.env)
+	$(COMPOSE_APP) up -d --build
+
+.PHONY: deploy-all
+deploy-all: ENVF := infra/env/all.env
+deploy-all: check-env ## [1 VPS] Build + start EVERYTHING incl. Postgres (reads infra/env/all.env)
+	$(COMPOSE_ALL) up -d --build
+
+.PHONY: deploy-tls
+deploy-tls: ## [App/1 VPS] One-time Let's Encrypt cert bootstrap (needs DNS + ports 80/443)
+	sh infra/certbot/init-letsencrypt.sh
+
+.PHONY: deploy-seed
+deploy-seed: ## Seed admin + demo data against the configured DATABASE_URL
+	$(COMPOSE_APP) --profile seed run --rm seed
+
+.PHONY: deploy-logs
+deploy-logs: ## Tail logs from the app stack
+	$(COMPOSE_APP) logs -f
+
+.PHONY: deploy-down
+deploy-down: ## Stop the app stack (keeps data)
+	$(COMPOSE_APP) down
+
+# Guard: env file must exist and have no CHANGE_ME placeholders left.
+.PHONY: check-env
+check-env:
+	@test -f "$(ENVF)" || { echo "❌ $(ENVF) missing — copy $(ENVF).example and fill it in"; exit 1; }
+	@if grep -qE 'CHANGE_ME' "$(ENVF)"; then \
+		echo "❌ $(ENVF) still has CHANGE_ME placeholders."; \
+		echo "   Did you set DATABASE_URL after deploying the DB? See infra/README.md."; \
+		exit 1; \
+	fi
+
+# ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
 

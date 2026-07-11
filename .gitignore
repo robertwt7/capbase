@@ -60,3 +60,8 @@ pnpm-debug.log*
 # Misc
 .DS_Store
 *.pem
+
+# infra: real deployment env files + Let's Encrypt state (keep *.example)
+infra/env/*.env
+infra/certbot/conf
+infra/certbot/www
