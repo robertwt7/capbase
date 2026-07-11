@@ -70,7 +70,11 @@ export default async function ContributeToCompanyPage({
         />
         <p className="mt-2 text-sm text-graphite-500">
           Add what you know — every submission is reviewed by a moderator before it appears on the
-          profile.
+          profile. Any contribution, here or elsewhere, unlocks full profiles for 30 days.{' '}
+          <Link href="/contribute" className="text-ink underline underline-offset-[3px]">
+            Add a new company instead
+          </Link>
+          .
         </p>
 
         <nav

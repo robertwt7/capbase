@@ -100,7 +100,8 @@ function AccessPanel({
         {access.unlockedUntil
           ? `Your access lapsed after ${formatDate(access.unlockedUntil)}. `
           : ''}
-        Contribute to unlock full company profiles for the next 30 days.
+        Contribute anything — a new company, a round, a person — to unlock all full profiles for the
+        next 30 days.
       </p>
     </Card>
   );

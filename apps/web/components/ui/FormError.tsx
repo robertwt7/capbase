@@ -6,8 +6,9 @@ import { cn } from '@/lib/utils';
 export function FormError({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <p
+      role="alert"
       className={cn(
-        'rounded-md border border-line bg-surface px-3 py-2.5 font-sans text-sm text-ink',
+        'rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 font-sans text-sm text-destructive',
         className,
       )}
     >

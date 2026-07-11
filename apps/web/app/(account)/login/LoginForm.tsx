@@ -1,79 +1,86 @@
 'use client';
 
+import { zodResolver } from '@hookform/resolvers/zod';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 
-import { Button, Card, FormError, Input, Label } from '../../../components/ui';
-
-import styles from '../account.module.css';
+import { Button, Card, Form, FormError, TextField } from '@/components/ui';
+import {
+  loginFormDefaults,
+  loginFormSchema,
+  toLoginInput,
+  type LoginFormValues,
+} from '@/lib/validation/auth';
 
 export function LoginForm({ next }: { next?: string }) {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [formError, setFormError] = useState<string>();
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginFormSchema),
+    defaultValues: loginFormDefaults,
+    mode: 'onBlur',
+  });
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setPending(true);
-    setError(null);
-
-    const form = new FormData(e.currentTarget);
+  const onSubmit = form.handleSubmit(async (values) => {
+    setFormError(undefined);
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
+      body: JSON.stringify(toLoginInput(values)),
     });
-
     if (res.ok) {
       router.replace(next || '/');
       router.refresh();
-    } else {
-      const data = (await res.json().catch(() => ({}))) as { message?: string };
-      setError(data.message ?? 'Sign in failed');
-      setPending(false);
+      return;
     }
-  }
+    const data = (await res.json().catch(() => ({}))) as { message?: string };
+    setFormError(data.message ?? 'Invalid email or password.');
+  });
 
   return (
-    <main className={styles.main}>
-      <Card className={styles.card}>
-        <form className={styles.cardForm} onSubmit={onSubmit}>
-          <h1 className={styles.title}>Sign in</h1>
-          <p className={styles.sub}>Contribute company and funding data to unlock full profiles.</p>
+    <main className="flex items-center justify-center px-5 py-20 sm:px-8">
+      <Card className="w-full max-w-[380px]">
+        <Form {...form}>
+          <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
+            <h1 className="font-display text-[22px] font-bold text-ink">Sign in</h1>
+            <p className="mb-2 font-sans text-[13px] text-graphite-500">
+              Contribute company and funding data to unlock full profiles.
+            </p>
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" name="email" autoComplete="username" required />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              required
+            <TextField
+              control={form.control}
+              name="email"
+              label="Email"
+              type="email"
+              autoComplete="username"
             />
-          </div>
+            <TextField
+              control={form.control}
+              name="password"
+              label="Password"
+              type="password"
+              autoComplete="current-password"
+            />
 
-          {error ? <FormError>{error}</FormError> : null}
+            {formError ? <FormError>{formError}</FormError> : null}
 
-          <Button variant="primary" block type="submit" disabled={pending}>
-            {pending ? 'Signing in…' : 'Sign in'}
-          </Button>
+            <Button variant="primary" block type="submit" disabled={form.formState.isSubmitting}>
+              {form.formState.isSubmitting ? 'Signing in…' : 'Sign in'}
+            </Button>
 
-          <p className={styles.altLine}>
-            New here?{' '}
-            <Link
-              className={styles.altLink}
-              href={next ? `/register?next=${encodeURIComponent(next)}` : '/register'}
-            >
-              Create an account
-            </Link>
-          </p>
-        </form>
+            <p className="mt-1 text-center font-sans text-[13px] text-graphite-500">
+              New here?{' '}
+              <Link
+                className="font-semibold text-ink underline"
+                href={next ? `/register?next=${encodeURIComponent(next)}` : '/register'}
+              >
+                Create an account
+              </Link>
+            </p>
+          </form>
+        </Form>
       </Card>
     </main>
   );

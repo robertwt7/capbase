@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
 import { AuthService } from './auth.service';
+import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 
 type UserRow = {
@@ -28,6 +29,14 @@ function usersWith(overrides: { byEmail?: UserRow | null; byId?: UserRow | null 
   const users = {
     findByEmail: jest.fn(async () => overrides.byEmail ?? null),
     findById: jest.fn(async () => overrides.byId ?? null),
+    create: jest.fn(
+      async (data: {
+        email: string;
+        name: string;
+        passwordHash: string;
+        role: 'USER' | 'ADMIN';
+      }) => ({ ...me, email: data.email, name: data.name, role: data.role }),
+    ),
     update: jest.fn(
       async (id: string, data: { name?: string; email?: string; passwordHash?: string }) => ({
         ...me,
@@ -36,8 +45,33 @@ function usersWith(overrides: { byEmail?: UserRow | null; byId?: UserRow | null 
       }),
     ),
   };
-  return { users, service: new AuthService(users as unknown as UsersService, jwt) };
+  const mail = { sendWelcomeEmail: jest.fn(async () => undefined) };
+  return {
+    users,
+    mail,
+    service: new AuthService(
+      users as unknown as UsersService,
+      jwt,
+      mail as unknown as MailService,
+    ),
+  };
 }
+
+describe('AuthService.register', () => {
+  it('sends a welcome email to the new user on success', async () => {
+    const { mail, service } = usersWith({ byEmail: null });
+    await service.register({ name: 'New', email: 'new@example.com', password: 'battery-staple' });
+    expect(mail.sendWelcomeEmail).toHaveBeenCalledWith('new@example.com', 'New');
+  });
+
+  it('does not send a welcome email when the email is already registered', async () => {
+    const { mail, service } = usersWith({ byEmail: me });
+    await expect(
+      service.register({ name: 'Dup', email: 'me@example.com', password: 'battery-staple' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(mail.sendWelcomeEmail).not.toHaveBeenCalled();
+  });
+});
 
 describe('AuthService.updateProfile', () => {
   it('rejects an email owned by another user', async () => {

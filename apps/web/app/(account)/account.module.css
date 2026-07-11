@@ -1,53 +1,6 @@
-/* Shared styles for the public auth surfaces (login, register, profile).
-   Strictly monochrome — mirrors admin.module.css conventions. */
-
-.main {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 80px var(--page-pad);
-}
-
-/* Card chrome comes from the Card primitive; layout stays local. */
-.card {
-  width: 100%;
-  max-width: 380px;
-}
-
-.cardForm {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 32px;
-}
-
-.title {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 22px;
-  color: var(--ink);
-  margin: 0;
-}
-
-.sub {
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--graphite-500);
-  margin: 0 0 8px;
-}
-
-.altLine {
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--graphite-500);
-  text-align: center;
-  margin: 4px 0 0;
-}
-.altLink {
-  color: var(--ink);
-  font-weight: 600;
-  text-decoration: underline;
-}
+/* Styles for the public profile page (`/profile`). The login/register auth forms
+   were migrated to Tailwind + the RHF+zod pattern; only the profile page remains
+   on this module. Strictly monochrome — mirrors admin.module.css conventions. */
 
 /* ---- Profile ---------------------------------------------------------- */
 .profileMain {

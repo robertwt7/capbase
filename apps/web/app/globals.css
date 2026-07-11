@@ -5,6 +5,8 @@
    Capbase — the monochrome terminal ledger.
    Strictly graphite: company logos supply the only color on screen. Emphasis
    comes from weight, size, hairline rules, and the mono numerals — never hue.
+   The one sanctioned exception is validation/error feedback, which uses the
+   `--destructive` red (see CLAUDE.md); destructive *actions* stay monochrome.
    Light-only by design (no dark mode); the `dark` variant is declared so
    shadcn primitives compile, but the ramp does not branch.
    ────────────────────────────────────────────────────────────────────────── */
@@ -41,7 +43,7 @@
   --muted-foreground: var(--graphite-500);
   --accent: var(--graphite-200);
   --accent-foreground: var(--ink);
-  --destructive: var(--graphite-900); /* monochrome: signalled by weight, not red */
+  --destructive: #b42318; /* validation/error red — the one sanctioned hue (see CLAUDE.md) */
   --destructive-foreground: var(--paper);
   --border: var(--line);
   --input: var(--line);

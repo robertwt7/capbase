@@ -21,9 +21,10 @@ to a monochrome design system. Tokens are declared in `app/globals.css` (`:root`
 the raw values, `@theme inline` to expose them as utilities); `lib/utils.ts` exports
 `cn` (clsx + tailwind-merge). Style with Tailwind utilities and the `components/ui`
 primitives — don't add CSS Module files for new UI. (Two legacy CSS Modules remain for
-the not-yet-redesigned `admin` and `(account)` auth pages; back-compat token aliases
-`--font-body`/`--page-max`/`--page-pad` exist only for them and will go when those
-routes are redesigned.)
+the not-yet-redesigned `admin` and `(account)` **profile** pages; the `(account)` auth
+forms — login/register — now follow the RHF+zod + Tailwind pattern. Back-compat token
+aliases `--font-body`/`--page-max`/`--page-pad` exist only for the remaining modules and
+will go when those routes are redesigned.)
 
 ### Design system — "monochrome terminal ledger"
 
@@ -34,8 +35,11 @@ gradients. Emphasis comes from weight, size, and the mono numerals — not hue.
 - The graphite ramp is exposed as Tailwind colors via `@theme`: use `text-ink`,
   `bg-paper`, `bg-surface`, `text-graphite-{200..900}`, `border-line`, plus the shadcn
   semantic colors (`bg-primary`, `text-muted-foreground`, `border-border`, …) which all
-  map onto the ramp. Never hardcode hex values. Destructive is monochrome too —
-  emphasis is weight/border, never red.
+  map onto the ramp. Never hardcode hex values. **The one sanctioned use of red is
+  validation/error feedback** — `--destructive` / `text-destructive` (the `FormError`
+  box, `FormMessage` field errors, and invalid-control borders/rings). Destructive
+  *actions* (delete-style menu items) stay monochrome — emphasis is weight/border,
+  never red. Everything else stays graphite.
 - Type roles (next/font in `app/layout.tsx`, exposed as `@theme` font utilities):
   - `font-display` → Archivo. Headlines, company names, big figures.
   - `font-sans` (default `body`) → IBM Plex Sans. Body text.
@@ -128,7 +132,8 @@ crowdsourced row carries `moderationStatus` (PENDING/APPROVED/REJECTED); public 
 return only APPROVED, `/admin/*` (RBAC) lists pending and flips status. Services map
 Prisma rows → shared `@repo/api` types (`src/companies/company.mapper.ts`). DTOs use
 `class-validator` and `implements` the shared `Create*Input` types. Config comes from
-env (`apps/api/.env`, see `.env.example`).
+env (`apps/api/.env`, see `.env.example`). Registration sends a welcome email through
+`MailModule` (`src/mail/`, Resend) — a no-op that only logs when `RESEND_API_KEY` is unset.
 
 ## Database (packages/db, `@repo/db`)
 

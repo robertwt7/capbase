@@ -21,10 +21,13 @@ install: ## Install all workspace dependencies (yarn)
 # ---------------------------------------------------------------------------
 
 .PHONY: db-up
-db-up: ## Start Postgres, apply migrations, and seed demo data
+db-up: ## Start Postgres + apply migrations (non-destructive; keeps existing data)
 	$(COMPOSE) up -d --wait postgres
 	yarn workspace @repo/db generate
 	yarn workspace @repo/db migrate:deploy
+
+.PHONY: db-init
+db-init: db-up ## First-time setup: start Postgres, migrate, THEN seed demo data (wipes data)
 	yarn workspace @repo/db seed
 
 .PHONY: dev

@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import type { AuthResponse, AuthUser } from '@repo/api';
 
+import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -22,6 +23,7 @@ export class AuthService {
   constructor(
     private readonly users: UsersService,
     private readonly jwt: JwtService,
+    private readonly mail: MailService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -36,6 +38,7 @@ export class AuthService {
       passwordHash,
       role: 'USER',
     });
+    void this.mail.sendWelcomeEmail(user.email, user.name); // fire-and-forget; never throws
     return this.buildResponse(user);
   }
 

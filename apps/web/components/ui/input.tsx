@@ -9,7 +9,7 @@ export const controlClass =
   'font-sans transition-colors outline-none ' +
   'placeholder:text-graphite-400 ' +
   'focus-visible:border-ink ' +
-  'aria-[invalid=true]:border-ink aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-ink/15 ' +
+  'aria-[invalid=true]:border-destructive aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-destructive/15 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
 
 function Input({ className, type, ...props }: React.ComponentProps<'input'>) {

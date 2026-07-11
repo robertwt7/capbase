@@ -339,20 +339,36 @@ function LockNote({
     <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 rounded-[10px] border border-dashed border-graphite-300 bg-paper px-[18px] py-3.5">
       <span className="font-sans text-[13px] text-graphite-700">
         Showing <span className="font-mono text-ink">{shown}</span> of{' '}
-        <span className="font-mono text-ink">{total}</span> — contribute to unlock the rest.
+        <span className="font-mono text-ink">{total}</span> — any contribution unlocks every profile
+        for 30 days.
       </span>
-      <Button
-        variant="primary"
-        shape="pill"
-        size="sm"
-        href={
-          signedIn
-            ? `/companies/${slug}/contribute`
-            : `/login?next=${encodeURIComponent(`/companies/${slug}`)}`
-        }
-      >
-        {signedIn ? 'Contribute to unlock' : 'Sign in to unlock'}
-      </Button>
+      {signedIn ? (
+        <span className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="primary"
+            shape="pill"
+            size="sm"
+            href={`/companies/${slug}/contribute`}
+          >
+            Contribute to unlock
+          </Button>
+          <Link
+            href="/contribute"
+            className="font-sans text-[13px] text-graphite-700 underline underline-offset-[3px] transition-colors hover:text-ink"
+          >
+            or add a new company
+          </Link>
+        </span>
+      ) : (
+        <Button
+          variant="primary"
+          shape="pill"
+          size="sm"
+          href={`/login?next=${encodeURIComponent(`/companies/${slug}`)}`}
+        >
+          Sign in to unlock
+        </Button>
+      )}
     </div>
   );
 }

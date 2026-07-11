@@ -1,0 +1,3 @@
+some of the forms like when registering, we need some revamp. when registering we need to have a confirm password obviously, then we need to have some reminder to update the send email using resend or something
+
+then at the same time the validation when we're to register or something, that's supposed to be red no? why is it black and white i can't see a thing. another thing is when we contribute to unlock when i press it, it suddenly shows that i need to contribute to that specific company, it's not supposed to be like that right. we can contribute to new company or something then it should still unlock. we need to fix these things

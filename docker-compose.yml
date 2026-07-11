@@ -32,9 +32,8 @@ services:
       <<: *db-url
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.fyi}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
-      ADMIN_NAME: ${ADMIN_NAME:-Capbase Admin}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}
     ports:
       - '3000:3000'
     depends_on:
