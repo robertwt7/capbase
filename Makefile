@@ -1,8 +1,10 @@
 # Capbase — common dev & production commands.
 # Run `make help` to list every target.
 
-# Max SEC Form D filings to process in a backfill (override: `make ingest LIMIT=10`).
-LIMIT ?= 50
+# Backfill window/limit/source (override: `make ingest DAYS=30 LIMIT=500 SOURCE=SEC_EDGAR`).
+DAYS   ?= 90
+LIMIT  ?= 100000
+SOURCE ?= all
 
 COMPOSE := docker compose
 
@@ -71,13 +73,13 @@ db-seed: ## Re-seed the database with demo data
 # ---------------------------------------------------------------------------
 
 .PHONY: ingest
-ingest: ## Run a local SEC Form D backfill (LIMIT=N, default 50)
+ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA)
 	yarn workspace jobs build
-	cd apps/jobs && node dist/backfill.js $(LIMIT)
+	cd apps/jobs && node dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
 .PHONY: ingest-prod
-ingest-prod: ## Run a backfill inside the jobs container (LIMIT=N)
-	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill.js $(LIMIT)
+ingest-prod: ## Run a backfill inside the jobs container (DAYS=N LIMIT=N SOURCE=...)
+	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
 # ---------------------------------------------------------------------------
 # Production-like stack (everything in Docker)

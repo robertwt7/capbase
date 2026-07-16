@@ -27,18 +27,27 @@ export class EdgarClient {
       config.get<string>('SEC_USER_AGENT') ?? 'capbase-ingest (contact@example.com)';
   }
 
-  /** Form D refs for a given day, walking back up to `lookbackDays` if empty. */
-  async listRecentFormD(target: Date, lookbackDays = 5): Promise<FormDRef[]> {
-    for (let i = 0; i < lookbackDays; i++) {
-      const day = new Date(target);
+  /** All Form D/A refs filed in the last `days` calendar days (deduped by accession).
+   *  Weekends are skipped locally; holidays return 404 and are skipped by fetchText. */
+  async listFormD(days: number): Promise<FormDRef[]> {
+    const out: FormDRef[] = [];
+    const seen = new Set<string>();
+    const today = new Date();
+    for (let i = 0; i < days; i++) {
+      const day = new Date(today);
       day.setUTCDate(day.getUTCDate() - i);
+      const dow = day.getUTCDay();
+      if (dow === 0 || dow === 6) continue; // no weekend indexes
       const refs = await this.listFormDForDay(day);
-      if (refs.length > 0) {
-        this.logger.log(`Found ${refs.length} Form D filings for ${ymd(day)}`);
-        return refs;
+      if (refs.length) this.logger.log(`${refs.length} Form D refs for ${ymd(day)}`);
+      for (const ref of refs) {
+        if (!seen.has(ref.accession)) {
+          seen.add(ref.accession);
+          out.push(ref);
+        }
       }
     }
-    return [];
+    return out;
   }
 
   private async listFormDForDay(day: Date): Promise<FormDRef[]> {

@@ -1,5 +1,11 @@
 import { XMLParser } from 'fast-xml-parser';
 
+export interface ParsedPerson {
+  name: string;
+  role: string;
+  title: string | null;
+}
+
 export interface ParsedFormD {
   entityName: string;
   city: string;
@@ -10,6 +16,14 @@ export interface ParsedFormD {
   amountSoldUsd: number;
   /** ISO date of first sale, or null if not yet occurred. */
   dateOfFirstSale: string | null;
+  /** True for pooled-fund/SPV filers (industryGroupType = "Pooled Investment Fund"). */
+  isPooledFund: boolean;
+  /** True for D/A amendment filings. */
+  isAmendment: boolean;
+  /** Accession of the filing this D/A amends, or null. */
+  previousAccession: string | null;
+  /** Executives/directors from relatedPersonsList (fund administrators filtered out). */
+  people: ParsedPerson[];
 }
 
 const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: true });
@@ -39,6 +53,14 @@ export function parseFormD(xml: string): ParsedFormD | null {
   const sale = offering.typeOfFiling?.dateOfFirstSale ?? offering.dateOfFirstSale;
   const dateOfFirstSale = isoDate(str(sale?.value));
 
+  const isPooledFund = industry === 'Pooled Investment Fund';
+  const newOrAmendment = offering.typeOfFiling?.newOrAmendment ?? {};
+  const isAmendment =
+    newOrAmendment.isAmendment === true || str(newOrAmendment.isAmendment) === 'true';
+  const previousAccession = str(newOrAmendment.previousAccessionNumber) || null;
+
+  const people = parseRelatedPersons(sub.relatedPersonsList?.relatedPersonInfo);
+
   return {
     entityName,
     city,
@@ -47,7 +69,41 @@ export function parseFormD(xml: string): ParsedFormD | null {
     industry,
     amountSoldUsd,
     dateOfFirstSale,
+    isPooledFund,
+    isAmendment,
+    previousAccession,
+    people,
   };
+}
+
+/** Fund administrators and similar entities file as "related persons" too —
+ *  skip anything whose name reads like a company rather than an individual. */
+const ENTITY_RE =
+  /\b(llc|l\.l\.c\.?|lp|l\.p\.?|inc|ltd|corp|fund|capital|management|advis[oe]rs?|partners)\b/i;
+
+function parseRelatedPersons(raw: unknown): ParsedPerson[] {
+  const out: ParsedPerson[] = [];
+  for (const info of toArray<Record<string, any>>(raw)) {
+    const nameParts = info.relatedPersonName ?? {};
+    const name = [nameParts.firstName, nameParts.middleName, nameParts.lastName]
+      .map(str)
+      .filter(Boolean)
+      .join(' ');
+    if (!name || ENTITY_RE.test(name)) continue;
+
+    const relationships = toArray(info.relatedPersonRelationshipList?.relationship).map(str);
+    const role = relationships.find(Boolean) ?? '';
+    if (!role) continue;
+
+    out.push({ name, role, title: str(info.relationshipClarification) || null });
+  }
+  return out;
+}
+
+/** fast-xml-parser yields an object for single children and an array for many. */
+function toArray<T>(v: unknown): T[] {
+  if (v === undefined || v === null) return [];
+  return (Array.isArray(v) ? v : [v]) as T[];
 }
 
 function str(v: unknown): string {

@@ -165,12 +165,29 @@ SEC-ingested rows leave these null (no SEC→sector mapping yet).
 
 ## Jobs (apps/jobs)
 
-NestJS worker (port 3002, health endpoint) that ingests **SEC EDGAR Form D** filings —
-the free, official source for US private-placement funding. `@nestjs/schedule` cron
-(`CRON_SCHEDULE`) plus a `node dist/backfill [limit]` CLI. Pluggable `IngestionSource`
-interface (`src/sources/`) — add Wikidata/OpenCorporates here later. The SEC client sets
-`SEC_USER_AGENT` and throttles ≤10 req/s. Ingested rows upsert keyed on
-`(externalSource, externalId)` and are **auto-APPROVED** (trusted source).
+NestJS worker (port 3002, health endpoint) with two pluggable `IngestionSource`s
+(`src/sources/`, add OpenCorporates etc. later):
+
+- **SEC_EDGAR** — Form D filings (free, official source for US private-placement
+  funding). Walks N days of daily indexes (`INGEST_DAYS`), **skips pooled
+  funds/SPVs** by default (`INGEST_SKIP_FUNDS`), keys D/A amendments to the
+  original filing's accession, and extracts executives/directors from
+  `relatedPersonsList`. Client sets `SEC_USER_AGENT`, throttles ≤10 req/s.
+- **WIKIDATA** — enrichment for the ~6.4k notable companies carrying investor
+  (P1951) statements: metadata (website/LinkedIn/HQ/sector), investors,
+  founders/CEOs, acquisitions, exits. Throttled ~1 req/s SPARQL
+  (`WDQS_USER_AGENT`, defaults to `SEC_USER_AGENT`). No funding rounds.
+
+The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
+SEC-only). Backfills: `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA`
+(→ `node dist/backfill [days] [limit] [source]`). All ingested rows — companies,
+rounds, and the child entities (people/investors/acquisitions/exits) — upsert
+keyed on `(externalSource, externalId)` and are **auto-APPROVED** (trusted
+sources). `IngestService` also **matches & enriches**: a record whose company
+matches an existing row by domain or normalized name fills that row's blank
+fields instead of creating a duplicate (never overwriting name/stage/status or
+human-written copy). Unit tests: `yarn workspace jobs test` (jest, pure
+parser/mapper/service specs).
 
 ## Deployment (Docker + Makefile)
 

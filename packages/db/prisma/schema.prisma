@@ -175,12 +175,17 @@ model InvestorHolding {
   websiteUrl  String?
   linkedinUrl String?
 
+  // Provenance for ingested rows (e.g. SEC_EDGAR, WIKIDATA). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus])
 }
@@ -196,12 +201,17 @@ model Person {
   linkedinUrl String?
   title       String?
 
+  // Provenance for ingested rows (e.g. SEC_EDGAR, WIKIDATA). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus])
 }
@@ -215,12 +225,17 @@ model AcquisitionDeal {
   amountUsd BigInt?
   rationale String
 
+  // Provenance for ingested rows (e.g. SEC_EDGAR, WIKIDATA). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus])
 }
@@ -234,12 +249,17 @@ model ExitEvent {
   valueUsd  BigInt?
   detail    String
 
+  // Provenance for ingested rows (e.g. SEC_EDGAR, WIKIDATA). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus])
 }

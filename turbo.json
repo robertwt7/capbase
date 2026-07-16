@@ -14,7 +14,11 @@
     "INGEST_ON_BOOT",
     "NODE_ENV",
     "PORT",
-    "INGEST_LIMIT"
+    "INGEST_LIMIT",
+    "INGEST_DAYS",
+    "INGEST_SKIP_FUNDS",
+    "INGEST_SOURCES",
+    "WDQS_USER_AGENT"
   ],
   "tasks": {
     "dev": {

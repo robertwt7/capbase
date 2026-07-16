@@ -8211,6 +8211,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "jobs@workspace:apps/jobs"
   dependencies:
+    "@jest/globals": "npm:^30.2.0"
     "@nestjs/cli": "npm:^11.0.14"
     "@nestjs/common": "npm:^11.1.11"
     "@nestjs/config": "npm:^4.0.4"
@@ -8222,14 +8223,17 @@ __metadata:
     "@repo/api": "npm:*"
     "@repo/db": "npm:*"
     "@repo/eslint-config": "npm:*"
+    "@repo/jest-config": "npm:*"
     "@repo/typescript-config": "npm:*"
     "@types/node": "npm:^22.19.3"
     eslint: "npm:^9.39.2"
     fast-xml-parser: "npm:^4.5.0"
+    jest: "npm:^30.2.0"
     pg: "npm:^8.22.0"
     reflect-metadata: "npm:^0.2.2"
     rxjs: "npm:^7.8.2"
     source-map-support: "npm:^0.5.21"
+    ts-jest: "npm:^29.4.6"
     typescript: "npm:5.5.4"
   languageName: unknown
   linkType: soft

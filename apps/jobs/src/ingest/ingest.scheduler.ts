@@ -40,8 +40,16 @@ export class IngestScheduler implements OnApplicationBootstrap {
     }
     this.running = true;
     try {
-      const limit = Number(this.config.get<string>('INGEST_LIMIT') ?? '50');
-      await this.ingest.run(limit);
+      // Small idempotent catch-up window (rides out weekends/holidays).
+      const days = Number(this.config.get<string>('INGEST_DAYS') ?? '3');
+      const limit = Number(this.config.get<string>('INGEST_LIMIT') ?? '500');
+      // SEC-only by default — the Wikidata set changes slowly; re-pull it
+      // manually (make ingest SOURCE=WIKIDATA) or via a future monthly schedule.
+      const sources = (this.config.get<string>('INGEST_SOURCES') ?? 'SEC_EDGAR')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await this.ingest.run({ days, limit, sources });
     } catch (err) {
       this.logger.error(`Scheduled ingest failed: ${String(err)}`);
     } finally {

@@ -1,0 +1,217 @@
+import { describe, it, expect } from '@jest/globals';
+
+import { hostnameOf, mapWikidata, sectorFor, type WikidataBundle } from './wikidata.mapper';
+
+const uri = (qid: string) => ({ type: 'uri', value: `http://www.wikidata.org/entity/${qid}` });
+const lit = (value: string) => ({ type: 'literal', value });
+
+function bundle(overrides: Partial<WikidataBundle> = {}): WikidataBundle {
+  return { details: [], investors: [], people: [], acquisitions: [], exits: [], ...overrides };
+}
+
+const STRIPE_DETAILS = {
+  company: uri('Q1'),
+  companyLabel: lit('Stripe'),
+  companyDescription: lit('payment services company'),
+  website: lit('https://www.stripe.com'),
+  inception: lit('2010-01-01T00:00:00Z'),
+  hqLabel: lit('South San Francisco'),
+  countryLabel: lit('United States of America'),
+  industryLabel: lit('financial technology'),
+  employees: lit('7000'),
+  linkedinId: lit('stripe'),
+};
+
+describe('mapWikidata', () => {
+  it('maps a full company row to a normalized record', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [STRIPE_DETAILS],
+        investors: [{ company: uri('Q1'), investor: uri('Q20'), investorLabel: lit('Sequoia Capital') }],
+        people: [
+          { company: uri('Q1'), person: uri('Q30'), personLabel: lit('Patrick Collison'), role: lit('Founder') },
+          {
+            company: uri('Q1'),
+            person: uri('Q30'),
+            personLabel: lit('Patrick Collison'),
+            role: lit('CEO'),
+            start: lit('2011-06-01T00:00:00Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(records).toHaveLength(1);
+    const r = records[0]!;
+    expect(r.source).toBe('WIKIDATA');
+    expect(r.companyExternalId).toBe('Q1');
+    expect(r.round).toBeUndefined();
+    expect(r.company).toMatchObject({
+      name: 'Stripe',
+      domain: 'stripe.com',
+      websiteUrl: 'https://www.stripe.com',
+      linkedinUrl: 'https://www.linkedin.com/company/stripe',
+      foundedYear: 2010,
+      headcount: 7000,
+      hq: 'South San Francisco, United States of America',
+      industry: ['financial technology'],
+      primarySector: 'Fintech',
+      status: 'Private',
+      stage: 'Late stage',
+      totalRaisedUsd: 0,
+      oneLiner: 'Payment services company',
+    });
+    expect(r.investors).toEqual([
+      {
+        externalId: 'Q1:investor:Q20',
+        name: 'Sequoia Capital',
+        type: 'Venture',
+        firstRound: 'Undisclosed',
+        rounds: 1,
+      },
+    ]);
+    expect(r.people).toEqual([
+      { externalId: 'Q1:person:Q30:Founder', name: 'Patrick Collison', role: 'Founder', since: 2010 },
+      { externalId: 'Q1:person:Q30:CEO', name: 'Patrick Collison', role: 'CEO', since: 2011 },
+    ]);
+  });
+
+  it('skips companies whose English label is missing (bare QID label)', () => {
+    const records = mapWikidata(
+      bundle({ details: [{ company: uri('Q999'), companyLabel: lit('Q999') }] }),
+    );
+    expect(records).toEqual([]);
+  });
+
+  it('dedupes multi-valued detail rows first-wins', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [
+          STRIPE_DETAILS,
+          { ...STRIPE_DETAILS, website: lit('https://stripe.dev') },
+        ],
+        investors: [
+          { company: uri('Q1'), investor: uri('Q20'), investorLabel: lit('Sequoia Capital') },
+          { company: uri('Q1'), investor: uri('Q20'), investorLabel: lit('Sequoia Capital') },
+        ],
+      }),
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0]!.company.domain).toBe('stripe.com');
+    expect(records[0]!.investors).toHaveLength(1);
+  });
+
+  it('derives Public status/stage from an IPO exit (earliest dated row wins)', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [STRIPE_DETAILS],
+        exits: [
+          { company: uri('Q1'), kind: lit('ipo'), date: lit('2026-03-03T00:00:00Z') },
+          { company: uri('Q1'), kind: lit('ipo'), date: lit('2025-09-09T00:00:00Z') },
+          { company: uri('Q1'), kind: lit('ipo') },
+        ],
+      }),
+    );
+    const r = records[0]!;
+    expect(r.company.status).toBe('Public');
+    expect(r.company.stage).toBe('Public');
+    expect(r.exits).toEqual([
+      {
+        externalId: 'Q1:exit:ipo',
+        type: 'IPO',
+        date: '2025-09-09',
+        valueUsd: null,
+        detail: 'Initial public offering.',
+      },
+    ]);
+  });
+
+  it('derives Acquired status/stage from an acquisition exit', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [STRIPE_DETAILS],
+        exits: [
+          {
+            company: uri('Q1'),
+            kind: lit('acq'),
+            acquirer: uri('Q50'),
+            acquirerLabel: lit('BigCorp'),
+            date: lit('2024-04-04T00:00:00Z'),
+          },
+        ],
+      }),
+    );
+    const r = records[0]!;
+    expect(r.company.status).toBe('Acquired');
+    expect(r.company.stage).toBe('Acquired');
+    expect(r.exits).toEqual([
+      {
+        externalId: 'Q1:exit:acq:Q50',
+        type: 'Acquisition',
+        date: '2024-04-04',
+        valueUsd: null,
+        detail: 'Acquired by BigCorp.',
+      },
+    ]);
+  });
+
+  it('keeps only dated, labeled acquisition targets', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [STRIPE_DETAILS],
+        acquisitions: [
+          { company: uri('Q1'), target: uri('Q60'), targetLabel: lit('Paystack'), date: lit('2020-10-15T00:00:00Z') },
+          { company: uri('Q1'), target: uri('Q61'), targetLabel: lit('Q61'), date: lit('2021-01-01T00:00:00Z') },
+          { company: uri('Q1'), target: uri('Q62'), targetLabel: lit('Undated Co') },
+        ],
+      }),
+    );
+    expect(records[0]!.acquisitions).toEqual([
+      {
+        externalId: 'Q1:acq:Q60',
+        target: 'Paystack',
+        date: '2020-10-15',
+        amountUsd: null,
+        rationale: 'Acquisition recorded on Wikidata.',
+      },
+    ]);
+  });
+
+  it('falls back to a templated one-liner and Undisclosed HQ', () => {
+    const records = mapWikidata(
+      bundle({ details: [{ company: uri('Q2'), companyLabel: lit('Mystery Co') }] }),
+    );
+    const r = records[0]!;
+    expect(r.company.oneLiner).toBe('Mystery Co — profile sourced from Wikidata.');
+    expect(r.company.hq).toBe('Undisclosed');
+    expect(r.company.foundedYear).toBe(0);
+    expect(r.company.domain).toBe('');
+    expect(r.company.primarySector).toBeNull();
+  });
+});
+
+describe('sectorFor', () => {
+  it.each([
+    ['artificial intelligence research lab', 'Artificial intelligence'],
+    ['machine learning tooling', 'Artificial intelligence'],
+    ['payment processing', 'Fintech'],
+    ['digital bank', 'Fintech'],
+    ['biotech therapeutics', 'Healthcare'],
+    ['solar panels', 'Climate'],
+    ['cloud software', 'Enterprise SaaS'],
+    ['space logistics', null],
+  ])('%s → %s', (text, expected) => {
+    expect(sectorFor(text)).toBe(expected);
+  });
+});
+
+describe('hostnameOf', () => {
+  it.each([
+    ['https://www.stripe.com', 'stripe.com'],
+    ['https://openai.com/about', 'openai.com'],
+    ['not a url', ''],
+    [null, ''],
+  ])('%s → %s', (url, expected) => {
+    expect(hostnameOf(url)).toBe(expected);
+  });
+});
