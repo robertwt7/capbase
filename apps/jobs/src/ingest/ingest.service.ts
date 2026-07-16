@@ -65,6 +65,7 @@ export class IngestService {
       this.logger.log(`Ingesting from ${source.name} (days ${opts.days}, limit ${opts.limit})`);
       const records = await source.fetch(opts);
       processed += records.length;
+      let done = 0;
       for (const record of records) {
         try {
           await this.upsert(record, index);
@@ -74,6 +75,10 @@ export class IngestService {
           this.logger.warn(
             `Upsert failed for ${record.companyExternalId}: code=${e.code} meta=${JSON.stringify(e.meta)} ${e.message?.split('\n')[0]}`,
           );
+        }
+        done += 1;
+        if (done % 1000 === 0) {
+          this.logger.log(`Upserted ${done}/${records.length} ${source.name} records`);
         }
       }
     }

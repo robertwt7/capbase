@@ -10,11 +10,13 @@ export interface FormDRef {
 
 const SEC_BASE = 'https://www.sec.gov/Archives';
 const MIN_INTERVAL_MS = 160; // ~6 req/s — comfortably under SEC's 10 req/s limit.
+const REQUEST_TIMEOUT_MS = 30_000; // a stalled response must not wedge the pipeline
 
 /**
  * Thin client over the free SEC EDGAR archives. Discovers Form D filings from
  * the daily index and fetches each filing's structured primary_doc.xml. All
- * requests carry the SEC-required User-Agent and are serialized + throttled.
+ * requests carry the SEC-required User-Agent, time out rather than stall, and
+ * have their starts throttled to a global rate (callers may fetch concurrently).
  */
 @Injectable()
 export class EdgarClient {
@@ -70,6 +72,7 @@ export class EdgarClient {
     try {
       const res = await fetch(url, {
         headers: { 'User-Agent': this.userAgent, Accept: 'application/xml,text/plain,*/*' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {
         if (res.status !== 404) this.logger.warn(`GET ${url} -> ${res.status}`);
@@ -82,10 +85,18 @@ export class EdgarClient {
     }
   }
 
-  private async throttle(): Promise<void> {
-    const wait = this.lastRequestAt + MIN_INTERVAL_MS - Date.now();
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    this.lastRequestAt = Date.now();
+  /** Chain of pending rate-limit slots: request *starts* stay ≥MIN_INTERVAL_MS
+   *  apart even with concurrent callers, while responses may overlap. */
+  private slots: Promise<void> = Promise.resolve();
+
+  private throttle(): Promise<void> {
+    const slot = this.slots.then(async () => {
+      const wait = this.lastRequestAt + MIN_INTERVAL_MS - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      this.lastRequestAt = Date.now();
+    });
+    this.slots = slot;
+    return slot;
   }
 }
 
