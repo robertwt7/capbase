@@ -34,7 +34,6 @@ export default async function ComparePage({
   searchParams: Promise<{ companies?: string }>;
 }) {
   const { companies: raw } = await searchParams;
-  const all = await getCompanies();
 
   // Unknown slugs are silently dropped; duplicates collapse; cap at 4.
   const slugs = [
@@ -45,15 +44,15 @@ export default async function ComparePage({
         .filter(Boolean),
     ),
   ].slice(0, MAX_COMPARE);
+
+  // Fetch exactly the selected companies; preserve the URL's column order.
+  const { items } = slugs.length
+    ? await getCompanies({ slugs: slugs.join(','), pageSize: MAX_COMPARE })
+    : { items: [] as Company[] };
   const selected = slugs
-    .map((s) => all.find((c) => c.slug === s))
+    .map((s) => items.find((c) => c.slug === s))
     .filter((c): c is Company => Boolean(c));
   const current = selected.map((c) => c.slug);
-
-  const options = all
-    .filter((c) => !current.includes(c.slug))
-    .map((c) => ({ slug: c.slug, name: c.name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <PageContainer as="main" className="pt-8 pb-20">
@@ -126,7 +125,7 @@ export default async function ComparePage({
 
       <div className="mt-7">
         {selected.length < MAX_COMPARE ? (
-          <ComparePicker key={current.join(',')} options={options} current={current} />
+          <ComparePicker key={current.join(',')} current={current} />
         ) : (
           <p className="font-mono text-[11px] font-medium tracking-[0.14em] text-graphite-500 uppercase">
             Up to {MAX_COMPARE} companies

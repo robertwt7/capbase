@@ -7,10 +7,12 @@ import { formatCount, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
 
 const HOME_PREVIEW = 8;
+const HOME_SECTORS = 5;
 
 export default async function Home() {
+  // Landing shop window: the top-raised companies, not the full directory.
   const [companies, marketStats, marketTotals] = await Promise.all([
-    getCompanies(),
+    getCompanies({ pageSize: HOME_PREVIEW, sort: 'raised' }),
     getMarketStats(),
     getMarketTotals(),
   ]);
@@ -43,14 +45,21 @@ export default async function Home() {
         >
           <Stat size="lg" label="Capital deployed" value={formatUsd(marketTotals.totalRaisedUsd)} />
           <Stat size="lg" label="Disclosed deals" value={formatCount(marketTotals.dealCount)} />
-          <Stat size="lg" label="New unicorns" value={formatCount(marketTotals.newUnicorns)} />
+          <Stat size="lg" label="Unicorns" value={formatCount(marketTotals.newUnicorns)} />
         </div>
       </section>
 
       <section className="mx-auto max-w-(--page-max) px-(--page-pad) pt-16">
-        <SectionHeader title="Sectors this quarter" note="Deal volume vs. prior quarter" />
+        <SectionHeader
+          title="Top sectors"
+          note={
+            <Button variant="ghost" size="sm" href="/markets">
+              All markets →
+            </Button>
+          }
+        />
         <div className="mt-6 grid grid-cols-5 gap-px overflow-hidden rounded-xl border border-line bg-line max-[900px]:grid-cols-2">
-          {marketStats.map((stat) => (
+          {marketStats.slice(0, HOME_SECTORS).map((stat) => (
             <Link
               key={stat.sector}
               href={`/markets/${sectorSlug(stat.sector)}`}
@@ -84,7 +93,7 @@ export default async function Home() {
         />
 
         <div className="mt-6">
-          <CompanyTable companies={companies.slice(0, HOME_PREVIEW)} />
+          <CompanyTable companies={companies.items} />
         </div>
       </section>
 

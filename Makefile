@@ -29,8 +29,8 @@ db-up: ## Start Postgres + apply migrations (non-destructive; keeps existing dat
 	yarn workspace @repo/db migrate:deploy
 
 .PHONY: db-init
-db-init: db-up ## First-time setup: start Postgres, migrate, THEN seed demo data (wipes data)
-	yarn workspace @repo/db seed
+db-init: db-up ## First-time setup: start Postgres, migrate, then apply all seed phases (incl. demo)
+	SEED_DEMO=true yarn workspace @repo/db seed
 
 .PHONY: dev
 dev: ## Run web (:3001), api (:3000) and jobs (:3002) with hot reload
@@ -65,8 +65,16 @@ db-migrate: ## Create + apply a dev migration
 	yarn workspace @repo/db migrate
 
 .PHONY: db-seed
-db-seed: ## Re-seed the database with demo data
-	yarn workspace @repo/db seed
+db-seed: ## Apply pending seed phases (incl. demo; skips already-applied ones)
+	SEED_DEMO=true yarn workspace @repo/db seed
+
+.PHONY: db-baseline
+db-baseline: ## Mark all seed phases as applied WITHOUT running them (existing DBs)
+	yarn workspace @repo/db seed:baseline
+
+.PHONY: db-reset
+db-reset: ## DESTRUCTIVE: wipe all data, then re-apply every seed phase (incl. demo)
+	yarn workspace @repo/db reset
 
 # ---------------------------------------------------------------------------
 # Ingestion (SEC EDGAR Form D)
@@ -80,6 +88,15 @@ ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA)
 .PHONY: ingest-prod
 ingest-prod: ## Run a backfill inside the jobs container (DAYS=N LIMIT=N SOURCE=...)
 	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
+
+.PHONY: backfill-sectors
+backfill-sectors: ## Fill missing Company.primarySector from stored industry values
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-sectors.js
+
+.PHONY: backfill-sectors-prod
+backfill-sectors-prod: ## Fill missing sectors inside the jobs container
+	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill-sectors.js
 
 # ---------------------------------------------------------------------------
 # Production-like stack (everything in Docker)

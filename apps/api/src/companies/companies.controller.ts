@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import type { Company, CompanyDetailResponse } from '@repo/api';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import type { Company, CompanyDetailResponse, Paginated } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,6 +15,7 @@ import {
   CreatePersonDto,
 } from './dto/contributions.dto';
 import { CreateChangeProposalDto } from './dto/create-proposal.dto';
+import { ListCompaniesDto } from './dto/list-companies.dto';
 
 @Controller('companies')
 export class CompaniesController {
@@ -23,8 +24,8 @@ export class CompaniesController {
   // --- Public reads (approved data only) ---
 
   @Get()
-  findAll(): Promise<Company[]> {
-    return this.companies.findAllApproved();
+  findAll(@Query() query: ListCompaniesDto): Promise<Paginated<Company>> {
+    return this.companies.findAllApproved(query);
   }
 
   @UseGuards(OptionalJwtAuthGuard)

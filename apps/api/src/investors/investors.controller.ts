@@ -1,15 +1,16 @@
-import { Controller, Get } from '@nestjs/common';
-import type { InvestorSummary } from '@repo/api';
+import { Controller, Get, Query } from '@nestjs/common';
+import type { InvestorSummary, Paginated } from '@repo/api';
 
 import { InvestorsService } from './investors.service';
+import { ListInvestorsDto } from './dto/list-investors.dto';
 
 @Controller('investors')
 export class InvestorsController {
   constructor(private readonly investors: InvestorsService) {}
 
-  // Public read: unique investors aggregated from approved data.
+  // Public read: one page of unique investors aggregated from approved data.
   @Get()
-  findAll(): Promise<InvestorSummary[]> {
-    return this.investors.findAll();
+  findAll(@Query() query: ListInvestorsDto): Promise<Paginated<InvestorSummary>> {
+    return this.investors.findAll(query);
   }
 }

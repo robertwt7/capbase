@@ -1,10 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   CONTRIBUTION_WINDOW_DAYS,
+  DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   type Company,
   type CompanyDetailResponse,
   type CompanyEditFields,
+  type CompanyListQuery,
+  type Paginated,
   type Role,
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
@@ -59,12 +62,43 @@ export class CompaniesService {
     private readonly users: UsersService,
   ) {}
 
-  async findAllApproved(): Promise<Company[]> {
-    const rows = await this.prisma.company.findMany({
-      where: { moderationStatus: 'APPROVED' },
-      orderBy: { name: 'asc' },
-    });
-    return rows.map((row) => toCompany(row));
+  /** One page of approved companies, filtered/sorted server-side. */
+  async findAllApproved(query: CompanyListQuery = {}): Promise<Paginated<Company>> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+
+    const where: Prisma.CompanyWhereInput = {
+      moderationStatus: 'APPROVED',
+      ...(query.slugs && { slug: { in: query.slugs.split(',').filter(Boolean) } }),
+      ...(query.q && {
+        OR: [
+          { name: { contains: query.q, mode: 'insensitive' as const } },
+          { oneLiner: { contains: query.q, mode: 'insensitive' as const } },
+        ],
+      }),
+      ...(query.sector && { primarySector: query.sector }),
+      ...(query.stage && { stage: query.stage }),
+      ...(query.status && { status: query.status }),
+    };
+
+    const orderBy: Prisma.CompanyOrderByWithRelationInput =
+      query.sort === 'raised'
+        ? { totalRaisedUsd: 'desc' }
+        : query.sort === 'valuation'
+          ? { lastValuationUsd: { sort: 'desc', nulls: 'last' } }
+          : { name: 'asc' };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.company.count({ where }),
+      this.prisma.company.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return { items: rows.map((row) => toCompany(row)), total, page, pageSize };
   }
 
   /**

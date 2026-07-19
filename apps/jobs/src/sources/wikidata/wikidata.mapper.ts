@@ -21,13 +21,24 @@ export interface WikidataBundle {
 }
 
 /** Keyword heuristic mapping Wikidata industry/description text onto the
- *  canonical Sector vocabulary. First match wins; null when nothing fits. */
+ *  canonical Sector vocabulary. First match wins — ordering matters: specific
+ *  terms (fintech, renewables) sit above their broader buckets (financial
+ *  services, energy). Null when nothing fits. */
 const SECTOR_RULES: readonly [RegExp, Sector][] = [
   [/artificial intelligence|machine learning/i, 'Artificial intelligence'],
-  [/fintech|financial|payment|bank/i, 'Fintech'],
-  [/health|biotech|pharma|medical/i, 'Healthcare'],
-  [/climate|energy|solar|carbon/i, 'Climate'],
+  [/fintech|payment/i, 'Fintech'],
+  [/bank|insurance|invest|financial|credit|asset management/i, 'Financial services'],
+  [/health|biotech|pharma|medical|hospital/i, 'Healthcare'],
+  [/climate|solar|wind power|renewable|carbon|environmental/i, 'Climate'],
+  [/oil|gas|petroleum|energy|utilit|sewer|water supply/i, 'Energy'],
   [/software|saas|cloud/i, 'Enterprise SaaS'],
+  [/real estate|property|housing|construction|urban planning/i, 'Real estate'],
+  [/transport|logistic|airline|railway|shipping|automotive/i, 'Transport'],
+  [/retail|restaurant|hotel|tourism|travel|consumer|food/i, 'Consumer & retail'],
+  [/telecommunication|media|broadcast|publishing|entertainment/i, 'Media & telecom'],
+  [/education|university|school/i, 'Education'],
+  [/manufactur|industrial|agricult|forestry|mining|chemical/i, 'Industrials'],
+  [/technology|computer|internet|electronics/i, 'Technology'],
 ];
 
 export function sectorFor(text: string): Sector | null {

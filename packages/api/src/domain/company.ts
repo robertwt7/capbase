@@ -37,7 +37,16 @@ export type Sector =
   | 'Fintech'
   | 'Healthcare'
   | 'Climate'
-  | 'Enterprise SaaS';
+  | 'Enterprise SaaS'
+  | 'Technology' // generic tech (SEC "Other Technology"/"Computers")
+  | 'Financial services' // banking, insurance, investing
+  | 'Energy' // oil & gas, non-renewable energy
+  | 'Real estate'
+  | 'Industrials' // manufacturing, agriculture, construction inputs
+  | 'Consumer & retail' // retail, restaurants, hospitality, travel
+  | 'Transport'
+  | 'Media & telecom'
+  | 'Education';
 
 export const SECTORS: readonly Sector[] = [
   'Artificial intelligence',
@@ -45,6 +54,15 @@ export const SECTORS: readonly Sector[] = [
   'Healthcare',
   'Climate',
   'Enterprise SaaS',
+  'Technology',
+  'Financial services',
+  'Energy',
+  'Real estate',
+  'Industrials',
+  'Consumer & retail',
+  'Transport',
+  'Media & telecom',
+  'Education',
 ];
 
 export type OperatingStatus = 'Active' | 'Closed';

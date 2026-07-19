@@ -20,6 +20,14 @@ enum ReviewStatus {
   REJECTED
 }
 
+// Ledger of applied seed phases (Flyway-style). The seed runner
+// (prisma/seed.ts) only executes phases not recorded here; `--baseline` marks
+// phases as applied without running them (for DBs that predate the runner).
+model SeedHistory {
+  name      String   @id
+  appliedAt DateTime @default(now())
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -91,6 +99,12 @@ model Company {
 
   @@unique([externalSource, externalId])
   @@index([moderationStatus])
+  // Server-side directory filters/sorts always scope to APPROVED first.
+  @@index([moderationStatus, primarySector])
+  @@index([moderationStatus, stage])
+  @@index([moderationStatus, status])
+  @@index([moderationStatus, name])
+  @@index([moderationStatus, totalRaisedUsd])
 }
 
 // A company pinned to a user's personal watchlist.
@@ -280,23 +294,4 @@ model DiversitySignal {
 
   @@index([companyId])
   @@index([moderationStatus])
-}
-
-// Aggregate sector statistics — seeded, not user-contributed (for now).
-model MarketStat {
-  id                 String @id @default(cuid())
-  sector             String @unique
-  dealCount          Int
-  totalRaisedUsd     BigInt
-  medianValuationUsd BigInt
-  trendPct           Float
-}
-
-// Top-of-market totals shown on the landing hero. Singleton (one row).
-model MarketSnapshot {
-  id             String @id @default(cuid())
-  totalRaisedUsd BigInt
-  dealCount      Int
-  newUnicorns    Int
-  quarter        String
 }

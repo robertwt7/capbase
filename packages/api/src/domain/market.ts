@@ -1,9 +1,10 @@
 export interface MarketStat {
   sector: string;
-  dealCount: number;
+  companyCount: number; // approved companies in the sector
+  dealCount: number; // approved rounds on approved companies in the sector
   totalRaisedUsd: number;
   medianValuationUsd: number;
-  trendPct: number; // quarter-over-quarter change in deal volume
+  trendPct: number; // deal-volume change, trailing 90 days vs the 90 days before
 }
 
 export interface MarketTotals {

@@ -9,12 +9,16 @@
 // (e.g. `import type { FundingRound } from '../lib/data'`) keep working.
 
 import {
+  DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   type Company,
   type CompanyDetailResponse,
+  type CompanyListQuery,
+  type InvestorListQuery,
   type InvestorSummary,
   type MarketStat,
   type MarketTotals,
+  type Paginated,
 } from '@repo/api';
 
 import { apiFetch } from './api';
@@ -306,11 +310,11 @@ const fallbackCompanies: Company[] = [
 ];
 
 const fallbackMarketStats: MarketStat[] = [
-  { sector: 'Artificial intelligence', dealCount: 1284, totalRaisedUsd: 48_200_000_000, medianValuationUsd: 240_000_000, trendPct: 31 },
-  { sector: 'Fintech', dealCount: 962, totalRaisedUsd: 19_400_000_000, medianValuationUsd: 95_000_000, trendPct: -6 },
-  { sector: 'Healthcare', dealCount: 741, totalRaisedUsd: 14_800_000_000, medianValuationUsd: 78_000_000, trendPct: 4 },
-  { sector: 'Climate', dealCount: 523, totalRaisedUsd: 11_900_000_000, medianValuationUsd: 64_000_000, trendPct: 12 },
-  { sector: 'Enterprise SaaS', dealCount: 1105, totalRaisedUsd: 16_300_000_000, medianValuationUsd: 70_000_000, trendPct: -2 },
+  { sector: 'Artificial intelligence', companyCount: 2, dealCount: 1284, totalRaisedUsd: 48_200_000_000, medianValuationUsd: 240_000_000, trendPct: 31 },
+  { sector: 'Fintech', companyCount: 2, dealCount: 962, totalRaisedUsd: 19_400_000_000, medianValuationUsd: 95_000_000, trendPct: -6 },
+  { sector: 'Healthcare', companyCount: 0, dealCount: 741, totalRaisedUsd: 14_800_000_000, medianValuationUsd: 78_000_000, trendPct: 4 },
+  { sector: 'Climate', companyCount: 0, dealCount: 523, totalRaisedUsd: 11_900_000_000, medianValuationUsd: 64_000_000, trendPct: 12 },
+  { sector: 'Enterprise SaaS', companyCount: 4, dealCount: 1105, totalRaisedUsd: 16_300_000_000, medianValuationUsd: 70_000_000, trendPct: -2 },
 ];
 
 const fallbackMarketTotals: MarketTotals = {
@@ -349,12 +353,54 @@ const fallbackInvestors: InvestorSummary[] = [
   },
 ];
 
-export async function getCompanies(): Promise<Company[]> {
+/** Build a query string from defined params only. */
+function toSearchParams(query: object): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** Offline fallback: apply the list query to the mock array client-side. */
+function paginateFallbackCompanies(query: CompanyListQuery): Paginated<Company> {
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+  const needle = (query.q ?? '').trim().toLowerCase();
+  const slugs = query.slugs?.split(',').filter(Boolean);
+  const list = fallbackCompanies.filter((c) => {
+    if (slugs && !slugs.includes(c.slug)) return false;
+    if (
+      needle &&
+      !c.name.toLowerCase().includes(needle) &&
+      !c.oneLiner.toLowerCase().includes(needle)
+    ) {
+      return false;
+    }
+    if (query.sector && c.primarySector !== query.sector) return false;
+    if (query.stage && c.stage !== query.stage) return false;
+    if (query.status && c.status !== query.status) return false;
+    return true;
+  });
+  if (query.sort === 'raised') list.sort((a, b) => b.totalRaisedUsd - a.totalRaisedUsd);
+  else if (query.sort === 'valuation')
+    list.sort((a, b) => (b.lastValuationUsd ?? 0) - (a.lastValuationUsd ?? 0));
+  else list.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    items: list.slice((page - 1) * pageSize, page * pageSize),
+    total: list.length,
+    page,
+    pageSize,
+  };
+}
+
+export async function getCompanies(query: CompanyListQuery = {}): Promise<Paginated<Company>> {
   try {
-    return await apiFetch<Company[]>('/companies');
+    return await apiFetch<Paginated<Company>>(`/companies${toSearchParams(query)}`);
   } catch (err) {
     console.warn('[data] getCompanies fell back to mock data:', err);
-    return fallbackCompanies;
+    return paginateFallbackCompanies(query);
   }
 }
 
@@ -393,12 +439,35 @@ export async function getCompanyDetail(
   }
 }
 
-export async function getInvestors(): Promise<InvestorSummary[]> {
+/** Offline fallback: apply the list query to the mock array client-side. */
+function paginateFallbackInvestors(query: InvestorListQuery): Paginated<InvestorSummary> {
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+  const needle = (query.q ?? '').trim().toLowerCase();
+  const list = fallbackInvestors.filter((inv) => {
+    if (needle && !inv.name.toLowerCase().includes(needle)) return false;
+    if (query.type && inv.type !== query.type) return false;
+    return true;
+  });
+  if (query.sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
+  else
+    list.sort((a, b) => b.portfolioCount - a.portfolioCount || a.name.localeCompare(b.name));
+  return {
+    items: list.slice((page - 1) * pageSize, page * pageSize),
+    total: list.length,
+    page,
+    pageSize,
+  };
+}
+
+export async function getInvestors(
+  query: InvestorListQuery = {},
+): Promise<Paginated<InvestorSummary>> {
   try {
-    return await apiFetch<InvestorSummary[]>('/investors');
+    return await apiFetch<Paginated<InvestorSummary>>(`/investors${toSearchParams(query)}`);
   } catch (err) {
     console.warn('[data] getInvestors fell back to mock data:', err);
-    return fallbackInvestors;
+    return paginateFallbackInvestors(query);
   }
 }
 

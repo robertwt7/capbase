@@ -8,7 +8,7 @@ import type { MarketStat } from '@repo/api';
 import { formatCount, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
 
-export type MarketRow = MarketStat & { companyCount: number };
+export type MarketRow = MarketStat;
 
 type Key = 'sector' | 'capital' | 'deals' | 'median' | 'trend' | 'companies';
 type Dir = 'asc' | 'desc';

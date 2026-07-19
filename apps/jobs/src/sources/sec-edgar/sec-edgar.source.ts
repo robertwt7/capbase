@@ -6,6 +6,7 @@ import type { FetchOptions, IngestionSource, NormalizedRecord } from '../ingesti
 import { kebab } from '../../util/slug';
 import { EdgarClient, type FormDRef } from './edgar.client';
 import { parseFormD } from './form-d.parser';
+import { secSector } from './sector-map';
 
 export const SEC_EDGAR = 'SEC_EDGAR';
 
@@ -90,6 +91,7 @@ export class SecEdgarSource implements IngestionSource {
         hq,
         foundedYear: parsed.yearOfInc,
         industry: parsed.industry ? [parsed.industry] : [],
+        primarySector: parsed.industry ? secSector(parsed.industry) : null,
         stage: stageFromAmount(parsed.amountSoldUsd),
         totalRaisedUsd: parsed.amountSoldUsd,
       },

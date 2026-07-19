@@ -4,7 +4,14 @@ import { notFound } from 'next/navigation';
 import { SECTORS } from '@repo/api';
 
 import { CompanyTable } from '@/components/CompanyTable';
-import { EmptyState, Eyebrow, PageContainer, SectionHeader, Stat } from '@/components/ui';
+import {
+  EmptyState,
+  Eyebrow,
+  PageContainer,
+  Pagination,
+  SectionHeader,
+  Stat,
+} from '@/components/ui';
 import { getCompanies, getMarketStats } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
 import { sectorFromSlug, sectorSlug } from '@/lib/markets';
@@ -13,13 +20,25 @@ export function generateStaticParams() {
   return SECTORS.map((s) => ({ sector: sectorSlug(s) }));
 }
 
-export default async function SectorPage({ params }: { params: Promise<{ sector: string }> }) {
+export default async function SectorPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ sector: string }>;
+  searchParams: Promise<{ page?: string }>;
+}) {
   const sector = sectorFromSlug((await params).sector);
   if (!sector) notFound();
 
-  const [stats, companies] = await Promise.all([getMarketStats(), getCompanies()]);
+  const rawPage = Number((await searchParams).page);
+  const page = Number.isInteger(rawPage) && rawPage >= 1 ? rawPage : 1;
+
+  const [stats, companies] = await Promise.all([
+    getMarketStats(),
+    getCompanies({ sector, page }),
+  ]);
   const stat = stats.find((s) => s.sector === sector);
-  const inSector = companies.filter((c) => c.primarySector === sector);
+  const base = `/markets/${sectorSlug(sector)}`;
 
   return (
     <PageContainer as="main" className="pt-14 pb-20">
@@ -43,10 +62,20 @@ export default async function SectorPage({ params }: { params: Promise<{ sector:
       ) : null}
 
       <div className="mt-10">
-        <SectionHeader title="Companies" note={`${inSector.length} in ${sector}`} />
-        {inSector.length ? (
+        <SectionHeader
+          title="Companies"
+          note={`${formatCount(companies.total)} in ${sector}`}
+        />
+        {companies.items.length ? (
           <div className="mt-6">
-            <CompanyTable companies={inSector} />
+            <CompanyTable companies={companies.items} />
+            <Pagination
+              page={companies.page}
+              pageSize={companies.pageSize}
+              total={companies.total}
+              href={(p) => (p > 1 ? `${base}?page=${p}` : base)}
+              className="mt-6"
+            />
           </div>
         ) : (
           <EmptyState className="mt-6">

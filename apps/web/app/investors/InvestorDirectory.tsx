@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { INVESTOR_TYPES, type InvestorSummary } from '@repo/api';
+import { INVESTOR_TYPES, type InvestorSummary, type Paginated } from '@repo/api';
 
 import {
   Badge,
   Button,
   EmptyState,
   Input,
+  Pagination,
   Select,
   SelectContent,
   SelectItem,
@@ -28,48 +29,53 @@ const SORTS: { value: Sort; label: string }[] = [
 
 const isSort = (v: string | undefined): v is Sort => v === 'portfolio' || v === 'name';
 
+/**
+ * Server-driven directory: filters/sort/page live in the URL, the server
+ * component refetches one page from the API on every change.
+ */
 export function InvestorDirectory({
-  investors,
+  result,
   initial,
 }: {
-  investors: InvestorSummary[];
+  result: Paginated<InvestorSummary>;
   initial: Record<string, string | undefined>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
   const [q, setQ] = useState(initial.q ?? '');
   const [type, setType] = useState(initial.type ?? ALL);
   const [sort, setSort] = useState<Sort>(isSort(initial.sort) ? initial.sort : 'portfolio');
 
-  // Mirror filter state to the URL (debounced), dropping empty / default keys.
-  useEffect(() => {
+  const filterQuery = (page?: number) => {
     const params = new URLSearchParams();
     if (q.trim()) params.set('q', q.trim());
     if (type !== ALL) params.set('type', type);
     if (sort !== 'portfolio') params.set('sort', sort);
-    const query = params.toString();
+    if (page && page > 1) params.set('page', String(page));
+    const qs = params.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  };
+
+  // Mirror filter state to the URL (debounced); the server component refetches.
+  // Any filter change drops the page param (back to page 1). Skipped on mount
+  // so a deep-linked ?page=N isn't stripped before the user touches a filter.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    const next = filterQuery();
     const t = setTimeout(() => {
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      startTransition(() => {
+        router.replace(next, { scroll: false });
+      });
     }, 250);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, type, sort, pathname, router]);
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const list = investors.filter((inv) => {
-      if (needle && !inv.name.toLowerCase().includes(needle)) return false;
-      if (type !== ALL && inv.type !== type) return false;
-      return true;
-    });
-    const sorted = [...list];
-    if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
-    else
-      sorted.sort(
-        (a, b) => b.portfolioCount - a.portfolioCount || a.name.localeCompare(b.name),
-      );
-    return sorted;
-  }, [investors, q, type, sort]);
 
   const active = q.trim() !== '' || type !== ALL || sort !== 'portfolio';
   const clear = () => {
@@ -77,6 +83,10 @@ export function InvestorDirectory({
     setType(ALL);
     setSort('portfolio');
   };
+
+  const { items, total, page, pageSize } = result;
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
 
   return (
     <div className="mt-6">
@@ -118,7 +128,9 @@ export function InvestorDirectory({
 
       <div className="mt-4 flex items-center justify-between gap-4">
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-graphite-500">
-          {formatCount(filtered.length)} shown
+          {total === 0
+            ? '0 matches'
+            : `${formatCount(first)}–${formatCount(last)} of ${formatCount(total)}`}
         </span>
         {active ? (
           <Button variant="ghost" size="sm" onClick={clear}>
@@ -127,48 +139,57 @@ export function InvestorDirectory({
         ) : null}
       </div>
 
-      {filtered.length ? (
-        <div className="mt-4 overflow-hidden rounded-xl border border-line" role="table" aria-label="Investor directory">
-          <div
-            className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden"
-            role="row"
-          >
-            <span role="columnheader">Investor</span>
-            <span role="columnheader" className="text-right">
-              Portfolio
-            </span>
-            <span role="columnheader">Sectors</span>
-            <span role="columnheader">Selected companies</span>
-          </div>
-
-          {filtered.map((inv) => (
+      {items.length ? (
+        <div className={`mt-4 transition-opacity ${isPending ? 'opacity-60' : ''}`}>
+          <div className="overflow-hidden rounded-xl border border-line" role="table" aria-label="Investor directory">
             <div
-              key={inv.name}
-              className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 border-t border-line px-[22px] py-4 max-[820px]:grid-cols-1 max-[820px]:gap-y-2"
+              className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden"
               role="row"
             >
-              <span className="flex min-w-0 flex-col gap-1" role="cell">
-                <span className="font-display text-base font-semibold tracking-tight text-ink">
-                  {inv.name}
-                </span>
-                <Badge variant="pill" mono className="self-start">
-                  {inv.type}
-                </Badge>
+              <span role="columnheader">Investor</span>
+              <span role="columnheader" className="text-right">
+                Portfolio
               </span>
-              <span
-                className="text-right font-mono text-base font-medium text-ink max-[820px]:text-left"
-                role="cell"
-              >
-                {formatCount(inv.portfolioCount)}
-              </span>
-              <span className="text-[13px] text-graphite-500" role="cell">
-                {inv.sectors.length ? inv.sectors.join(' · ') : '—'}
-              </span>
-              <span className="truncate text-[13px] text-graphite-700" role="cell">
-                {inv.companies.map((c) => c.name).join(', ')}
-              </span>
+              <span role="columnheader">Sectors</span>
+              <span role="columnheader">Selected companies</span>
             </div>
-          ))}
+
+            {items.map((inv) => (
+              <div
+                key={inv.name}
+                className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 border-t border-line px-[22px] py-4 max-[820px]:grid-cols-1 max-[820px]:gap-y-2"
+                role="row"
+              >
+                <span className="flex min-w-0 flex-col gap-1" role="cell">
+                  <span className="font-display text-base font-semibold tracking-tight text-ink">
+                    {inv.name}
+                  </span>
+                  <Badge variant="pill" mono className="self-start">
+                    {inv.type}
+                  </Badge>
+                </span>
+                <span
+                  className="text-right font-mono text-base font-medium text-ink max-[820px]:text-left"
+                  role="cell"
+                >
+                  {formatCount(inv.portfolioCount)}
+                </span>
+                <span className="text-[13px] text-graphite-500" role="cell">
+                  {inv.sectors.length ? inv.sectors.join(' · ') : '—'}
+                </span>
+                <span className="truncate text-[13px] text-graphite-700" role="cell">
+                  {inv.companies.map((c) => c.name).join(', ')}
+                </span>
+              </div>
+            ))}
+          </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            href={(p) => filterQuery(p)}
+            className="mt-6"
+          />
         </div>
       ) : (
         <EmptyState className="mt-4">

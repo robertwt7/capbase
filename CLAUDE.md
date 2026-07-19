@@ -103,13 +103,17 @@ Forms use **react-hook-form** with **zod** validation (shadcn `Form` pattern):
 
 ### Data
 
-`lib/data.ts` is the data seam. Its getters (`getCompanies`, `getCompany`,
-`getMarketStats`, `getMarketTotals`) are **async** and fetch the live NestJS API
-through `lib/api.ts` (server-only `API_URL` env, 60s ISR). The mock arrays in the
-file remain ONLY as an offline fallback if the API is unreachable in local dev — they
-are illustrative, not real. Domain types are re-exported from `@repo/api` (single
-source of truth). Company logos resolve from `domain` via Clearbit in
-`components/CompanyLogo.tsx`, with a monogram fallback.
+`lib/data.ts` is the data seam. Its getters are **async** and fetch the live NestJS API
+through `lib/api.ts` (server-only `API_URL` env, 60s ISR). List reads are **paginated
+server-side**: `getCompanies`/`getInvestors` take a `CompanyListQuery`/`InvestorListQuery`
+(q/filters/sort/page/pageSize, parsed leniently from `searchParams` by `lib/list-params.ts`)
+and return `Paginated<T>` (`{ items, total, page, pageSize }` from `@repo/api`). Directory
+pages are URL-driven: the client components only mirror filter state to the URL (debounced
+`router.replace`, page resets on filter change) and render the page plus `<Pagination>`;
+the server component refetches. The mock arrays in the file remain ONLY as an offline
+fallback if the API is unreachable in local dev — they are illustrative, not real. Domain
+types are re-exported from `@repo/api` (single source of truth). Company logos resolve from
+`domain` via Clearbit in `components/CompanyLogo.tsx`, with a monogram fallback.
 
 ### Routes
 
@@ -145,15 +149,27 @@ in `prisma.config.ts` (reads `DATABASE_URL`), not the schema. Money is `BigInt`.
 Company/FundingRound rows also have `externalSource`/`externalId` (`@@unique`) for idempotent
 ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
 
+**Seeding is phased** (Flyway-style): `prisma/seeds/` holds ordered `Seed` phases
+(`001-admin-user` bootstrap, `002-demo-companies` demo, …) registered in `seeds/index.ts`;
+`prisma/seed.ts` is the runner, applying only phases not yet recorded in the `SeedHistory`
+table. `kind: 'demo'` phases need `SEED_DEMO=true` (set by `make db-seed`/`db-init` and the
+compose seed profile); plain `seed` is bootstrap-only and safe on prod. To add seed data,
+append a new `NNN-*.ts` phase (idempotent upserts, never `deleteMany`; never edit a shipped
+phase). `make db-baseline` marks all phases applied without running (pre-runner DBs);
+`make db-reset` is the explicit destructive wipe-and-reseed for local dev.
+
 ### Controlled vocabularies & entity metadata
 
 Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
 (`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
 — not Prisma enums. Besides `Stage`/`CompanyStatus`/`InvestorType`/`ExitType`, there is a
-**`Sector`/`SECTORS`** vocabulary (the 5 canonical sectors: `Artificial intelligence`, `Fintech`,
-`Healthcare`, `Climate`, `Enterprise SaaS`) shared between `Company.primarySector` and
-`MarketStat.sector`. This is the connection between companies and the sector tape; `MarketStat`
-aggregate numbers stay **seeded**, not computed from companies. Two small status vocabularies also
+**`Sector`/`SECTORS`** vocabulary (14 canonical sectors: the original `Artificial intelligence`/
+`Fintech`/`Healthcare`/`Climate`/`Enterprise SaaS` plus `Technology`, `Financial services`,
+`Energy`, `Real estate`, `Industrials`, `Consumer & retail`, `Transport`, `Media & telecom`,
+`Education`) shared between `Company.primarySector` and `MarketStat.sector`. This is the
+connection between companies and the sector tape; market stats (`MarketStat`/`MarketTotals`)
+are **computed live** by the API's `MarketService` from approved Company/FundingRound rows —
+there are no seeded market tables. Two small status vocabularies also
 exist: `OperatingStatus`/`OPERATING_STATUSES` (`Active`/`Closed`) and `CompanyType`/`COMPANY_TYPES`
 (`For profit`/`Non-profit`).
 
@@ -161,7 +177,9 @@ Entities carry optional outbound-link / metadata fields (all nullable, `@IsUrl`-
 link): `Company` — `websiteUrl`, `linkedinUrl`, `twitterUrl`, `legalName`, `operatingStatus`,
 `companyType`, `primarySector`; `Person` — `linkedinUrl`, `title`; `InvestorHolding` —
 `websiteUrl`, `linkedinUrl`. They render as outbound links / facts on the company profile.
-SEC-ingested rows leave these null (no SEC→sector mapping yet).
+SEC rows get `primarySector` via the deterministic Form D map
+(`apps/jobs/src/sources/sec-edgar/sector-map.ts`); Wikidata rows via the `SECTOR_RULES`
+keyword heuristic. `make backfill-sectors` fills missing sectors from stored `industry[]`.
 
 ## Jobs (apps/jobs)
 

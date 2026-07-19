@@ -194,12 +194,28 @@ describe('sectorFor', () => {
   it.each([
     ['artificial intelligence research lab', 'Artificial intelligence'],
     ['machine learning tooling', 'Artificial intelligence'],
+    // Ordering: specific fintech terms beat the broad financial bucket…
     ['payment processing', 'Fintech'],
-    ['digital bank', 'Fintech'],
+    // …but bare banking/finance terms land in Financial services.
+    ['digital bank', 'Financial services'],
+    ['investment management firm', 'Financial services'],
     ['biotech therapeutics', 'Healthcare'],
+    // Ordering: renewables beat the generic energy bucket.
     ['solar panels', 'Climate'],
+    ['solar energy developer', 'Climate'],
+    ['oil and gas exploration', 'Energy'],
+    ['sewer network operator', 'Energy'],
     ['cloud software', 'Enterprise SaaS'],
-    ['space logistics', null],
+    ['real estate developer', 'Real estate'],
+    ['urban planning consultancy', 'Real estate'],
+    ['space logistics', 'Transport'],
+    ['hotel chain', 'Consumer & retail'],
+    ['telecommunications carrier', 'Media & telecom'],
+    ['university spin-off in education', 'Education'],
+    ['agriculture, forestry and fishing', 'Industrials'],
+    ['consumer electronics', 'Consumer & retail'],
+    ['electronics maker', 'Technology'],
+    ['zebra grooming services', null],
   ])('%s → %s', (text, expected) => {
     expect(sectorFor(text)).toBe(expected);
   });
