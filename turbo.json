@@ -9,6 +9,8 @@
     "ADMIN_PASSWORD",
     "ADMIN_NAME",
     "API_URL",
+    "SITE_URL",
+    "NEXT_PUBLIC_GA_ID",
     "SEC_USER_AGENT",
     "CRON_SCHEDULE",
     "INGEST_ON_BOOT",

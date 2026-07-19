@@ -1,7 +1,10 @@
+import { GoogleAnalytics } from '@next/third-parties/google';
 import type { Metadata } from 'next';
 import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 
+import { SiteFooter } from '@/components/SiteFooter';
 import { SiteHeader } from '@/components/SiteHeader';
+import { SITE_NAME, SITE_URL } from '@/lib/site';
 import './globals.css';
 
 const archivo = Archivo({
@@ -23,9 +26,20 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Capbase — open company and funding intelligence',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'Capbase — Free Company & Startup Funding Data',
+    template: `%s — ${SITE_NAME}`,
+  },
   description:
-    'Funding rounds, investors, people, and market data for private companies. An open alternative to closed deal databases.',
+    'Funding rounds, investors, people, and market data for private companies — a free, crowdsourced, open-source alternative to Crunchbase and PitchBook.',
+  openGraph: {
+    type: 'website',
+    siteName: SITE_NAME,
+    url: '/',
+  },
+  twitter: { card: 'summary_large_image' },
+  alternates: { canonical: '/' },
 };
 
 export default function RootLayout({
@@ -33,6 +47,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Read server-side at runtime (this is an RSC), so no Docker build arg is
+  // needed; unset in dev → GA is a silent no-op.
+  const gaId = process.env.NEXT_PUBLIC_GA_ID;
+
   return (
     <html lang="en">
       <body
@@ -40,6 +58,8 @@ export default function RootLayout({
       >
         <SiteHeader />
         {children}
+        <SiteFooter />
+        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
       </body>
     </html>
   );

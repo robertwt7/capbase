@@ -28,6 +28,11 @@ const FORMS = {
   diversity: DiversityForm,
 } satisfies Record<ContributionType, ComponentType<ContributionFormProps>>;
 
+export const metadata = {
+  title: 'Contribute',
+  robots: { index: false, follow: false },
+};
+
 export default async function ContributeToCompanyPage({
   params,
   searchParams,

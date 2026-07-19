@@ -10,6 +10,11 @@ import { SavedCompanies } from './SavedCompanies';
 
 import styles from '../account.module.css';
 
+export const metadata = {
+  title: 'Profile',
+  robots: { index: false, follow: false },
+};
+
 export default async function ProfilePage() {
   const user = await requireUser('/profile');
   const [{ access, items }, savedCompanies] = await Promise.all([

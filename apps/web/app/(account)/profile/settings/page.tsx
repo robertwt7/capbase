@@ -5,7 +5,10 @@ import { requireUser } from '@/lib/auth';
 
 import { SettingsForms } from './SettingsForms';
 
-export const metadata = { title: 'Account settings' };
+export const metadata = {
+  title: 'Account settings',
+  robots: { index: false, follow: false },
+};
 
 export default async function SettingsPage() {
   const user = await requireUser('/profile/settings');

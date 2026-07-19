@@ -1,8 +1,17 @@
+import type { Metadata } from 'next';
+
 import { PageContainer, SectionHeader } from '@/components/ui';
 import { getInvestors } from '@/lib/data';
 import { formatCount } from '@/lib/format';
 import { investorListQuery } from '@/lib/list-params';
 import { InvestorDirectory } from './InvestorDirectory';
+
+export const metadata: Metadata = {
+  title: 'Investor Directory — VCs, Angels & Funds',
+  description:
+    'Venture firms, growth funds, and angels with their portfolio companies and sectors — free, crowdsourced investor data.',
+  alternates: { canonical: '/investors' },
+};
 
 export default async function InvestorsPage({
   searchParams,

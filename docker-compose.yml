@@ -56,6 +56,9 @@ services:
     restart: unless-stopped
     environment:
       API_URL: http://api:3000
+      SITE_URL: ${SITE_URL:-https://capbase.fyi}
+      # Read server-side in the root layout at runtime — no build arg needed.
+      NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
     ports:
       - '3001:3001'
     depends_on:

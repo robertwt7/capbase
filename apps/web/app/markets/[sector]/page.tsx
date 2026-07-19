@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -18,6 +19,27 @@ import { sectorFromSlug, sectorSlug } from '@/lib/markets';
 
 export function generateStaticParams() {
   return SECTORS.map((s) => ({ sector: sectorSlug(s) }));
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ sector: string }>;
+}): Promise<Metadata> {
+  const sector = sectorFromSlug((await params).sector);
+  if (!sector) return {}; // the page itself 404s
+
+  const stats = await getMarketStats();
+  const stat = stats.find((s) => s.sector === sector);
+  const description = stat
+    ? `${sector} startups on Capbase: ${formatCount(stat.companyCount)} companies, ${formatCount(stat.dealCount)} disclosed deals, ${formatUsd(stat.totalRaisedUsd)} raised. Free, crowdsourced funding data.`
+    : `Funding rounds, investors, and market data for ${sector} startups — free and crowdsourced on Capbase.`;
+
+  return {
+    title: `${sector} Startups — Funding & Market Data`,
+    description,
+    alternates: { canonical: `/markets/${sectorSlug(sector)}` },
+  };
 }
 
 export default async function SectorPage({

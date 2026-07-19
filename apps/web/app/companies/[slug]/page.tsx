@@ -1,20 +1,53 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CompanyAccess } from '@repo/api';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { FundingLadder } from '@/components/FundingLadder';
+import { JsonLd } from '@/components/JsonLd';
 import { SaveCompanyButton } from '@/components/SaveCompanyButton';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
 import { formatCount, formatDate, formatUsd, signedPct } from '@/lib/format';
+import { companyBreadcrumbJsonLd, companyJsonLd } from '@/lib/schema';
 import { getSavedStatus } from '@/lib/watchlist';
 
 import { ProposeChangeMenu } from './ProposeChangeMenu';
 
 const panel = 'grid gap-px overflow-hidden rounded-[10px] border border-line bg-line';
 const cell = 'bg-surface';
+
+const DESCRIPTION_MAX = 160;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const result = await getCompanyDetail(slug);
+  if (!result) return {};
+  const { company } = result;
+
+  const facts = [
+    company.oneLiner.replace(/\.$/, ''),
+    `Founded ${company.founded}`,
+    company.hq,
+    company.totalRaisedUsd > 0 ? `${formatUsd(company.totalRaisedUsd)} raised` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const description =
+    facts.length > DESCRIPTION_MAX ? `${facts.slice(0, DESCRIPTION_MAX - 1).trimEnd()}…` : facts;
+
+  return {
+    title: `${company.name} — Funding, Investors & Profile`,
+    description,
+    alternates: { canonical: `/companies/${slug}` },
+  };
+}
 
 export default async function CompanyProfile({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -32,6 +65,9 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
   return (
     <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+      <JsonLd data={companyJsonLd(company)} />
+      <JsonLd data={companyBreadcrumbJsonLd(company)} />
+
       <div className="flex items-center justify-between gap-4">
         <Link
           href="/"
@@ -314,7 +350,14 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
       </Block>
 
       <footer className="mt-6 border-t border-line pt-7 pb-16 font-mono text-xs text-graphite-500">
-        Figures shown are illustrative demo data, pending live ingestion.
+        Data aggregated from SEC EDGAR, Wikidata, and community contributions. Spotted an error?{' '}
+        <Link
+          href={`/companies/${company.slug}/contribute?type=edit`}
+          className="underline underline-offset-[3px] transition-colors hover:text-ink"
+        >
+          Propose a change
+        </Link>
+        .
       </footer>
     </main>
   );

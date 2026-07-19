@@ -144,6 +144,30 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
   });
 });
 
+describe('CompaniesService.listSlugs (sitemap feed)', () => {
+  it('returns approved slugs only, with ISO-formatted update timestamps', async () => {
+    const findMany = jest.fn(async () => [
+      { slug: 'helia', updatedAt: new Date('2026-07-01T10:30:00.000Z') },
+      { slug: 'vellum', updatedAt: new Date('2026-06-15T08:00:00.000Z') },
+    ]);
+    const prisma = { company: { findMany } } as unknown as PrismaService;
+    const users = {} as unknown as UsersService;
+    const service = new CompaniesService(prisma, users);
+
+    const entries = await service.listSlugs();
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { moderationStatus: 'APPROVED' },
+      select: { slug: true, updatedAt: true },
+      orderBy: { slug: 'asc' },
+    });
+    expect(entries).toEqual([
+      { slug: 'helia', updatedAt: '2026-07-01T10:30:00.000Z' },
+      { slug: 'vellum', updatedAt: '2026-06-15T08:00:00.000Z' },
+    ]);
+  });
+});
+
 describe('CompaniesService.createCompany (new fields persist)', () => {
   it('passes the new link/metadata fields to prisma.company.create', async () => {
     const create = jest.fn(async () => ({

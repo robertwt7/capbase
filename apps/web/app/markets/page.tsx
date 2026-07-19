@@ -1,7 +1,16 @@
+import type { Metadata } from 'next';
+
 import { PageContainer, SectionHeader, Stat } from '@/components/ui';
 import { getMarketStats, getMarketTotals } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
 import { MarketTable } from './MarketTable';
+
+export const metadata: Metadata = {
+  title: 'Startup Market Data by Sector',
+  description:
+    'Deal counts, capital raised, and median valuations across 14 startup sectors, computed live from crowdsourced funding data.',
+  alternates: { canonical: '/markets' },
+};
 
 export default async function MarketsPage() {
   const [marketStats, marketTotals] = await Promise.all([getMarketStats(), getMarketTotals()]);

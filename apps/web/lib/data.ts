@@ -8,12 +8,15 @@
 // the NestJS backend. They are re-exported here so existing component imports
 // (e.g. `import type { FundingRound } from '../lib/data'`) keep working.
 
+import { cache } from 'react';
+
 import {
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   type Company,
   type CompanyDetailResponse,
   type CompanyListQuery,
+  type CompanySlugEntry,
   type InvestorListQuery,
   type InvestorSummary,
   type MarketStat,
@@ -404,7 +407,9 @@ export async function getCompanies(query: CompanyListQuery = {}): Promise<Pagina
   }
 }
 
-export async function getCompanyDetail(
+// Wrapped in React cache() so generateMetadata, the page, and the OG image
+// route share one fetch per request.
+export const getCompanyDetail = cache(async function getCompanyDetail(
   slug: string,
 ): Promise<CompanyDetailResponse | undefined> {
   // The detail endpoint is gated per-viewer, so it is authenticated (when a
@@ -436,6 +441,17 @@ export async function getCompanyDetail(
         },
       },
     };
+  }
+});
+
+/** Every approved company's slug + last update, for the sitemap. */
+export async function getCompanySlugs(): Promise<CompanySlugEntry[]> {
+  try {
+    return await apiFetch<CompanySlugEntry[]>('/companies/sitemap');
+  } catch (err) {
+    // Never emit mock slugs into a production sitemap — an empty list is safer.
+    console.warn('[data] getCompanySlugs failed; sitemap gets no company URLs:', err);
+    return [];
   }
 }
 

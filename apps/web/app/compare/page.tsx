@@ -8,7 +8,13 @@ import { formatCount, formatUsd } from '@/lib/format';
 
 import { ComparePicker } from './ComparePicker';
 
-export const metadata = { title: 'Compare companies' };
+export const metadata = {
+  title: 'Compare companies',
+  description:
+    'Line up funding, stage, valuation, and scale for up to four private companies side by side.',
+  // Selection query variants canonicalise to the bare compare URL.
+  alternates: { canonical: '/compare' },
+};
 
 const MAX_COMPARE = 4;
 

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import type { Company, CompanyDetailResponse, Paginated } from '@repo/api';
+import type { Company, CompanyDetailResponse, CompanySlugEntry, Paginated } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -26,6 +26,12 @@ export class CompaniesController {
   @Get()
   findAll(@Query() query: ListCompaniesDto): Promise<Paginated<Company>> {
     return this.companies.findAllApproved(query);
+  }
+
+  // Declared before @Get(':slug') so the literal path wins over the param route.
+  @Get('sitemap')
+  sitemap(): Promise<CompanySlugEntry[]> {
+    return this.companies.listSlugs();
   }
 
   @UseGuards(OptionalJwtAuthGuard)

@@ -7,6 +7,7 @@ import {
   type CompanyDetailResponse,
   type CompanyEditFields,
   type CompanyListQuery,
+  type CompanySlugEntry,
   type Paginated,
   type Role,
 } from '@repo/api';
@@ -99,6 +100,16 @@ export class CompaniesService {
     ]);
 
     return { items: rows.map((row) => toCompany(row)), total, page, pageSize };
+  }
+
+  /** Every approved company's slug + last update, for the web sitemap. */
+  async listSlugs(): Promise<CompanySlugEntry[]> {
+    const rows = await this.prisma.company.findMany({
+      where: { moderationStatus: 'APPROVED' },
+      select: { slug: true, updatedAt: true },
+      orderBy: { slug: 'asc' },
+    });
+    return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
   }
 
   /**

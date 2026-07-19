@@ -6,6 +6,13 @@ import { logoutAction } from './actions';
 
 import styles from './admin.module.css';
 
+// Covers /admin and /admin/login (a client component, which can't export
+// metadata itself). Belt-and-braces with the robots.txt disallow.
+export const metadata = {
+  title: 'Moderation',
+  robots: { index: false, follow: false },
+};
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Non-redirecting read so this layout can wrap both the login screen (no
   // session) and the guarded queue (session). Page-level guards do the gating.

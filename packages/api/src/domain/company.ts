@@ -151,6 +151,12 @@ export interface CompanyFinancials {
   burnMonths: number | null;
 }
 
+/** Lightweight listing entry for the web sitemap: every APPROVED company. */
+export interface CompanySlugEntry {
+  slug: string;
+  updatedAt: string; // ISO timestamp of the row's last update
+}
+
 export interface Company {
   slug: string;
   name: string;

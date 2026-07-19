@@ -1,10 +1,12 @@
 import Link from 'next/link';
 
 import { CompanyTable } from '@/components/CompanyTable';
+import { JsonLd } from '@/components/JsonLd';
 import { Button, Eyebrow, SectionHeader, Stat } from '@/components/ui';
 import { getCompanies, getMarketStats, getMarketTotals } from '@/lib/data';
 import { formatCount, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
+import { siteOrganizationJsonLd, websiteJsonLd } from '@/lib/schema';
 
 const HOME_PREVIEW = 8;
 const HOME_SECTORS = 5;
@@ -19,6 +21,9 @@ export default async function Home() {
 
   return (
     <main>
+      <JsonLd data={websiteJsonLd()} />
+      <JsonLd data={siteOrganizationJsonLd()} />
+
       <section className="mx-auto max-w-(--page-max) px-(--page-pad) pt-20">
         <div className="max-w-3xl">
           <Eyebrow>{marketTotals.quarter} · private market intelligence</Eyebrow>
@@ -27,7 +32,8 @@ export default async function Home() {
           </h1>
           <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-graphite-700">
             Funding rounds, investors, people, and exits for the companies shaping each sector —
-            sourced openly, free to read, free to build on.
+            a free, crowdsourced alternative to Crunchbase and PitchBook. Open to read, open to
+            build on.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Button variant="primary" shape="pill" href="/companies">
@@ -97,10 +103,6 @@ export default async function Home() {
         </div>
       </section>
 
-      <footer className="mx-auto mt-20 flex max-w-(--page-max) flex-wrap justify-between gap-4 border-t border-line px-(--page-pad) py-7 text-[13px] text-graphite-500">
-        <span>Capbase · open company and funding data</span>
-        <span className="font-mono text-xs">Figures shown are illustrative demo data.</span>
-      </footer>
     </main>
   );
 }

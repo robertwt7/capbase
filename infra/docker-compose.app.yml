@@ -37,6 +37,11 @@ services:
     restart: unless-stopped
     environment:
       API_URL: http://api:3000
+      # Canonical origin for metadata/sitemap/robots/JSON-LD; defaults to the
+      # nginx domain. Override only if the public origin differs (e.g. www).
+      SITE_URL: ${SITE_URL:-https://${DOMAIN:?set DOMAIN in your env file}}
+      # GA4 measurement id — read server-side at runtime; empty disables GA.
+      NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
     # No published port — nginx is the only public entrypoint.
     depends_on:
       api:
