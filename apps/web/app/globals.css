@@ -2,9 +2,15 @@
 @import 'tw-animate-css';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Capbase — the monochrome terminal ledger.
-   Strictly graphite: company logos supply the only color on screen. Emphasis
-   comes from weight, size, hairline rules, and the mono numerals — never hue.
+   Capbase — the parchment ledger.
+   Strict single-hue monochrome on warm cream paper, like an aged ledger
+   book. Surfaces are TONAL: `--surface` (cards, tables, inputs) is one soft
+   step lighter than `--paper`, on the same warm axis — never pure white, so
+   sheets blend into the ground and hairlines do the separating. The
+   graphite ramp is tinted warm (taupe grays) so ink → paper is one
+   continuous hue. Company logos supply the only saturated color on screen.
+   Emphasis comes from weight, size, hairline rules, and the mono numerals —
+   never hue.
    The one sanctioned exception is validation/error feedback, which uses the
    `--destructive` red (see CLAUDE.md); destructive *actions* stay monochrome.
    Light-only by design (no dark mode); the `dark` variant is declared so
@@ -14,17 +20,17 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Graphite ramp — the whole palette. */
-  --ink: #0e0e10;
-  --paper: #fbfbfc;
-  --surface: #ffffff;
-  --graphite-900: #1c1c20;
-  --graphite-700: #3a3a40;
-  --graphite-500: #75757e;
-  --graphite-400: #9a9aa2;
-  --graphite-300: #c6c6cd;
-  --graphite-200: #e4e4e8;
-  --line: #e6e6ea;
+  /* Parchment ramp — the whole palette, one warm hue from ink to paper. */
+  --ink: #141210;
+  --paper: #f0ece3;
+  --surface: #f7f4ee;
+  --graphite-900: #28241f;
+  --graphite-700: #4a453d;
+  --graphite-500: #6e675c;
+  --graphite-400: #9c9486;
+  --graphite-300: #c9c2b6;
+  --graphite-200: #e2ddd3;
+  --line: #ded8cc;
 
   --radius: 0.625rem; /* 10px — the md step */
 
@@ -39,7 +45,7 @@
   --primary-foreground: var(--paper);
   --secondary: var(--graphite-200);
   --secondary-foreground: var(--ink);
-  --muted: #efeff1;
+  --muted: #e8e3d9;
   --muted-foreground: var(--graphite-500);
   --accent: var(--graphite-200);
   --accent-foreground: var(--ink);

@@ -10,7 +10,7 @@ import { formatUsd } from '@/lib/format';
 export function CompanyTable({ companies }: { companies: Company[] }) {
   return (
     <div
-      className="overflow-hidden rounded-xl border border-line"
+      className="overflow-hidden rounded-xl border border-line bg-surface"
       role="table"
       aria-label="Company directory"
     >

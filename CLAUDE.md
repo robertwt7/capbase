@@ -26,13 +26,21 @@ forms — login/register — now follow the RHF+zod + Tailwind pattern. Back-com
 aliases `--font-body`/`--page-max`/`--page-pad` exist only for the remaining modules and
 will go when those routes are redesigned.)
 
-### Design system — "monochrome terminal ledger"
+### Design system — "parchment ledger"
 
-The interface is deliberately monochrome (graphite ramp) so that company logos are
-the only color on screen. When adding UI, hold this line: no accent colors, no
-gradients. Emphasis comes from weight, size, and the mono numerals — not hue.
+The interface is strict single-hue monochrome on warm cream paper, like an aged
+ledger book. Surfaces are **tonal**: `--paper` is the cream page ground and
+`--surface` (cards, tables, inputs) is one soft step lighter on the same warm axis —
+never pure white — so sheets blend into the ground and hairline borders do the
+separating. The graphite ramp is tinted warm (taupe grays) so ink → paper is one
+continuous hue. Company
+logos are the only saturated color on screen. When adding UI, hold this line: no
+accent colors, no gradients, no pure `#fff`. Emphasis comes from weight, size, and
+the mono numerals — not hue. Bordered containers that sit on the page must carry
+their own `bg-surface`; never rely on the page ground being near-white (it isn't
+anymore).
 
-- The graphite ramp is exposed as Tailwind colors via `@theme`: use `text-ink`,
+- The ledger ramp is exposed as Tailwind colors via `@theme`: use `text-ink`,
   `bg-paper`, `bg-surface`, `text-graphite-{200..900}`, `border-line`, plus the shadcn
   semantic colors (`bg-primary`, `text-muted-foreground`, `border-border`, …) which all
   map onto the ramp. Never hardcode hex values. **The one sanctioned use of red is

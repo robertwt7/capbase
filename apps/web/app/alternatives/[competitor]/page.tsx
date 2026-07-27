@@ -66,7 +66,7 @@ export default async function AlternativePage({
 
       <section className="mt-14">
         <SectionHeader title={`Capbase vs ${competitor.name}`} note="At a glance" />
-        <div className="mt-6 overflow-x-auto rounded-[10px] border border-line">
+        <div className="mt-6 overflow-x-auto rounded-[10px] border border-line bg-surface">
           <table className="w-full min-w-[560px] border-collapse bg-surface">
             <thead>
               <tr>

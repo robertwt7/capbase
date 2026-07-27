@@ -141,7 +141,7 @@ export function InvestorDirectory({
 
       {items.length ? (
         <div className={`mt-4 transition-opacity ${isPending ? 'opacity-60' : ''}`}>
-          <div className="overflow-hidden rounded-xl border border-line" role="table" aria-label="Investor directory">
+          <div className="overflow-hidden rounded-xl border border-line bg-surface" role="table" aria-label="Investor directory">
             <div
               className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden"
               role="row"

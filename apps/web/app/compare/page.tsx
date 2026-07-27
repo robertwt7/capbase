@@ -76,7 +76,7 @@ export default async function ComparePage({
           </EmptyState>
         </div>
       ) : (
-        <div className="mt-7 overflow-x-auto rounded-[10px] border border-line">
+        <div className="mt-7 overflow-x-auto rounded-[10px] border border-line bg-surface">
           <table className="w-full min-w-[640px] border-collapse bg-surface">
             <thead>
               <tr>

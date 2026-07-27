@@ -62,7 +62,7 @@ export function MarketTable({ rows }: { rows: MarketRow[] }) {
   });
 
   return (
-    <div className="overflow-hidden rounded-xl border border-line" role="table" aria-label="Sector markets">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface" role="table" aria-label="Sector markets">
       <div
         className={`${GRID} bg-paper py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase`}
         role="row"
