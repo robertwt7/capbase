@@ -33,7 +33,11 @@ const approvedChildren = {
     orderBy: { date: 'asc' as const },
   },
   people: { where: { moderationStatus: 'APPROVED' as const } },
-  investors: { where: { moderationStatus: 'APPROVED' as const } },
+  investors: {
+    where: { moderationStatus: 'APPROVED' as const },
+    // The linked firm's slug turns each card into a link to its profile.
+    include: { investor: { select: { slug: true, moderationStatus: true } } },
+  },
   acquisitions: {
     where: { moderationStatus: 'APPROVED' as const },
     orderBy: { date: 'asc' as const },
@@ -227,9 +231,11 @@ export class CompaniesService {
 
   async addInvestor(slug: string, dto: CreateInvestorDto, userId: string) {
     const company = await this.requireCompany(slug);
+    const investorId = await this.resolveInvestor(dto, userId);
     const created = await this.prisma.investorHolding.create({
       data: {
         companyId: company.id,
+        investorId,
         name: dto.name,
         type: dto.type,
         firstRound: dto.firstRound,
@@ -241,6 +247,35 @@ export class CompaniesService {
       },
     });
     return { id: created.id, moderationStatus: created.moderationStatus };
+  }
+
+  /**
+   * Find the contributed investor by name, or mint a PENDING firm for it, so
+   * every holding links to a first-class Investor. Matching is case-insensitive
+   * on the exact name — deliberately narrower than the ingest jobs' normalizer,
+   * since a contributor's typo should not silently attach to another firm.
+   */
+  private async resolveInvestor(dto: CreateInvestorDto, userId: string): Promise<string> {
+    const existing = await this.prisma.investor.findFirst({
+      where: { name: { equals: dto.name, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+
+    const slug = await this.uniqueInvestorSlug(dto.name);
+    const created = await this.prisma.investor.create({
+      data: {
+        slug,
+        name: dto.name,
+        type: dto.type,
+        websiteUrl: dto.websiteUrl ?? null,
+        linkedinUrl: dto.linkedinUrl ?? null,
+        moderationStatus: 'PENDING',
+        submittedById: userId,
+      },
+      select: { id: true },
+    });
+    return created.id;
   }
 
   async addAcquisition(slug: string, dto: CreateAcquisitionDto, userId: string) {
@@ -326,12 +361,7 @@ export class CompaniesService {
   }
 
   private async uniqueSlug(name: string): Promise<string> {
-    const base =
-      name
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') || 'company';
+    const base = slugBase(name, 'company');
     let slug = base;
     let n = 1;
     while (await this.prisma.company.findUnique({ where: { slug } })) {
@@ -339,4 +369,24 @@ export class CompaniesService {
     }
     return slug;
   }
+
+  private async uniqueInvestorSlug(name: string): Promise<string> {
+    const base = slugBase(name, 'investor');
+    let slug = base;
+    let n = 1;
+    while (await this.prisma.investor.findUnique({ where: { slug } })) {
+      slug = `${base}-${++n}`;
+    }
+    return slug;
+  }
+}
+
+function slugBase(name: string, fallback: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || fallback
+  );
 }

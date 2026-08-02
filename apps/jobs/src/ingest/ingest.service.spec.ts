@@ -110,6 +110,7 @@ function firm(overrides: Partial<NormalizedInvestorFirm> = {}): NormalizedInvest
     type: 'Venture',
     hq: 'Austin, TX, United States',
     websiteUrl: 'https://www.nextcoastventures.com',
+    domain: 'nextcoastventures.com',
     crdNumber: '123456',
     fundCount: 7,
     assetsUsd: 430_428_863,
@@ -443,8 +444,8 @@ describe('IngestService investor firms', () => {
     // Both are real SEC ADV rows. Neither may collapse into Sequoia Capital.
     const prisma = mockPrisma([], [investorRow({ id: 'i-seq', name: 'Sequoia Capital', domain: 'sequoiacap.com' })]);
     await serviceWithFirms(prisma, [
-      firm({ externalId: '111', name: 'Sequoia Planning & Investments LLC', websiteUrl: null }),
-      firm({ externalId: '222', name: 'Benchmark Capital Group Ltd.', websiteUrl: null }),
+      firm({ externalId: '111', name: 'Sequoia Planning & Investments LLC', websiteUrl: null, domain: null }),
+      firm({ externalId: '222', name: 'Benchmark Capital Group Ltd.', websiteUrl: null, domain: null }),
     ]).run(RUN);
 
     expect(prisma.investor.create).toHaveBeenCalledTimes(2);
@@ -502,6 +503,22 @@ describe('IngestService investor firms', () => {
 
     expect(prisma.investor.create).toHaveBeenCalledTimes(1);
     expect(prisma.investorHolding.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('never matches on a platform domain the source refused to publish', async () => {
+    // Founders Fund and Menlo Ventures both list the same medium.com blog. The
+    // parser strips the domain, so they must stay two distinct investors.
+    const prisma = mockPrisma([], [investorRow({ id: 'i-ff', name: 'Founders Fund', domain: null })]);
+    await serviceWithFirms(prisma, [
+      firm({ externalId: '900', name: 'Menlo Ventures', websiteUrl: 'https://medium.com/@menlo', domain: null }),
+    ]).run(RUN);
+
+    expect(prisma.investor.create).toHaveBeenCalledTimes(1);
+    expect(prisma.investor.create.mock.calls[0]![0].data).toMatchObject({
+      name: 'Menlo Ventures',
+      domain: null,
+      websiteUrl: 'https://medium.com/@menlo',
+    });
   });
 
   it('suffixes the slug when one is already taken', async () => {

@@ -4,9 +4,11 @@ import type {
   NormalizedAcquisition,
   NormalizedExit,
   NormalizedInvestor,
+  NormalizedInvestorFirm,
   NormalizedPerson,
   NormalizedRecord,
 } from '../ingestion-source';
+import { identifyingDomain } from '../../util/domain';
 import { investorTypeForClasses } from './investor-class-map';
 import type { SparqlBinding } from './wikidata.client';
 
@@ -143,6 +145,45 @@ function mapInvestors(qid: string, rows: SparqlBinding[]): NormalizedInvestor[] 
       name,
       firstRound: 'Undisclosed',
       rounds: 1,
+    });
+  }
+  return out;
+}
+
+/** Map the class-enumerated investor firms into standalone investor rows. One
+ *  row per P31 class, so classes are collected per QID before typing. */
+export function mapInvestorFirms(rows: SparqlBinding[]): NormalizedInvestorFirm[] {
+  const byQid = new Map<string, { row: SparqlBinding; classes: string[] }>();
+  for (const b of rows) {
+    const qid = qidOf(b.investor);
+    if (!qid) continue;
+    const entry = byQid.get(qid) ?? { row: b, classes: [] };
+    const cls = qidOf(b.class);
+    if (cls && !entry.classes.includes(cls)) entry.classes.push(cls);
+    byQid.set(qid, entry);
+  }
+
+  const out: NormalizedInvestorFirm[] = [];
+  for (const [qid, { row, classes }] of byQid) {
+    const name = labelOf(row.investorLabel);
+    if (!name) continue; // QID-only rows are useless on the site
+
+    const website = row.website?.value ?? null;
+    const linkedinId = row.linkedinId?.value;
+    const hq = [labelOf(row.hqLabel), labelOf(row.countryLabel)].filter(Boolean).join(', ');
+    const rawDescription = row.investorDescription?.value ?? '';
+
+    out.push({
+      externalId: qid,
+      name,
+      type: investorTypeForClasses(classes) ?? 'Venture',
+      hq: hq || null,
+      websiteUrl: website,
+      domain: identifyingDomain(website),
+      linkedinUrl: linkedinId ? `https://www.linkedin.com/company/${linkedinId}` : null,
+      description: rawDescription ? capitalize(rawDescription) : null,
+      assetsUsd: numberOf(row.aum?.value),
+      foundedYear: yearOf(row.inception?.value),
     });
   }
   return out;

@@ -17,7 +17,9 @@ import {
   type CompanyDetailResponse,
   type CompanyListQuery,
   type CompanySlugEntry,
+  type InvestorDetailResponse,
   type InvestorListQuery,
+  type InvestorSlugEntry,
   type InvestorSummary,
   type MarketStat,
   type MarketTotals,
@@ -41,7 +43,9 @@ export type {
   DiversitySignal,
   CompanyFinancials,
   Company,
+  Investor,
   InvestorSummary,
+  InvestorDetailResponse,
   MarketStat,
   MarketTotals,
 } from '@repo/api';
@@ -489,6 +493,26 @@ export async function getInvestors(
   } catch (err) {
     console.warn('[data] getInvestors fell back to mock data:', err);
     return paginateFallbackInvestors(query);
+  }
+}
+
+/** One investor profile, or null when the slug is unknown (renders notFound). */
+export async function getInvestor(slug: string): Promise<InvestorDetailResponse | null> {
+  try {
+    return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    console.warn(`[data] getInvestor(${slug}) fell back to mock data:`, err);
+    return fallbackInvestors.find((i) => i.slug === slug) ?? null;
+  }
+}
+
+export async function getInvestorSlugs(): Promise<InvestorSlugEntry[]> {
+  try {
+    return await apiFetch<InvestorSlugEntry[]>('/investors/sitemap');
+  } catch (err) {
+    // Never emit mock slugs into a production sitemap — an empty list is safer.
+    console.warn('[data] getInvestorSlugs failed; sitemap gets no investor URLs:', err);
+    return [];
   }
 }
 

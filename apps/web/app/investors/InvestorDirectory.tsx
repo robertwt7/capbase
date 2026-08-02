@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { INVESTOR_TYPES, type InvestorSummary, type Paginated } from '@repo/api';
@@ -155,9 +156,10 @@ export function InvestorDirectory({
             </div>
 
             {items.map((inv) => (
-              <div
-                key={inv.name}
-                className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 border-t border-line px-[22px] py-4 max-[820px]:grid-cols-1 max-[820px]:gap-y-2"
+              <Link
+                key={inv.slug || inv.name}
+                href={`/investors/${inv.slug}`}
+                className="grid grid-cols-[minmax(0,1.6fr)_auto_1.2fr_1.6fr] items-center gap-5 border-t border-line px-[22px] py-4 transition-colors hover:bg-paper max-[820px]:grid-cols-1 max-[820px]:gap-y-2"
                 role="row"
               >
                 <span className="flex min-w-0 flex-col gap-1" role="cell">
@@ -177,10 +179,16 @@ export function InvestorDirectory({
                 <span className="text-[13px] text-graphite-500" role="cell">
                   {inv.sectors.length ? inv.sectors.join(' · ') : '—'}
                 </span>
+                {/* Most firms in the SEC Form ADV universe have no disclosed
+                    portfolio — say so plainly and invite a contribution. */}
                 <span className="truncate text-[13px] text-graphite-700" role="cell">
-                  {inv.companies.map((c) => c.name).join(', ')}
+                  {inv.companies.length ? (
+                    inv.companies.map((c) => c.name).join(', ')
+                  ) : (
+                    <span className="text-graphite-500">No known investments yet →</span>
+                  )}
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
           <Pagination

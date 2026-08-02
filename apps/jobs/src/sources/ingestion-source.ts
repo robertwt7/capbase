@@ -107,6 +107,10 @@ export interface NormalizedInvestorFirm {
   hq?: string | null;
   websiteUrl?: string | null;
   linkedinUrl?: string | null;
+  /** Match key and logo source. Sources MUST leave this null when the website's
+   *  host belongs to a platform (medium.com, crunchbase.com, …) rather than the
+   *  firm — see util/domain.ts. */
+  domain?: string | null;
   description?: string | null;
   crdNumber?: string | null;
   cikNumber?: string | null;

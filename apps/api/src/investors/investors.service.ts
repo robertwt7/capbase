@@ -1,140 +1,98 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
+  type InvestorDetailResponse,
   type InvestorListQuery,
+  type InvestorSlugEntry,
   type InvestorSummary,
-  type InvestorType,
   type Paginated,
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { toInvestorSummary, type InvestorWithHoldings } from './investor.mapper';
 
 /** How many portfolio companies to include in each investor's preview sample. */
 const PORTFOLIO_SAMPLE = 6;
 
-interface Accumulator {
-  name: string;
-  slug: string;
-  types: InvestorType[];
-  companies: Map<string, { slug: string; name: string; domain: string }>;
-  sectors: Set<string>;
-}
+/** Only approved holdings on approved companies count towards a portfolio. */
+const PUBLIC_HOLDINGS = {
+  moderationStatus: 'APPROVED',
+  company: { moderationStatus: 'APPROVED' },
+} satisfies Prisma.InvestorHoldingWhereInput;
 
-/** Returns the most-frequent value; ties break by first-seen order.
-    Callers always pass a non-empty array (a group has at least one holding). */
-function mode(values: InvestorType[]): InvestorType {
-  const counts = new Map<InvestorType, number>();
-  let best: InvestorType = values[0]!;
-  let bestCount = 0;
-  for (const v of values) {
-    const next = (counts.get(v) ?? 0) + 1;
-    counts.set(v, next);
-    if (next > bestCount) {
-      best = v;
-      bestCount = next;
-    }
-  }
-  return best;
-}
+const COMPANY_SELECT = {
+  select: { slug: true, name: true, domain: true, primarySector: true },
+};
 
 @Injectable()
 export class InvestorsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * One page of unique investors derived from approved holdings on approved
-   * companies. Grouping happens in SQL (`groupBy` + skip/take); only the page's
-   * holdings are loaded to build summaries.
+   * One page of investors, read straight from the Investor table.
+   *
+   * Investors with no known portfolio are included on purpose: the SEC Form ADV
+   * universe is mostly firms whose investments no free source discloses, and
+   * their profiles invite a contribution rather than hiding.
    */
   async findAll(query: InvestorListQuery = {}): Promise<Paginated<InvestorSummary>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
 
-    const where: Prisma.InvestorHoldingWhereInput = {
+    const where: Prisma.InvestorWhereInput = {
       moderationStatus: 'APPROVED',
-      company: { moderationStatus: 'APPROVED' },
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
       ...(query.type && { type: query.type }),
     };
 
-    // Total distinct investors under the filter. groupBy returns one row per
-    // name — fine at this scale; swap for a raw COUNT(DISTINCT) if it grows.
-    const allGroups = await this.prisma.investorHolding.groupBy({ by: ['name'], where });
-    const total = allGroups.length;
-
-    // The page of investor names. Ordering by holding count approximates
-    // portfolio size (one holding row per company per investor is the norm);
-    // `portfolioCount` below still dedupes companies exactly.
-    const pageGroups = await this.prisma.investorHolding.groupBy({
-      by: ['name'],
-      where,
-      orderBy:
-        query.sort === 'name'
-          ? [{ name: 'asc' }]
-          : [{ _count: { name: 'desc' } }, { name: 'asc' }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    });
-    const names = pageGroups.map((g) => g.name);
-    if (names.length === 0) return { items: [], total, page, pageSize };
-
-    // Every holding for just this page's investors, with the company facts the
-    // summary needs. Note: unfiltered by q/type on purpose — an investor's
-    // portfolio is the same whichever filter found them.
-    const holdings = await this.prisma.investorHolding.findMany({
-      where: {
-        name: { in: names },
-        moderationStatus: 'APPROVED',
-        company: { moderationStatus: 'APPROVED' },
-      },
-      include: {
-        company: {
-          select: { slug: true, name: true, domain: true, primarySector: true },
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.investor.count({ where }),
+      this.prisma.investor.findMany({
+        where,
+        orderBy:
+          query.sort === 'name'
+            ? [{ name: 'asc' }]
+            : [{ holdings: { _count: 'desc' } }, { name: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          holdings: {
+            where: PUBLIC_HOLDINGS,
+            take: PORTFOLIO_SAMPLE,
+            include: { company: COMPANY_SELECT },
+          },
+          _count: { select: { holdings: { where: PUBLIC_HOLDINGS } } },
         },
-        investor: { select: { slug: true } },
+      }),
+    ]);
+
+    return { items: rows.map((r) => toInvestorSummary(r as InvestorWithHoldings)), total, page, pageSize };
+  }
+
+  /** Full profile: the whole approved portfolio, not a sample. */
+  async findOne(slug: string): Promise<InvestorDetailResponse> {
+    const row = await this.prisma.investor.findFirst({
+      where: { slug, moderationStatus: 'APPROVED' },
+      include: {
+        holdings: {
+          where: PUBLIC_HOLDINGS,
+          include: { company: COMPANY_SELECT },
+        },
+        _count: { select: { holdings: { where: PUBLIC_HOLDINGS } } },
       },
     });
+    if (!row) throw new NotFoundException(`Investor "${slug}" not found`);
+    return toInvestorSummary(row as InvestorWithHoldings);
+  }
 
-    const groups = new Map<string, Accumulator>();
-    for (const holding of holdings) {
-      let acc = groups.get(holding.name);
-      if (!acc) {
-        acc = {
-          name: holding.name,
-          slug: holding.investor?.slug ?? '',
-          types: [],
-          companies: new Map(),
-          sectors: new Set(),
-        };
-        groups.set(holding.name, acc);
-      }
-      if (!acc.slug && holding.investor) acc.slug = holding.investor.slug;
-      acc.types.push(holding.type as InvestorType);
-      acc.companies.set(holding.company.slug, {
-        slug: holding.company.slug,
-        name: holding.company.name,
-        domain: holding.company.domain,
-      });
-      if (holding.company.primarySector) acc.sectors.add(holding.company.primarySector);
-    }
-
-    // Preserve the SQL page order.
-    const items: InvestorSummary[] = names
-      .map((name) => groups.get(name))
-      .filter((acc): acc is Accumulator => Boolean(acc))
-      .map((acc) => {
-        const companies = [...acc.companies.values()].sort((a, b) => a.name.localeCompare(b.name));
-        return {
-          slug: acc.slug,
-          name: acc.name,
-          type: mode(acc.types),
-          portfolioCount: companies.length,
-          sectors: [...acc.sectors].sort((a, b) => a.localeCompare(b)),
-          companies: companies.slice(0, PORTFOLIO_SAMPLE),
-        };
-      });
-
-    return { items, total, page, pageSize };
+  /** Every approved investor slug, for the web sitemap. */
+  async listSlugs(): Promise<InvestorSlugEntry[]> {
+    const rows = await this.prisma.investor.findMany({
+      where: { moderationStatus: 'APPROVED' },
+      select: { slug: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
   }
 }

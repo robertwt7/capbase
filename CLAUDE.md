@@ -129,6 +129,9 @@ types are re-exported from `@repo/api` (single source of truth). Company logos r
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle).
+- `/investors` — investor directory (URL-driven filters, same pattern as companies);
+  `/investors/[slug]` — investor profile: facts, fund assets, portfolio grid, or an
+  empty state inviting a contribution.
 - `/admin` — moderation queue (ADMIN only). `/admin/login` signs in via
   `app/api/admin/login` which stores the JWT in an httpOnly `capbase_token` cookie.
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
@@ -168,9 +171,22 @@ phase). `make db-baseline` marks all phases applied without running (pre-runner 
 
 ### Controlled vocabularies & entity metadata
 
+**Investors are a first-class entity.** The `Investor` table holds ~7.4k firms (slug, type, HQ,
+website, and for ADV rows CRD/CIK/fund count/gross fund assets); `InvestorHolding` and
+`RoundInvestor` carry a nullable `investorId` pointing at it. Nullable only because seed phase
+`002` shipped before the column existed and seed phases are immutable — every write path (ingest
+and contribution) populates it, so treat non-null as an invariant. `/investors` and
+`/investors/[slug]` read the table directly. **Most firms have an empty portfolio and that is
+expected**: no free source discloses investor→company edges (Form D names the issuer, Form ADV the
+funds; only Wikidata's ~1.5k P1951 edges are automatable), so empty profiles invite a contribution
+rather than being hidden.
+
 Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
 (`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
-— not Prisma enums. Besides `Stage`/`CompanyStatus`/`InvestorType`/`ExitType`, there is a
+— not Prisma enums. `InvestorType` covers `Venture`/`Growth`/`Angel`/`Corporate`/`Private equity`/
+`Accelerator`/`Hedge fund`/`Sovereign wealth` — the last three are derived from source *structure*
+(Wikidata P31 class, ADV fund-type columns), never guessed from the firm's name. Besides
+`Stage`/`CompanyStatus`/`InvestorType`/`ExitType`, there is a
 **`Sector`/`SECTORS`** vocabulary (14 canonical sectors: the original `Artificial intelligence`/
 `Fintech`/`Healthcare`/`Climate`/`Enterprise SaaS` plus `Technology`, `Financial services`,
 `Energy`, `Real estate`, `Industrials`, `Consumer & retail`, `Transport`, `Media & telecom`,
@@ -202,18 +218,37 @@ NestJS worker (port 3002, health endpoint) with two pluggable `IngestionSource`s
 - **WIKIDATA** — enrichment for the ~6.4k notable companies carrying investor
   (P1951) statements: metadata (website/LinkedIn/HQ/sector), investors,
   founders/CEOs, acquisitions, exits. Throttled ~1 req/s SPARQL
-  (`WDQS_USER_AGENT`, defaults to `SEC_USER_AGENT`). No funding rounds.
+  (`WDQS_USER_AGENT`, defaults to `SEC_USER_AGENT`). No funding rounds. Also
+  enumerates ~640 **investor firms** by P31 class (`investor-class-map.ts`),
+  independent of any P1951 edge.
+- **SEC_ADV** — the investor universe: ~7k VC/PE firms from the monthly Form ADV
+  bulk files (name, CRD/CIK, HQ, website, fund counts, gross fund assets). A
+  *monthly snapshot*, so `days` is ignored and it stays off the daily cron; pin a
+  month with `ADV_SNAPSHOT` for a reproducible run. Contributes **no** company
+  records — Form ADV never names portfolio companies.
 
 The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
-SEC-only). Backfills: `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA`
-(→ `node dist/backfill [days] [limit] [source]`). All ingested rows — companies,
-rounds, and the child entities (people/investors/acquisitions/exits) — upsert
-keyed on `(externalSource, externalId)` and are **auto-APPROVED** (trusted
-sources). `IngestService` also **matches & enriches**: a record whose company
-matches an existing row by domain or normalized name fills that row's blank
-fields instead of creating a duplicate (never overwriting name/stage/status or
-human-written copy). Unit tests: `yarn workspace jobs test` (jest, pure
-parser/mapper/service specs).
+SEC-only). Backfills: `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV`
+(→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
+(ADV + Wikidata firms) and `make ingest-all` (everything). All ingested rows —
+companies, rounds, the child entities (people/investors/acquisitions/exits) and
+standalone investor firms — upsert keyed on `(externalSource, externalId)` and are
+**auto-APPROVED** (trusted sources). `IngestService` also **matches & enriches**: a
+record whose company matches an existing row by domain or normalized name fills
+that row's blank fields instead of creating a duplicate (never overwriting
+name/stage/status or human-written copy). The same match-and-enrich runs for
+investor firms, keyed on domain then `normalizeInvestorName` (which strips legal
+suffixes only — "Greylock Partners" and "Greylock Capital Management" are
+different firms).
+
+**Domains are a match key, so they must identify the entity.** `src/util/domain.ts`
+classifies a URL host as identifying, social, or platform; sources publish a
+`domain` only for the first kind. This is not theoretical: 3,295 ADV filers list a
+linkedin.com URL as their website and 21 list the same medium.com blog — matching
+on those merges unrelated firms into one investor.
+
+Unit tests: `yarn workspace jobs test` (jest, pure parser/mapper/service specs).
+Rebuilding the whole dataset from scratch, locally or on prod: **`docs/DATA_REBUILD.md`**.
 
 ## Deployment (Docker + Makefile)
 

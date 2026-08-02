@@ -68,8 +68,15 @@ export function toPerson(row: DbPerson): Person {
   };
 }
 
-export function toInvestorHolding(row: DbInvestorHolding): InvestorHolding {
+/** The linked firm, when the caller included it. Only an APPROVED investor gets
+ *  a slug: a pending firm has no public page to link to. */
+type DbHoldingWithInvestor = DbInvestorHolding & {
+  investor?: { slug: string; moderationStatus: string } | null;
+};
+
+export function toInvestorHolding(row: DbHoldingWithInvestor): InvestorHolding {
   return {
+    slug: row.investor?.moderationStatus === 'APPROVED' ? row.investor.slug : null,
     name: row.name,
     type: row.type as InvestorType,
     firstRound: row.firstRound,

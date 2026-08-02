@@ -321,13 +321,15 @@ export class IngestService {
     source: string,
     index: InvestorIndex,
   ): Promise<void> {
-    const domain = hostnameOf(firm.websiteUrl ?? null);
+    // The source decides the domain: it alone knows whether the website's host
+    // identifies the firm or belongs to a platform (see util/domain.ts).
+    const domain = firm.domain ?? null;
     const facts = {
       legalName: firm.legalName ?? null,
       hq: firm.hq ?? null,
       websiteUrl: firm.websiteUrl ?? null,
       linkedinUrl: firm.linkedinUrl ?? null,
-      domain: domain || null,
+      domain,
       description: firm.description ?? null,
       crdNumber: firm.crdNumber ?? null,
       cikNumber: firm.cikNumber ?? null,
@@ -593,12 +595,3 @@ export function normalizeInvestorName(name: string): string {
   return tokens.join(' ');
 }
 
-/** Hostname of a URL, www.-stripped; '' when absent or unparseable. */
-export function hostnameOf(url: string | null): string {
-  if (!url) return '';
-  try {
-    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-  } catch {
-    return '';
-  }
-}

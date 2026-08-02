@@ -183,7 +183,16 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 key={inv.name}
                 className={`${cell} grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-1 px-[18px] py-4`}
               >
-                {inv.websiteUrl || inv.linkedinUrl ? (
+                {/* The investor's own profile wins; an outbound link is the
+                    fallback for firms we have not resolved to a row yet. */}
+                {inv.slug ? (
+                  <Link
+                    href={`/investors/${inv.slug}`}
+                    className="font-display text-[15px] font-semibold text-ink underline underline-offset-[3px] hover:text-graphite-700"
+                  >
+                    {inv.name}
+                  </Link>
+                ) : inv.websiteUrl || inv.linkedinUrl ? (
                   <a
                     href={(inv.websiteUrl ?? inv.linkedinUrl)!}
                     target="_blank"
@@ -198,8 +207,15 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 <span className="text-right font-mono text-[11px] tracking-[0.04em] text-graphite-500 uppercase">
                   {inv.type}
                 </span>
-                <span className="col-span-full text-[13px] text-graphite-500">
-                  {inv.rounds} {inv.rounds === 1 ? 'round' : 'rounds'} · since {inv.firstRound}
+                <span className="col-span-full flex flex-wrap items-baseline gap-x-3 text-[13px] text-graphite-500">
+                  <span>
+                    {inv.rounds} {inv.rounds === 1 ? 'round' : 'rounds'} · since {inv.firstRound}
+                  </span>
+                  {inv.slug && (inv.websiteUrl || inv.linkedinUrl) ? (
+                    <OutboundLink href={(inv.websiteUrl ?? inv.linkedinUrl)!}>
+                      {inv.websiteUrl ? 'Website' : 'LinkedIn'}
+                    </OutboundLink>
+                  ) : null}
                 </span>
               </div>
             ))}

@@ -1,13 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import type { FetchOptions, IngestionSource, NormalizedRecord } from '../ingestion-source';
+import type {
+  FetchOptions,
+  IngestionSource,
+  NormalizedInvestorFirm,
+  NormalizedRecord,
+} from '../ingestion-source';
 import { WikidataClient } from './wikidata.client';
-import { WIKIDATA, mapWikidata, qidOf, type WikidataBundle } from './wikidata.mapper';
+import { WIKIDATA, mapInvestorFirms, mapWikidata, qidOf, type WikidataBundle } from './wikidata.mapper';
 import {
   acquisitionsQuery,
   chunkQids,
   detailsQuery,
   exitsQuery,
+  investorFirmsQuery,
   investorsQuery,
   peopleQuery,
   seedQuery,
@@ -60,5 +66,14 @@ export class WikidataSource implements IngestionSource {
     const records = mapWikidata(bundle).slice(0, opts.limit);
     this.logger.log(`Normalized ${records.length} Wikidata companies`);
     return records;
+  }
+
+  /** The ~640 entities that ARE investor firms by P31 class, independent of
+   *  whether Wikidata records a P1951 edge for them. */
+  async fetchInvestors(opts: FetchOptions): Promise<NormalizedInvestorFirm[]> {
+    const rows = await this.client.runQuery(investorFirmsQuery());
+    const firms = mapInvestorFirms(rows).slice(0, opts.limit);
+    this.logger.log(`Normalized ${firms.length} Wikidata investor firms`);
+    return firms;
   }
 }

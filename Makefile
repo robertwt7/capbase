@@ -76,18 +76,41 @@ db-baseline: ## Mark all seed phases as applied WITHOUT running them (existing D
 db-reset: ## DESTRUCTIVE: wipe all data, then re-apply every seed phase (incl. demo)
 	yarn workspace @repo/db reset
 
+.PHONY: db-verify-fresh
+db-verify-fresh: ## Prove a prod-style rebuild works: migrate + seed a throwaway database
+	@scripts/verify-fresh-db.sh
+
 # ---------------------------------------------------------------------------
-# Ingestion (SEC EDGAR Form D)
+# Ingestion (SEC EDGAR Form D, Wikidata, SEC Form ADV)
 # ---------------------------------------------------------------------------
 
 .PHONY: ingest
-ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA)
+ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV)
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
 .PHONY: ingest-prod
 ingest-prod: ## Run a backfill inside the jobs container (DAYS=N LIMIT=N SOURCE=...)
 	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
+
+.PHONY: ingest-investors
+ingest-investors: ## Rebuild the investor universe (SEC Form ADV + Wikidata firms)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill.js 1 100000 SEC_ADV
+	cd apps/jobs && node dist/backfill.js 1 100000 WIKIDATA
+
+.PHONY: ingest-investors-prod
+ingest-investors-prod: ## Rebuild the investor universe inside the jobs container
+	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill.js 1 100000 SEC_ADV
+	$(COMPOSE) run --rm jobs node apps/jobs/dist/backfill.js 1 100000 WIKIDATA
+
+.PHONY: ingest-all
+ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See docs/DATA_REBUILD.md
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill.js $(or $(DAYS),3650) 1000000 SEC_EDGAR
+	cd apps/jobs && node dist/backfill.js 1 1000000 WIKIDATA
+	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV
+	cd apps/jobs && node dist/backfill-sectors.js
 
 .PHONY: backfill-sectors
 backfill-sectors: ## Fill missing Company.primarySector from stored industry values

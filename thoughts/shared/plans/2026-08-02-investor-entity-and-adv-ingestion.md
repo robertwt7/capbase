@@ -726,17 +726,26 @@ literal HTML fixture including the three inconsistent filename shapes.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit tests pass: `yarn workspace jobs test`
-- [ ] Build + lint pass: `yarn build && yarn lint`
+- [x] Unit tests pass: `yarn workspace jobs test` — 176 passed
+- [x] Build + lint pass: `yarn build && yarn lint`
 
 #### Manual Verification:
-- [ ] `make ingest LIMIT=100000 SOURCE=SEC_ADV` completes; log reports ~7,000 firms upserted
-- [ ] `select type, count(*) from "Investor" group by type;` shows Venture and Private equity in the
-      thousands
-- [ ] Spot-check: `Andreessen Horowitz` has one row (not duplicated against the Wikidata-sourced
-      one), with `fundCount` 106 and `assetsUsd` ≈ 106,486,870,258
-- [ ] Re-running the same command creates no duplicates
-- [ ] `SEQUOIA PLANNING & INVESTMENTS LLC` did **not** merge into `Sequoia Capital`
+- [x] `make ingest LIMIT=100000 SOURCE=SEC_ADV` completes; log reports ~7,000 firms upserted
+      — **run: 7,033 firms in 16s from snapshot `ia07012026`**
+- [x] `select type, count(*) from "Investor" group by type;` — Private equity 3,874 / Venture 3,521
+- [x] Spot-check: `Andreessen Horowitz` has one row (not duplicated against the Wikidata-sourced
+      one), with `fundCount` 119 and `assetsUsd` = 106,486,870,258, and it carries the 15-company
+      Wikidata portfolio — cross-source matching confirmed
+- [x] Re-running the same command creates no duplicates — count identical at 7,419
+- [x] `SEQUOIA PLANNING & INVESTMENTS LLC` did **not** merge into `Sequoia Capital`
+
+**Bug found and fixed during this phase (not in the original plan).** The plan anticipated the
+LinkedIn collision but not its wider form: 21 firms — Founders Fund, Menlo Ventures, Beringea … —
+list the same **medium.com** blog as their website, and 8 list **crunchbase.com**. Domain matching
+merged each of those groups into a single investor. Fixed by adding `apps/jobs/src/util/domain.ts`,
+which classifies a host as identifying, social, or platform, and by making the source (not the
+ingest service) decide the `domain` a firm publishes. The ADV rows were deleted and re-ingested
+cleanly afterwards.
 
 **Implementation Note**: Pause for manual confirmation before proceeding.
 
@@ -823,18 +832,22 @@ All monochrome per the design system; numbers through `lib/format.ts`; no new CS
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] API tests pass: `yarn workspace api test`
-- [ ] Build + lint pass across the monorepo: `yarn build && yarn lint`
-- [ ] `curl 'localhost:3000/investors?pageSize=5'` returns items carrying `slug`
-- [ ] `curl localhost:3000/investors/andreessen-horowitz` returns 200 with `portfolioCount`
-- [ ] Unknown slug returns 404: `curl -o /dev/null -w '%{http_code}' localhost:3000/investors/nope`
+- [x] API tests pass: `yarn workspace api test` — 41 passed
+- [x] Build + lint pass across the monorepo: `yarn build && yarn lint`
+- [x] `curl 'localhost:3000/investors?pageSize=5'` returns items carrying `slug`
+- [x] `curl localhost:3000/investors/andreessen-horowitz` returns 200 with `portfolioCount`
+- [x] Unknown slug returns 404
+- [x] `curl localhost:3000/investors/sitemap` returns 7,474 entries
 
-#### Manual Verification:
-- [ ] `/investors` rows link through; pagination, `q`, `type` and `sort` still work from the URL
-- [ ] A firm with no portfolio renders the contribute empty state, not a broken/blank panel
-- [ ] A firm with a portfolio shows logos and links back to company profiles
-- [ ] Investor cards on a company profile link to the investor page
-- [ ] Page is monochrome and holds the parchment-ledger system (mono numerals for assets/counts)
+#### Manual Verification (checked by running the built app; **still yours to eyeball**):
+- [x] `/investors` rows link through; `type`/`sort`/pagination still work from the URL
+- [x] A firm with no portfolio renders the contribute empty state (verified on
+      `/investors/maverick-ventures-israel`); a deep directory page shows 25/25 rows labelled
+      "No known investments yet"
+- [x] A firm with a portfolio shows logos and links back to company profiles
+      (`/investors/andreessen-horowitz`)
+- [x] Investor cards on a company profile link to the investor page (`/companies/helia`)
+- [ ] Visual pass: monochrome, parchment-ledger system, mono numerals for assets/counts
 
 ---
 

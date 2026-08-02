@@ -153,10 +153,7 @@ export class AdminService {
           await this.prisma.person.update({ where: { id }, data: { moderationStatus: status } });
           break;
         case 'investor':
-          await this.prisma.investorHolding.update({
-            where: { id },
-            data: { moderationStatus: status },
-          });
+          await this.approveInvestorHolding(id, status);
           break;
         case 'acquisition':
           await this.prisma.acquisitionDeal.update({
@@ -191,6 +188,25 @@ export class AdminService {
       throw new NotFoundException(`${type} "${id}" not found`);
     }
     return { id, type, moderationStatus: status };
+  }
+
+  /** Approving a contributed holding also publishes the firm it names, so the
+      investor is reachable in the directory. Rejecting leaves the firm alone —
+      it may already back other companies. */
+  private async approveInvestorHolding(id: string, status: 'APPROVED' | 'REJECTED') {
+    await this.prisma.$transaction(async (tx) => {
+      const holding = await tx.investorHolding.update({
+        where: { id },
+        data: { moderationStatus: status },
+        select: { investorId: true },
+      });
+      if (status === 'APPROVED' && holding.investorId) {
+        await tx.investor.updateMany({
+          where: { id: holding.investorId, moderationStatus: 'PENDING' },
+          data: { moderationStatus: 'APPROVED' },
+        });
+      }
+    });
   }
 
   /** Approving a proposal applies its diff to the Company row and flips the

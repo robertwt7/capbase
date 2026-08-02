@@ -129,6 +129,8 @@ export interface Person {
 }
 
 export interface InvestorHolding {
+  /** Slug of the linked Investor profile; null when the firm is not yet approved. */
+  slug?: string | null;
   name: string;
   type: InvestorType;
   firstRound: string;
