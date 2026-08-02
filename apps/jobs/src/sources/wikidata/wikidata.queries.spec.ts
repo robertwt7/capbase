@@ -6,6 +6,7 @@ import {
   chunkQids,
   detailsQuery,
   exitsQuery,
+  investorFirmsQuery,
   investorsQuery,
   peopleQuery,
   seedQuery,
@@ -64,5 +65,42 @@ describe('query builders', () => {
     expect(q).toContain('ps:P127 ?acquirer');
     expect(q).toContain('wd:Q184680');
     expect(q).toContain('p:P414');
+  });
+
+  it('investors query excludes the European Investment Bank and lender classes', () => {
+    const q = investorsQuery(qids);
+    // EIB carries no `development bank` class, so the QID exclusion is the only
+    // thing that keeps it out — it was 79% of all P1951 edges.
+    expect(q).toContain('wd:Q192247');
+    expect(q).toContain('FILTER NOT EXISTS');
+    expect(q).toContain('wd:Q1345691'); // international financial institution
+    expect(q).toContain('wd:Q5266746'); // development bank
+  });
+
+  it('investors query selects the P31 classes used for structural typing', () => {
+    expect(investorsQuery(qids)).toContain('OPTIONAL { ?investor wdt:P31 ?class . }');
+  });
+});
+
+describe('investorFirmsQuery', () => {
+  it('enumerates the investor firm classes without needing a P1951 edge', () => {
+    const q = investorFirmsQuery();
+    expect(q).toContain('VALUES ?class { wd:Q3487908 wd:Q5418962 wd:Q4086495 wd:Q1132207 wd:Q105611 wd:Q1061648 }');
+    expect(q).toContain('?investor wdt:P31 ?class .');
+    expect(q).not.toContain('wdt:P1951');
+  });
+
+  it('pulls the firm profile fields, using P4103 for AUM (not P2403)', () => {
+    const q = investorFirmsQuery();
+    expect(q).toContain('wdt:P856'); // website
+    expect(q).toContain('wdt:P571'); // inception
+    expect(q).toContain('wdt:P159'); // headquarters
+    expect(q).toContain('wdt:P4103'); // assets under management
+    expect(q).not.toContain('wdt:P2403'); // total assets — the wrong property
+    expect(q).toContain('SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }');
+  });
+
+  it('excludes the EIB from the firm universe too', () => {
+    expect(investorFirmsQuery()).toContain('wd:Q192247');
   });
 });

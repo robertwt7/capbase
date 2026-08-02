@@ -331,8 +331,11 @@ const fallbackMarketTotals: MarketTotals = {
 // API's /investors aggregate returns). Not verified — demo figures only.
 const fallbackInvestors: InvestorSummary[] = [
   {
+    slug: 'sequoia-capital',
     name: 'Sequoia Capital',
     type: 'Venture',
+    websiteUrl: 'https://www.sequoiacap.com',
+    domain: 'sequoiacap.com',
     portfolioCount: 2,
     sectors: ['Artificial intelligence', 'Fintech'],
     companies: [
@@ -341,6 +344,7 @@ const fallbackInvestors: InvestorSummary[] = [
     ],
   },
   {
+    slug: 'founders-fund',
     name: 'Founders Fund',
     type: 'Venture',
     portfolioCount: 1,
@@ -348,6 +352,7 @@ const fallbackInvestors: InvestorSummary[] = [
     companies: [{ slug: 'helia', name: 'Helia', domain: 'stripe.com' }],
   },
   {
+    slug: 'tiger-global',
     name: 'Tiger Global',
     type: 'Growth',
     portfolioCount: 1,

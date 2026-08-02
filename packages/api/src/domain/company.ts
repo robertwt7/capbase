@@ -73,7 +73,18 @@ export type CompanyType = 'For profit' | 'Non-profit';
 
 export const COMPANY_TYPES: readonly CompanyType[] = ['For profit', 'Non-profit'];
 
-export type InvestorType = 'Venture' | 'Growth' | 'Angel' | 'Corporate' | 'Private equity';
+/** Controlled investor vocabulary. The last three are derivable from source
+ *  structure — Wikidata P31 classes and the Form ADV fund-type columns — rather
+ *  than guessed from the firm's name. */
+export type InvestorType =
+  | 'Venture'
+  | 'Growth'
+  | 'Angel'
+  | 'Corporate'
+  | 'Private equity'
+  | 'Accelerator'
+  | 'Hedge fund'
+  | 'Sovereign wealth';
 
 export const INVESTOR_TYPES: readonly InvestorType[] = [
   'Venture',
@@ -81,6 +92,9 @@ export const INVESTOR_TYPES: readonly InvestorType[] = [
   'Angel',
   'Corporate',
   'Private equity',
+  'Accelerator',
+  'Hedge fund',
+  'Sovereign wealth',
 ];
 
 export type ExitType = 'IPO' | 'Acquisition' | 'Secondary';

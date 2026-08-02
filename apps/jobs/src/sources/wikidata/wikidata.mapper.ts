@@ -1,4 +1,4 @@
-import type { ExitType, InvestorType, Sector } from '@repo/api';
+import type { ExitType, Sector } from '@repo/api';
 
 import type {
   NormalizedAcquisition,
@@ -7,6 +7,7 @@ import type {
   NormalizedPerson,
   NormalizedRecord,
 } from '../ingestion-source';
+import { investorTypeForClasses } from './investor-class-map';
 import type { SparqlBinding } from './wikidata.client';
 
 export const WIKIDATA = 'WIKIDATA';
@@ -118,29 +119,33 @@ export function mapWikidata(bundle: WikidataBundle): NormalizedRecord[] {
   return out;
 }
 
+/** One investor per QID. The query returns a row per P31 class, so classes are
+ *  collected across rows before typing. */
 function mapInvestors(qid: string, rows: SparqlBinding[]): NormalizedInvestor[] {
-  const seen = new Set<string>();
-  const out: NormalizedInvestor[] = [];
+  const byQid = new Map<string, { name: string; classes: string[] }>();
   for (const b of rows) {
     const invQid = qidOf(b.investor);
     const name = labelOf(b.investorLabel);
-    if (!invQid || !name || seen.has(invQid)) continue;
-    seen.add(invQid);
+    if (!invQid || !name) continue;
+    const entry = byQid.get(invQid) ?? { name, classes: [] };
+    const cls = qidOf(b.class);
+    if (cls && !entry.classes.includes(cls)) entry.classes.push(cls);
+    byQid.set(invQid, entry);
+  }
+
+  const out: NormalizedInvestor[] = [];
+  for (const [invQid, { name, classes }] of byQid) {
     out.push({
       externalId: `${qid}:investor:${invQid}`,
+      investorExternalId: invQid,
+      // Structural typing from P31; 'Venture' only when Wikidata offers no class.
+      type: investorTypeForClasses(classes) ?? 'Venture',
       name,
-      type: investorTypeFor(name),
       firstRound: 'Undisclosed',
       rounds: 1,
     });
   }
   return out;
-}
-
-function investorTypeFor(label: string): InvestorType {
-  if (/angel/i.test(label)) return 'Angel';
-  if (/private equity/i.test(label)) return 'Private equity';
-  return 'Venture';
 }
 
 function mapPeople(qid: string, rows: SparqlBinding[], foundedYear: number): NormalizedPerson[] {

@@ -6,8 +6,18 @@
  * Properties used: P1951 investor, P856 website, P571 inception, P159 HQ,
  * P17 country, P452 industry, P1128 employees, P4264 LinkedIn id,
  * P112 founder, P169 CEO, P127 owned-by, P793 significant event
- * (Q184680 = IPO), P414 stock exchange; qualifiers P580 start, P585 point.
+ * (Q184680 = IPO), P414 stock exchange, P31 instance-of, P4103 assets under
+ * management; qualifiers P580 start, P585 point.
+ *
+ * Note P4103 (assets under management) is the AUM property — NOT P2403, which
+ * is balance-sheet total assets and is unpopulated on private firms.
  */
+
+import {
+  EXCLUDED_INVESTOR_CLASSES,
+  EXCLUDED_INVESTOR_QIDS,
+  INVESTOR_FIRM_CLASSES,
+} from './investor-class-map';
 
 /** Chunk size for VALUES batching — stays well under the WDQS 60s timeout. */
 export const WDQS_CHUNK_SIZE = 200;
@@ -44,10 +54,37 @@ export function detailsQuery(qids: string[]): string {
 }`;
 }
 
+/** Company→investor edges, carrying the investor's P31 classes so the mapper can
+ *  type it structurally. Development lenders and state bodies are filtered out —
+ *  see EXCLUDED_INVESTOR_QIDS for why the EIB needs an explicit QID exclusion. */
 export function investorsQuery(qids: string[]): string {
-  return `SELECT ?company ?investor ?investorLabel WHERE {
+  return `SELECT ?company ?investor ?investorLabel ?class WHERE {
   ${values(qids)}
   ?company wdt:P1951 ?investor .
+  OPTIONAL { ?investor wdt:P31 ?class . }
+  FILTER (?investor NOT IN (${EXCLUDED_INVESTOR_QIDS.map((q) => `wd:${q}`).join(', ')}))
+  FILTER NOT EXISTS {
+    ?investor wdt:P31/wdt:P279* ?excluded .
+    VALUES ?excluded { ${EXCLUDED_INVESTOR_CLASSES.map((q) => `wd:${q}`).join(' ')} }
+  }
+  ${LABEL_SERVICE}
+}`;
+}
+
+/** Every entity that IS an investor firm by class (~640 today), independent of
+ *  whether Wikidata records any P1951 edge for it. This is the investor-universe
+ *  pass: it yields firms we can list even with an empty portfolio. */
+export function investorFirmsQuery(): string {
+  return `SELECT ?investor ?investorLabel ?investorDescription ?class ?website ?inception ?hqLabel ?countryLabel ?aum ?linkedinId WHERE {
+  VALUES ?class { ${INVESTOR_FIRM_CLASSES.map((q) => `wd:${q}`).join(' ')} }
+  ?investor wdt:P31 ?class .
+  OPTIONAL { ?investor wdt:P856 ?website . }
+  OPTIONAL { ?investor wdt:P571 ?inception . }
+  OPTIONAL { ?investor wdt:P159 ?hq . }
+  OPTIONAL { ?investor wdt:P17 ?country . }
+  OPTIONAL { ?investor wdt:P4103 ?aum . }
+  OPTIONAL { ?investor wdt:P4264 ?linkedinId . }
+  FILTER (?investor NOT IN (${EXCLUDED_INVESTOR_QIDS.map((q) => `wd:${q}`).join(', ')}))
   ${LABEL_SERVICE}
 }`;
 }

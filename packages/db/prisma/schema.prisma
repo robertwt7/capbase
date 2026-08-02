@@ -40,6 +40,7 @@ model User {
   rounds         FundingRound[]
   people         Person[]
   investors      InvestorHolding[]
+  investorFirms  Investor[]
   acquisitions   AcquisitionDeal[]
   exits          ExitEvent[]
   diversity      DiversitySignal[]
@@ -175,7 +176,56 @@ model RoundInvestor {
   name    String
   lead    Boolean      @default(false)
 
+  // Resolved link to the canonical firm. Nullable: `name` stays the source of
+  // truth for rows whose firm we could not resolve.
+  investorId String?
+  investor   Investor? @relation(fields: [investorId], references: [id], onDelete: SetNull)
+
   @@index([roundId])
+  @@index([investorId])
+}
+
+// A first-class investor firm (VC, PE, accelerator, angel, …). Unlike
+// InvestorHolding — which is one row per company↔investor pairing — an Investor
+// exists on its own, so firms whose portfolio we don't know yet (the majority of
+// the SEC Form ADV universe) still get a row and a page.
+model Investor {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  legalName   String?
+  type        String
+  hq          String?
+  websiteUrl  String?
+  linkedinUrl String?
+  domain      String?
+  description String?
+
+  // Form ADV-derived facts; null on Wikidata-sourced and contributed rows.
+  crdNumber   String?
+  cikNumber   String?
+  fundCount   Int?
+  assetsUsd   BigInt?
+  foundedYear Int?
+
+  // Provenance for ingested rows (SEC_ADV, WIKIDATA). Null for human contributions.
+  externalSource String?
+  externalId     String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  holdings       InvestorHolding[]
+  roundPositions RoundInvestor[]
+
+  @@unique([externalSource, externalId])
+  @@index([moderationStatus])
+  @@index([moderationStatus, type])
+  @@index([moderationStatus, name])
+  @@index([domain])
 }
 
 model InvestorHolding {
@@ -189,6 +239,12 @@ model InvestorHolding {
   websiteUrl  String?
   linkedinUrl String?
 
+  // Resolved link to the canonical firm. Nullable because seed phase 002 shipped
+  // before this column existed and seed phases are immutable; every write path
+  // (ingest + contribution) populates it.
+  investorId String?
+  investor   Investor? @relation(fields: [investorId], references: [id], onDelete: SetNull)
+
   // Provenance for ingested rows (e.g. SEC_EDGAR, WIKIDATA). Null for human contributions.
   externalSource String?
   externalId     String?
@@ -201,6 +257,7 @@ model InvestorHolding {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
+  @@index([investorId])
   @@index([moderationStatus])
 }
 

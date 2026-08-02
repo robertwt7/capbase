@@ -13,7 +13,12 @@ export interface NormalizedPerson {
 
 /** An investor holding a position in the company (not tied to a round). */
 export interface NormalizedInvestor {
+  /** Identifies this company↔investor holding within the source. */
   externalId: string;
+  /** Stable id of the INVESTOR ITSELF within the source (Wikidata QID, ADV CRD).
+   *  Distinct from `externalId` above, which identifies the holding. Used to
+   *  resolve the holding to a first-class Investor row. */
+  investorExternalId?: string;
   name: string;
   type: InvestorType;
   /** 'Undisclosed' when unknown. */
@@ -86,6 +91,32 @@ export interface NormalizedRecord {
   exits?: NormalizedExit[];
 }
 
+/**
+ * An investor firm as an entity in its own right, with no company edge.
+ *
+ * Sources like SEC Form ADV publish a firm universe without disclosing any
+ * portfolio, so these arrive detached — they become Investor rows that a
+ * contributor can later attach companies to.
+ */
+export interface NormalizedInvestorFirm {
+  /** Stable id of the firm within the source (ADV CRD number, Wikidata QID). */
+  externalId: string;
+  name: string;
+  legalName?: string | null;
+  type: InvestorType;
+  hq?: string | null;
+  websiteUrl?: string | null;
+  linkedinUrl?: string | null;
+  description?: string | null;
+  crdNumber?: string | null;
+  cikNumber?: string | null;
+  /** Number of private funds the firm reports. */
+  fundCount?: number | null;
+  /** Gross assets across those funds, USD. */
+  assetsUsd?: number | null;
+  foundedYear?: number | null;
+}
+
 export const INGESTION_SOURCES = Symbol('INGESTION_SOURCES');
 
 export interface FetchOptions {
@@ -99,4 +130,7 @@ export interface FetchOptions {
 export interface IngestionSource {
   readonly name: string;
   fetch(opts: FetchOptions): Promise<NormalizedRecord[]>;
+  /** Sources that publish an investor universe implement this too. Keeping it on
+   *  the same interface means one DI token and one INGEST_SOURCES env var. */
+  fetchInvestors?(opts: FetchOptions): Promise<NormalizedInvestorFirm[]>;
 }

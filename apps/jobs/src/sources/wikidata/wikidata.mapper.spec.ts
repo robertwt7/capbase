@@ -27,7 +27,14 @@ describe('mapWikidata', () => {
     const records = mapWikidata(
       bundle({
         details: [STRIPE_DETAILS],
-        investors: [{ company: uri('Q1'), investor: uri('Q20'), investorLabel: lit('Sequoia Capital') }],
+        investors: [
+          {
+            company: uri('Q1'),
+            investor: uri('Q20'),
+            investorLabel: lit('Sequoia Capital'),
+            class: uri('Q3487908'),
+          },
+        ],
         people: [
           { company: uri('Q1'), person: uri('Q30'), personLabel: lit('Patrick Collison'), role: lit('Founder') },
           {
@@ -64,6 +71,7 @@ describe('mapWikidata', () => {
     expect(r.investors).toEqual([
       {
         externalId: 'Q1:investor:Q20',
+        investorExternalId: 'Q20',
         name: 'Sequoia Capital',
         type: 'Venture',
         firstRound: 'Undisclosed',
@@ -99,6 +107,46 @@ describe('mapWikidata', () => {
     expect(records).toHaveLength(1);
     expect(records[0]!.company.domain).toBe('stripe.com');
     expect(records[0]!.investors).toHaveLength(1);
+  });
+
+  it('types investors from their P31 class, not their name', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [STRIPE_DETAILS],
+        investors: [
+          // Name says nothing; the class decides.
+          { company: uri('Q1'), investor: uri('Q21'), investorLabel: lit('Y Combinator'), class: uri('Q4086495') },
+          { company: uri('Q1'), investor: uri('Q22'), investorLabel: lit('Blackstone'), class: uri('Q5418962') },
+          { company: uri('Q1'), investor: uri('Q23'), investorLabel: lit('Jane Doe'), class: uri('Q5') },
+          { company: uri('Q1'), investor: uri('Q24'), investorLabel: lit('Temasek'), class: uri('Q1061648') },
+        ],
+      }),
+    );
+    expect(records[0]!.investors!.map((i) => [i.name, i.type])).toEqual([
+      ['Y Combinator', 'Accelerator'],
+      ['Blackstone', 'Private equity'],
+      ['Jane Doe', 'Angel'],
+      ['Temasek', 'Sovereign wealth'],
+    ]);
+  });
+
+  it('collects classes across rows and falls back to Venture when none is usable', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [STRIPE_DETAILS],
+        investors: [
+          // One row per P31 value — the specific class must win over the generic.
+          { company: uri('Q1'), investor: uri('Q25'), investorLabel: lit('Index Ventures'), class: uri('Q4830453') },
+          { company: uri('Q1'), investor: uri('Q25'), investorLabel: lit('Index Ventures'), class: uri('Q3487908') },
+          // No class at all — the query's OPTIONAL left it unbound.
+          { company: uri('Q1'), investor: uri('Q26'), investorLabel: lit('Unknown Backer') },
+        ],
+      }),
+    );
+    const investors = records[0]!.investors!;
+    expect(investors).toHaveLength(2);
+    expect(investors[0]).toMatchObject({ name: 'Index Ventures', type: 'Venture', investorExternalId: 'Q25' });
+    expect(investors[1]).toMatchObject({ name: 'Unknown Backer', type: 'Venture', investorExternalId: 'Q26' });
   });
 
   it('derives Public status/stage from an IPO exit (earliest dated row wins)', () => {

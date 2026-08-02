@@ -1,8 +1,12 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
-import { IngestService, normalizeName } from './ingest.service';
+import { IngestService, normalizeInvestorName, normalizeName } from './ingest.service';
 import { PrismaService } from '../prisma/prisma.service';
-import type { IngestionSource, NormalizedRecord } from '../sources/ingestion-source';
+import type {
+  IngestionSource,
+  NormalizedInvestorFirm,
+  NormalizedRecord,
+} from '../sources/ingestion-source';
 
 /** A full company row as the enrich path reads it back. */
 function companyRow(overrides: Record<string, unknown> = {}) {
@@ -29,8 +33,48 @@ function companyRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function mockPrisma(existing: ReturnType<typeof companyRow>[] = []) {
+/** An Investor row as the enrich path reads it back. */
+function investorRow(overrides: Record<string, unknown> = {}) {
   return {
+    id: 'i-1',
+    slug: 'big-fund',
+    name: 'Big Fund',
+    legalName: null,
+    type: 'Venture',
+    hq: null,
+    websiteUrl: null,
+    linkedinUrl: null,
+    domain: null,
+    description: null,
+    crdNumber: null,
+    cikNumber: null,
+    fundCount: null,
+    assetsUsd: null,
+    foundedYear: null,
+    externalSource: null,
+    externalId: null,
+    ...overrides,
+  };
+}
+
+function mockPrisma(
+  existing: ReturnType<typeof companyRow>[] = [],
+  existingInvestors: ReturnType<typeof investorRow>[] = [],
+) {
+  let created = 0;
+  return {
+    investor: {
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingInvestors),
+      findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
+        async (args) => existingInvestors.find((i) => i.id === args.where.id) ?? null,
+      ),
+      update: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(async (args) => ({
+        id: args.where.id,
+      })),
+      create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<{ id: string }>>(
+        async () => ({ id: `i-new-${++created}` }),
+      ),
+    },
     company: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existing),
       findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
@@ -51,8 +95,26 @@ function mockPrisma(existing: ReturnType<typeof companyRow>[] = []) {
   };
 }
 
-function stubSource(records: NormalizedRecord[]): IngestionSource {
-  return { name: 'STUB', fetch: async () => records };
+function stubSource(records: NormalizedRecord[], firms?: NormalizedInvestorFirm[]): IngestionSource {
+  return {
+    name: 'STUB',
+    fetch: async () => records,
+    ...(firms ? { fetchInvestors: async () => firms } : {}),
+  };
+}
+
+function firm(overrides: Partial<NormalizedInvestorFirm> = {}): NormalizedInvestorFirm {
+  return {
+    externalId: '123456',
+    name: 'Next Coast Ventures',
+    type: 'Venture',
+    hq: 'Austin, TX, United States',
+    websiteUrl: 'https://www.nextcoastventures.com',
+    crdNumber: '123456',
+    fundCount: 7,
+    assetsUsd: 430_428_863,
+    ...overrides,
+  };
 }
 
 function record(overrides: Partial<NormalizedRecord> = {}): NormalizedRecord {
@@ -177,7 +239,7 @@ describe('IngestService.run', () => {
     const prisma = mockPrisma();
     const service = new IngestService(prisma as unknown as PrismaService, [stubSource([record()])]);
     const result = await service.run({ ...RUN, sources: ['OTHER'] });
-    expect(result).toEqual({ processed: 0, upserted: 0 });
+    expect(result).toEqual({ processed: 0, upserted: 0, investors: 0 });
     expect(prisma.company.create).not.toHaveBeenCalled();
   });
 });
@@ -303,6 +365,189 @@ describe('IngestService match-&-enrich', () => {
     expect(prisma.company.create).toHaveBeenCalledTimes(1);
     const created = prisma.company.create.mock.calls[0]![0].data;
     expect(created.slug).toBe('acme-q42');
+  });
+});
+
+describe('IngestService investor firms', () => {
+  function serviceWithFirms(
+    prisma: ReturnType<typeof mockPrisma>,
+    firms: NormalizedInvestorFirm[],
+    records: NormalizedRecord[] = [],
+  ) {
+    return new IngestService(prisma as unknown as PrismaService, [stubSource(records, firms)]);
+  }
+
+  it('creates a standalone investor with provenance and no holding', async () => {
+    const prisma = mockPrisma();
+    const result = await serviceWithFirms(prisma, [firm()]).run(RUN);
+
+    expect(result.investors).toBe(1);
+    expect(prisma.investorHolding.upsert).not.toHaveBeenCalled();
+    expect(prisma.investor.create).toHaveBeenCalledTimes(1);
+    expect(prisma.investor.create.mock.calls[0]![0].data).toMatchObject({
+      slug: 'next-coast-ventures',
+      name: 'Next Coast Ventures',
+      type: 'Venture',
+      domain: 'nextcoastventures.com',
+      crdNumber: '123456',
+      fundCount: 7,
+      assetsUsd: 430_428_863n,
+      externalSource: 'STUB',
+      externalId: '123456',
+      moderationStatus: 'APPROVED',
+    });
+  });
+
+  it('updates its own provenance-keyed row instead of creating a duplicate', async () => {
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-adv', externalSource: 'STUB', externalId: '123456' })],
+    );
+    await serviceWithFirms(prisma, [firm({ fundCount: 9 })]).run(RUN);
+
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.investor.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'i-adv' },
+        data: expect.objectContaining({ name: 'Next Coast Ventures', fundCount: 9 }),
+      }),
+    );
+  });
+
+  it('matches an existing investor by domain and only fills blanks', async () => {
+    const prisma = mockPrisma(
+      [],
+      [
+        investorRow({
+          id: 'i-wd',
+          name: 'Next Coast',
+          type: 'Growth',
+          domain: 'nextcoastventures.com',
+          hq: 'Austin',
+        }),
+      ],
+    );
+    await serviceWithFirms(prisma, [firm()]).run(RUN);
+
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    const data = prisma.investor.update.mock.calls[0]![0].data as Record<string, unknown>;
+    // Blank fields filled…
+    expect(data).toMatchObject({ crdNumber: '123456', fundCount: 7 });
+    // …but nothing already set is touched, and never name/type.
+    expect(data.hq).toBeUndefined();
+    expect(data.name).toBeUndefined();
+    expect(data.type).toBeUndefined();
+  });
+
+  it('does not merge ADV false friends into a different firm of a similar name', async () => {
+    // Both are real SEC ADV rows. Neither may collapse into Sequoia Capital.
+    const prisma = mockPrisma([], [investorRow({ id: 'i-seq', name: 'Sequoia Capital', domain: 'sequoiacap.com' })]);
+    await serviceWithFirms(prisma, [
+      firm({ externalId: '111', name: 'Sequoia Planning & Investments LLC', websiteUrl: null }),
+      firm({ externalId: '222', name: 'Benchmark Capital Group Ltd.', websiteUrl: null }),
+    ]).run(RUN);
+
+    expect(prisma.investor.create).toHaveBeenCalledTimes(2);
+    expect(prisma.investor.update).not.toHaveBeenCalled();
+  });
+
+  it('links a holding to a newly minted investor row', async () => {
+    const prisma = mockPrisma();
+    const r = record({
+      investors: [
+        {
+          externalId: 'X1:investor:Q20',
+          investorExternalId: 'Q20',
+          name: 'Big Fund',
+          type: 'Venture',
+          firstRound: 'Undisclosed',
+          rounds: 1,
+        },
+      ],
+    });
+    await serviceWithFirms(prisma, [], [r]).run(RUN);
+
+    expect(prisma.investor.create).toHaveBeenCalledTimes(1);
+    expect(prisma.investor.create.mock.calls[0]![0].data).toMatchObject({
+      slug: 'big-fund',
+      externalSource: 'STUB',
+      externalId: 'Q20',
+    });
+    expect(prisma.investorHolding.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ investorId: 'i-new-1', name: 'Big Fund' }),
+        update: expect.objectContaining({ investorId: 'i-new-1' }),
+      }),
+    );
+  });
+
+  it('reuses one investor row across holdings at different companies', async () => {
+    const prisma = mockPrisma();
+    const holding = (companyId: string) => ({
+      externalId: `${companyId}:investor:Q20`,
+      investorExternalId: 'Q20',
+      name: 'Big Fund',
+      type: 'Venture' as const,
+      firstRound: 'Undisclosed',
+      rounds: 1,
+    });
+    await serviceWithFirms(
+      prisma,
+      [],
+      [
+        record({ companyExternalId: 'A', investors: [holding('A')] }),
+        record({ companyExternalId: 'B', investors: [holding('B')] }),
+      ],
+    ).run(RUN);
+
+    expect(prisma.investor.create).toHaveBeenCalledTimes(1);
+    expect(prisma.investorHolding.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('suffixes the slug when one is already taken', async () => {
+    const prisma = mockPrisma([], [investorRow({ id: 'i-other', slug: 'next-coast-ventures', name: 'Unrelated' })]);
+    await serviceWithFirms(prisma, [firm()]).run(RUN);
+    expect(prisma.investor.create.mock.calls[0]![0].data.slug).toBe('next-coast-ventures-123456');
+  });
+
+  it('keeps going when one firm fails to upsert', async () => {
+    const prisma = mockPrisma();
+    prisma.investor.create.mockRejectedValueOnce(new Error('unique violation'));
+    const result = await serviceWithFirms(prisma, [
+      firm({ externalId: '1', name: 'One' }),
+      firm({ externalId: '2', name: 'Two' }),
+    ]).run(RUN);
+
+    expect(result.investors).toBe(1);
+  });
+});
+
+describe('normalizeInvestorName', () => {
+  it.each([
+    ['Next Coast Ventures, LLC', 'next coast ventures'],
+    ['468 Management GmbH', '468 management'],
+    ['Andreessen Horowitz', 'andreessen horowitz'],
+    ['ANDREESSEN HOROWITZ LP', 'andreessen horowitz'],
+    ['A.Capital Ventures', 'a capital ventures'],
+    ['Work-Bench Management, L.L.C.', 'work bench management'],
+  ])('%s → %s', (input, expected) => {
+    expect(normalizeInvestorName(input)).toBe(expected);
+  });
+
+  it('keeps business words that distinguish real firms', () => {
+    // All four are distinct firms; stripping business words would merge them.
+    const keys = [
+      'Greylock Partners',
+      'Greylock Capital Management',
+      'Sequoia Capital',
+      'Sequoia Planning & Investments LLC',
+    ].map(normalizeInvestorName);
+    expect(new Set(keys).size).toBe(4);
+  });
+
+  it('matches the same firm across legal-form variations', () => {
+    expect(normalizeInvestorName('Team8')).toBe(normalizeInvestorName('Team8 Ltd'));
+    expect(normalizeInvestorName('F2 Capital')).toBe(normalizeInvestorName('F2 Capital LP'));
   });
 });
 

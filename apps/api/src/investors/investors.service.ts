@@ -15,6 +15,7 @@ const PORTFOLIO_SAMPLE = 6;
 
 interface Accumulator {
   name: string;
+  slug: string;
   types: InvestorType[];
   companies: Map<string, { slug: string; name: string; domain: string }>;
   sectors: Set<string>;
@@ -91,6 +92,7 @@ export class InvestorsService {
         company: {
           select: { slug: true, name: true, domain: true, primarySector: true },
         },
+        investor: { select: { slug: true } },
       },
     });
 
@@ -98,9 +100,16 @@ export class InvestorsService {
     for (const holding of holdings) {
       let acc = groups.get(holding.name);
       if (!acc) {
-        acc = { name: holding.name, types: [], companies: new Map(), sectors: new Set() };
+        acc = {
+          name: holding.name,
+          slug: holding.investor?.slug ?? '',
+          types: [],
+          companies: new Map(),
+          sectors: new Set(),
+        };
         groups.set(holding.name, acc);
       }
+      if (!acc.slug && holding.investor) acc.slug = holding.investor.slug;
       acc.types.push(holding.type as InvestorType);
       acc.companies.set(holding.company.slug, {
         slug: holding.company.slug,
@@ -117,6 +126,7 @@ export class InvestorsService {
       .map((acc) => {
         const companies = [...acc.companies.values()].sort((a, b) => a.name.localeCompare(b.name));
         return {
+          slug: acc.slug,
           name: acc.name,
           type: mode(acc.types),
           portfolioCount: companies.length,

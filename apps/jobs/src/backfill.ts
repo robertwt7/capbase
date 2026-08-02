@@ -7,7 +7,7 @@ import { IngestService } from './ingest/ingest.service';
 // One-off CLI: `node dist/backfill [days] [limit] [source]` — runs a single
 // ingest pass and exits. Handy for first-load / manual backfills without
 // waiting for the cron. `source` is `all` (default) or a source name
-// (SEC_EDGAR | WIKIDATA).
+// (SEC_EDGAR | WIKIDATA | SEC_ADV).
 async function main() {
   const logger = new Logger('Backfill');
   const days = Number(process.argv[2] ?? process.env.INGEST_DAYS ?? '90');
@@ -21,7 +21,9 @@ async function main() {
   try {
     const ingest = app.get(IngestService);
     const result = await ingest.run({ days, limit, sources });
-    logger.log(`Backfill done: ${result.upserted}/${result.processed} upserted`);
+    logger.log(
+      `Backfill done: ${result.upserted}/${result.processed} upserted, ${result.investors} investor firms`,
+    );
   } finally {
     await app.close();
   }
