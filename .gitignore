@@ -65,3 +65,6 @@ pnpm-debug.log*
 infra/env/*.env
 infra/certbot/conf
 infra/certbot/www
+
+# Local database dumps (make db-dump)
+backups/

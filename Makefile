@@ -81,6 +81,22 @@ db-verify-fresh: ## Prove a prod-style rebuild works: migrate + seed a throwaway
 	@scripts/verify-fresh-db.sh
 
 # ---------------------------------------------------------------------------
+# Backup / transfer (see docs/DATA_REBUILD.md → "Shipping the local dataset")
+# ---------------------------------------------------------------------------
+
+.PHONY: db-dump
+db-dump: ## Dump the local DB to backups/ (DATA_ONLY=1 for rows without schema)
+	@scripts/db-dump.sh
+
+.PHONY: db-restore
+db-restore: ## DESTRUCTIVE: recreate the LOCAL db from a dump (FILE=backups/….dump)
+	@scripts/db-restore.sh
+
+.PHONY: db-restore-remote
+db-restore-remote: ## DESTRUCTIVE: restore a dump into any DB (FILE=… URL=… CONFIRM=yes)
+	@scripts/db-restore.sh
+
+# ---------------------------------------------------------------------------
 # Ingestion (SEC EDGAR Form D, Wikidata, SEC Form ADV)
 # ---------------------------------------------------------------------------
 

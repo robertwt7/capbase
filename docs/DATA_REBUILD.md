@@ -88,6 +88,44 @@ page for links rather than constructing a URL from a date.
 `SEC_EDGAR` is pinned by its `DAYS` window; `WIKIDATA` is live and cannot be
 pinned — it reflects Wikidata at the moment of the run.
 
+## Shipping the local dataset to production
+
+Re-ingesting on prod (above) is the canonical path — every row is reproducible, and
+it costs nothing but time. Copying the local database is the *fast* path: it takes
+about a minute instead of hours of throttled SEC requests, and it guarantees prod
+matches exactly what you have been looking at locally.
+
+```bash
+make db-dump                                    # → backups/capbase-<utc-stamp>.dump (~2.5 MB)
+make db-restore-remote \
+  FILE=backups/capbase-20260802-225820.dump \
+  URL='postgresql://capbase:PASSWORD@DB_HOST:5432/capbase' \
+  CONFIRM=yes
+```
+
+`pg_dump`/`pg_restore` run **inside the local Postgres container**, so no local
+client is needed and the container just has to be able to reach the target host.
+Take `URL` from `infra/env/app.env` → `DATABASE_URL`.
+
+- The dump is `-Fc` (custom format, compressed) and includes `_prisma_migrations`,
+  so after a restore the api container's `prisma migrate deploy` on boot is a
+  no-op — migration history arrives intact.
+- The restore uses `--clean --if-exists`, so it works whether the target is empty
+  or already migrated/populated.
+- **It is destructive**: every row in the target is replaced, including `User`
+  accounts. It refuses to run without `CONFIRM=yes`, and passwords are redacted
+  from its output.
+- `DATA_ONLY=1 make db-dump` produces a rows-only dump (no schema, no migration
+  history) for loading into a database whose schema is already migrated.
+
+Restoring into the local database instead — handy for rolling back an experiment:
+
+```bash
+make db-restore FILE=backups/capbase-20260802-225820.dump
+```
+
+`backups/` is gitignored; move dumps over `scp` rather than committing them.
+
 ## Verifying a rebuild
 
 ```sql
