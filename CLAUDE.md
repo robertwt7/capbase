@@ -258,6 +258,20 @@ api container runs `prisma migrate deploy` on boot, and a one-shot `seed` profil
 demo data. Use the `Makefile`: `make up` (prod stack), `make dev` (local dev servers),
 `make ingest` (run a backfill), `make help` for the full list.
 
+**Production is a single VPS** (`make deploy-all`) serving `capbase.fyi` — the split
+two-box topology still works but is an appendix. The runbook is **`infra/README.md`**;
+`make` detects the topology from whether `infra/env/app.env` exists, so `deploy-ps` /
+`deploy-logs` / `deploy-down` / `deploy-seed` cover Postgres too on one box. Postgres
+binds `127.0.0.1` only (remote psql via `make db-tunnel`), is tuned for 8 GB via env
+vars, and every container has a `mem_limit` + capped logs. nginx serves a **static**
+`infra/nginx/conf.d/capbase.conf` (the `${DOMAIN}` template is gone; the domain is
+hardcoded and `deploy-tls` enforces that it matches `DOMAIN`). Key targets:
+`deploy-secrets` (generate all credentials), `backup-keygen` (age keypair, run on the
+laptop — the VPS only ever holds the public key), `deploy-backup` (dump → verify-restore
+→ encrypt → prune) and `deploy-backup-cron`, `deploy-restore` (ship a local dump to prod
+over SSH), `rotate-admin-password` (the `001-admin-user` seed phase upserts with
+`update: {}`, so re-seeding can never rotate), and `deploy-doctor`.
+
 ## Lint & tooling
 
 `yarn lint` runs flat-config ESLint per workspace via turbo. There is **no `next lint`**

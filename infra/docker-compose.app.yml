@@ -3,6 +3,15 @@
 # Env: infra/env/app.env  (single VPS: infra/env/all.env).
 #
 # ⚠️ DATABASE_URL must point at the DB VPS BEFORE `make deploy-app` — see README.
+#
+# Every service caps its json-file logs (unbounded logs are how a single VPS
+# fills its disk) and carries a mem_limit ceiling sized for an 8 GB box.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   api:
     build:
@@ -11,6 +20,8 @@ services:
     image: capbase-api
     container_name: capbase-api
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: ${API_MEM_LIMIT:-768m}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your env file}
@@ -35,6 +46,8 @@ services:
     image: capbase-web
     container_name: capbase-web
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: ${WEB_MEM_LIMIT:-768m}
     environment:
       API_URL: http://api:3000
       # Canonical origin for metadata/sitemap/robots/JSON-LD; defaults to the
@@ -54,6 +67,10 @@ services:
     image: capbase-jobs
     container_name: capbase-jobs
     restart: unless-stopped
+    logging: *default-logging
+    # The highest ceiling: the ADV ingest unzips + parses multi-MB bulk files
+    # and the Wikidata sweep buffers large SPARQL results.
+    mem_limit: ${JOBS_MEM_LIMIT:-1536m}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-capbase-ingest (contact@example.com)}
@@ -68,28 +85,29 @@ services:
     image: nginx:1.27-alpine
     container_name: capbase-nginx
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 128m
     depends_on:
       - web
     ports:
       - '80:80'
       - '443:443'
-    environment:
-      DOMAIN: ${DOMAIN:?set DOMAIN in your env file}
-      NGINX_ENVSUBST_FILTER: DOMAIN   # only substitute ${DOMAIN}, not $host etc.
+    # No DOMAIN env / envsubst filter here: the vhost is a static conf, not a
+    # template — see infra/nginx/conf.d/capbase.conf.
     volumes:
-      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
-    # Reload every 6h so renewed certs are picked up without a restart.
-    # Re-exec the official entrypoint so its /docker-entrypoint.d scripts still
-    # run (they render *.template → conf.d, substituting ${DOMAIN}); those are
-    # skipped when the container command doesn't start with `nginx`.
+    # Reload every 6h so renewed certs are picked up without a restart. Still
+    # re-execs the official entrypoint so its /docker-entrypoint.d scripts run.
     command: sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec /docker-entrypoint.sh nginx -g "daemon off;"'
 
   certbot:
     image: certbot/certbot
     container_name: capbase-certbot
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 128m
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
@@ -106,3 +124,17 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
       ADMIN_NAME: ${ADMIN_NAME:-Capbase Admin}
     command: ['yarn', 'workspace', '@repo/db', 'seed']
+
+  # One-shot admin password rotation: `make rotate-admin-password`.
+  # Separate from `seed` because 001-admin-user never updates an existing user.
+  # Reuses the api image for the same reason `seed` does — it carries @repo/db,
+  # bcrypt and tsx.
+  rotate-admin:
+    image: capbase-api
+    profiles: ['admin']
+    logging: *default-logging
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@capbase.fyi}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in your env file}
+    command: ['yarn', 'workspace', '@repo/db', 'rotate:admin']

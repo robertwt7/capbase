@@ -43,13 +43,17 @@ rate limit; use `DAYS=90` for a quick, representative dataset.
 ## Full rebuild, production
 
 ```bash
-make deploy-db                 # Postgres (migrations run on api container boot)
+make deploy-all                # whole stack incl. Postgres (migrations run on api boot)
 make deploy-seed               # admin user
 make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR
 make ingest-investors-prod     # SEC_ADV + Wikidata investor firms
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=WIKIDATA
 make backfill-sectors-prod
 ```
+
+This is "Flow B" in [`infra/README.md`](../infra/README.md); `make deploy-all` is
+the single-VPS command (`make deploy-db` is the split-topology equivalent).
+`deploy-seed` refuses to run with a weak `ADMIN_PASSWORD`.
 
 Migrations are applied automatically by the api container (`prisma migrate
 deploy`), including the `add_investor_entity` data steps — the EIB purge and the
@@ -97,15 +101,18 @@ matches exactly what you have been looking at locally.
 
 ```bash
 make db-dump                                    # → backups/capbase-<utc-stamp>.dump (~2.5 MB)
-make db-restore-remote \
+make deploy-restore \
   FILE=backups/capbase-20260802-225820.dump \
-  URL='postgresql://capbase:PASSWORD@DB_HOST:5432/capbase' \
+  VPS=user@host \
   CONFIRM=yes
+make rotate-admin-password VPS=user@host ADMIN_EMAIL=admin@capbase.dev   # ← NOT optional
 ```
 
-`pg_dump`/`pg_restore` run **inside the local Postgres container**, so no local
-client is needed and the container just has to be able to reach the target host.
-Take `URL` from `infra/env/app.env` → `DATABASE_URL`.
+`deploy-restore` streams the dump over SSH into the VPS's **own** Postgres
+container. Production Postgres is bound to `127.0.0.1`, so nothing dials it from
+outside — which is also why `make db-restore-remote` (it connects to a
+`URL=` from the *local* container) no longer reaches a hardened production box.
+`db-restore-remote` stays for tunnelled or split-topology targets.
 
 - The dump is `-Fc` (custom format, compressed) and includes `_prisma_migrations`,
   so after a restore the api container's `prisma migrate deploy` on boot is a
@@ -113,8 +120,14 @@ Take `URL` from `infra/env/app.env` → `DATABASE_URL`.
 - The restore uses `--clean --if-exists`, so it works whether the target is empty
   or already migrated/populated.
 - **It is destructive**: every row in the target is replaced, including `User`
-  accounts. It refuses to run without `CONFIRM=yes`, and passwords are redacted
-  from its output.
+  accounts. It refuses to run without `CONFIRM=yes`.
+- **Rotating the admin password afterwards is mandatory.** The dump carries your
+  local `User` rows, so production's admin login becomes whatever your dev box
+  used — and the admin is `admin@capbase.dev`, not the `admin@capbase.fyi`
+  default, so `ADMIN_EMAIL=` is required. `deploy-restore` prints the user table
+  it just installed to make this impossible to miss.
+- **No seeding is needed.** `SeedHistory` came across in the dump, so
+  `make deploy-seed` would skip every phase anyway.
 - `DATA_ONLY=1 make db-dump` produces a rows-only dump (no schema, no migration
   history) for loading into a database whose schema is already migrated.
 

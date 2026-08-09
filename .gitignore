@@ -66,5 +66,9 @@ infra/env/*.env
 infra/certbot/conf
 infra/certbot/www
 
+# infra: backup recipients (keep the .example) + any stray key material
+infra/backup/recipients.txt
+*.key
+
 # Local database dumps (make db-dump)
 backups/

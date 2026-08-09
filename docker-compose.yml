@@ -1,11 +1,19 @@
 x-db-url: &db-url
   DATABASE_URL: postgresql://capbase:capbase@postgres:5432/capbase?schema=public
 
+# Unbounded json-file logs fill a dev disk just as well as a VPS one.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   postgres:
     image: postgres:16
     container_name: capbase-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: capbase
       POSTGRES_PASSWORD: capbase
@@ -28,6 +36,7 @@ services:
     image: capbase-api
     container_name: capbase-api
     restart: unless-stopped
+    logging: *default-logging
     environment:
       <<: *db-url
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
@@ -54,6 +63,7 @@ services:
     image: capbase-web
     container_name: capbase-web
     restart: unless-stopped
+    logging: *default-logging
     environment:
       API_URL: http://api:3000
       SITE_URL: ${SITE_URL:-https://capbase.fyi}
@@ -72,6 +82,7 @@ services:
     image: capbase-jobs
     container_name: capbase-jobs
     restart: unless-stopped
+    logging: *default-logging
     environment:
       <<: *db-url
       SEC_USER_AGENT: ${SEC_USER_AGENT:-capbase-ingest (contact@example.com)}

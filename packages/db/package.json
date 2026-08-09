@@ -22,6 +22,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "seed": "prisma db seed",
     "seed:baseline": "tsx prisma/seed.ts --baseline",
+    "rotate:admin": "tsx prisma/rotate-admin-password.ts",
     "reset": "tsx prisma/reset.ts"
   },
   "dependencies": {

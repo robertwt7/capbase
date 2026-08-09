@@ -17,3 +17,5 @@ README.md
 infra/env/*.env
 infra/certbot/conf
 infra/certbot/www
+infra/backup/recipients.txt
+*.key

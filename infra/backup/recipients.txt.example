@@ -1,0 +1,4 @@
+# Your age PUBLIC key(s) — one per line. `make backup-keygen` prints the exact
+# command to create the real recipients.txt on the VPS from this template.
+# The PRIVATE key (identity) must NEVER live on the server or in this repo.
+age1exampleexampleexampleexampleexampleexampleexampleexampleexampl

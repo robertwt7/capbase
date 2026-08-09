@@ -21,14 +21,37 @@ LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$(env_val LETSENCRYPT_EMAIL)}"
 : "${DOMAIN:?set DOMAIN in $ENV_FILE}"
 : "${LETSENCRYPT_EMAIL:?set LETSENCRYPT_EMAIL in $ENV_FILE}"
 
+# Match the Makefile's topology detection: app.env → split (app stack only),
+# otherwise single VPS (the full stack, Postgres included).
+if [ "$ENV_FILE" = "infra/env/app.env" ]; then
+  COMPOSE_FILES="-f infra/docker-compose.app.yml"
+else
+  COMPOSE_FILES="-f infra/docker-compose.db.yml -f infra/docker-compose.app.yml -f infra/docker-compose.all.yml"
+fi
+
 compose() {
-  docker compose -p capbase -f infra/docker-compose.app.yml --env-file "$ENV_FILE" "$@"
+  # shellcheck disable=SC2086
+  docker compose -p capbase $COMPOSE_FILES --env-file "$ENV_FILE" "$@"
 }
+
+# The vhost hardcodes its server_name, so a DOMAIN that doesn't match would
+# issue a cert nginx never serves. Fail early instead.
+NGINX_CONF=infra/nginx/conf.d/capbase.conf
+if ! grep -q "server_name $DOMAIN;" "$NGINX_CONF"; then
+  echo "❌ DOMAIN=$DOMAIN is not a server_name in $NGINX_CONF."
+  echo "   Update both, or set DOMAIN to match the vhost."
+  exit 1
+fi
+
+# CERT_DOMAINS lets you add www later without touching this script.
+CERT_DOMAINS="${CERT_DOMAINS:-$DOMAIN}"
+d_args=""
+for d in $CERT_DOMAINS; do d_args="$d_args -d $d"; done
 
 CONF=infra/certbot/conf
 mkdir -p "$CONF" infra/certbot/www
 
-# Recommended TLS params referenced by the nginx template.
+# Recommended TLS params referenced by the nginx vhost.
 [ -f "$CONF/options-ssl-nginx.conf" ] || curl -sfL \
   https://raw.githubusercontent.com/certbot/certbot/main/certbot-nginx/src/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
   -o "$CONF/options-ssl-nginx.conf"
@@ -53,7 +76,7 @@ compose up -d --build
 compose run --rm --entrypoint "sh -c '\
   rm -rf /etc/letsencrypt/live/$DOMAIN /etc/letsencrypt/archive/$DOMAIN /etc/letsencrypt/renewal/$DOMAIN.conf'" certbot
 compose run --rm --entrypoint "certbot certonly --webroot -w /var/www/certbot \
-  -d $DOMAIN --email $LETSENCRYPT_EMAIL --agree-tos --no-eff-email --non-interactive" certbot
+ $d_args --email $LETSENCRYPT_EMAIL --agree-tos --no-eff-email --non-interactive" certbot
 # 4) Reload nginx with the real cert (restart covers a mid-backoff nginx).
 compose exec nginx nginx -s reload || compose restart nginx
 echo "TLS ready: https://$DOMAIN"

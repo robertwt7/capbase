@@ -1,22 +1,59 @@
-# Postgres — runs on the DB VPS (`make deploy-db`) or, on a single box, as the
-# base of the all-in-one stack (`make deploy-all`). Env: infra/env/db.env
-# (single VPS uses infra/env/all.env instead).
+# Postgres — the single-VPS default (`make deploy-all`), or standalone on a DB
+# VPS (`make deploy-db`). Env: infra/env/all.env (single) / db.env (split).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16 # pinned major on purpose: a surprise bump won't start on an old PGDATA
     container_name: capbase-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-capbase}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your env file}
       POSTGRES_DB: ${POSTGRES_DB:-capbase}
-    # Split VPS: after you set up the private network, set POSTGRES_BIND to the
-    # DB VPS's PRIVATE ip (e.g. 10.0.0.2) and firewall this port to the App VPS.
-    # Single VPS: 127.0.0.1 is fine (nothing external connects). See infra/README.md.
+    # DEFAULT IS LOOPBACK-ONLY. Nothing outside the box can reach Postgres;
+    # `make db-tunnel` gives you remote psql over SSH instead. Only the SPLIT
+    # topology overrides this (to the DB VPS's PRIVATE ip) — see infra/README.md.
     ports:
-      - '${POSTGRES_BIND:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432'
+      - '${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - capbase-pgdata:/var/lib/postgresql/data
+    # Sized for an 8 GB box; override in the env file after a resize.
+    shm_size: ${PG_SHM_SIZE:-256mb}
+    mem_limit: ${PG_MEM_LIMIT:-3g}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-2GB} # ~25% RAM
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-4GB} # ~50% RAM
+      - -c
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-512MB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-16MB}
+      # 50 not 100: pg.Pool defaults to max=10/process and we run at most
+      # api + jobs + one backfill ≈ 30.
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-50}
+      - -c
+      - random_page_cost=1.1 # SSD, not spinning rust
+      - -c
+      - effective_io_concurrency=200 # SSD
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - min_wal_size=512MB
+      - -c
+      - wal_compression=on
+      - -c
+      - log_min_duration_statement=2000 # log queries slower than 2s
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-capbase} -d ${POSTGRES_DB:-capbase}']
       interval: 5s
