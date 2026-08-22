@@ -1,6 +1,10 @@
 // Payload shapes for crowdsourced contributions. The NestJS DTO classes
 // (apps/api) implement these interfaces and attach class-validator decorators;
 // the web app reuses them to type its submission forms.
+//
+// Every contribution carries an optional `sourceUrl`: the primary document the
+// contributor is citing. Optional but prompted — a fact with no citation renders
+// as explicitly uncited rather than looking identical to a sourced one.
 
 import type {
   CompanyFinancials,
@@ -35,6 +39,8 @@ export interface CreateCompanyInput {
   operatingStatus?: OperatingStatus | null;
   companyType?: CompanyType | null;
   primarySector?: Sector | null;
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }
 
 export interface CreateFundingRoundInput {
@@ -44,6 +50,8 @@ export interface CreateFundingRoundInput {
   postMoneyUsd?: number | null;
   lead?: string | null;
   investors: RoundInvestor[];
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }
 
 export interface CreatePersonInput {
@@ -53,6 +61,8 @@ export interface CreatePersonInput {
   prior?: string;
   linkedinUrl?: string | null;
   title?: string | null;
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }
 
 export interface CreateInvestorInput {
@@ -62,6 +72,8 @@ export interface CreateInvestorInput {
   rounds: number;
   websiteUrl?: string | null;
   linkedinUrl?: string | null;
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }
 
 export interface CreateAcquisitionInput {
@@ -69,6 +81,8 @@ export interface CreateAcquisitionInput {
   date: string;
   amountUsd?: number | null;
   rationale: string;
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }
 
 export interface CreateExitInput {
@@ -76,10 +90,14 @@ export interface CreateExitInput {
   date: string;
   valueUsd?: number | null;
   detail: string;
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }
 
 export interface CreateDiversityInput {
   label: string;
   value: string;
   note: string;
+  /** Primary document backing this contribution. */
+  sourceUrl?: string | null;
 }

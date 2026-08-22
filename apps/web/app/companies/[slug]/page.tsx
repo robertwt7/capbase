@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CompanyAccess } from '@repo/api';
 
+import { Citation, companyEntityId } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { FundingLadder } from '@/components/FundingLadder';
 import { JsonLd } from '@/components/JsonLd';
@@ -57,7 +58,13 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
     notFound();
   }
 
-  const { company, access } = result;
+  const { company, access, citations } = result;
+  // Company-level facts all anchor to the company row; a whole-row citation
+  // (what the backfill mints) attests each of them.
+  const companyId = companyEntityId(citations);
+  const cite = (field: string) => (
+    <Citation citations={citations} entityId={companyId} field={field} />
+  );
   const signedIn = session !== null;
   const saved = signedIn
     ? (await getSavedStatus(slug).catch(() => ({ saved: false }))).saved
@@ -84,6 +91,14 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             href={`/compare?companies=${company.slug}`}
           >
             Compare
+          </Button>
+          <Button
+            variant="outline"
+            shape="pill"
+            size="sm"
+            href={`/companies/${company.slug}/history`}
+          >
+            History
           </Button>
           <ProposeChangeMenu slug={company.slug} />
         </div>
@@ -119,9 +134,9 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           )}
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
-          <Fact label="Founded" value={company.founded.toString()} />
-          <Fact label="Headquarters" value={company.hq} />
-          <Fact label="Headcount" value={formatCount(company.headcount)} />
+          <Fact label="Founded" value={company.founded.toString()} cite={cite('founded')} />
+          <Fact label="Headquarters" value={company.hq} cite={cite('hq')} />
+          <Fact label="Headcount" value={formatCount(company.headcount)} cite={cite('headcount')} />
           <Fact label="Stage" value={company.stage} />
           {company.primarySector && <Fact label="Sector" value={company.primarySector} />}
           {company.legalName && <Fact label="Legal name" value={company.legalName} />}
@@ -133,8 +148,24 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
       </header>
 
       <section className="flex flex-wrap gap-x-16 gap-y-3.5 border-b border-line py-8">
-        <Stat label="Total raised" value={formatUsd(company.totalRaisedUsd)} />
-        <Stat label="Last valuation" value={formatUsd(company.lastValuationUsd)} />
+        <Stat
+          label="Total raised"
+          value={
+            <>
+              {formatUsd(company.totalRaisedUsd)}
+              {cite('totalRaisedUsd')}
+            </>
+          }
+        />
+        <Stat
+          label="Last valuation"
+          value={
+            <>
+              {formatUsd(company.lastValuationUsd)}
+              {cite('lastValuationUsd')}
+            </>
+          }
+        />
         {company.financials && (
           <>
             <Stat label="Revenue (est.)" value={formatUsd(company.financials.revenueUsd)} />
@@ -154,7 +185,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         note={access.totals.rounds > 0 ? `${access.totals.rounds} rounds` : undefined}
       >
         {company.rounds && company.rounds.length > 0 ? (
-          <FundingLadder rounds={company.rounds} />
+          <FundingLadder rounds={company.rounds} citations={citations} />
         ) : (
           <Empty
             action="Add a funding round"
@@ -180,7 +211,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <div className={`${panel} grid-cols-2 max-[600px]:grid-cols-1`}>
             {company.investors.map((inv) => (
               <div
-                key={inv.name}
+                key={inv.id}
                 className={`${cell} grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-1 px-[18px] py-4`}
               >
                 {/* The investor's own profile wins; an outbound link is the
@@ -210,6 +241,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 <span className="col-span-full flex flex-wrap items-baseline gap-x-3 text-[13px] text-graphite-500">
                   <span>
                     {inv.rounds} {inv.rounds === 1 ? 'round' : 'rounds'} · since {inv.firstRound}
+                    <Citation citations={citations} entityId={inv.id} />
                   </span>
                   {inv.slug && (inv.websiteUrl || inv.linkedinUrl) ? (
                     <OutboundLink href={(inv.websiteUrl ?? inv.linkedinUrl)!}>
@@ -241,7 +273,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         {company.people && company.people.length > 0 ? (
           <div className={`${panel} grid-cols-3 max-[860px]:grid-cols-1`}>
             {company.people.map((person) => (
-              <div key={person.name} className={`${cell} flex flex-col gap-1 p-[18px]`}>
+              <div key={person.id} className={`${cell} flex flex-col gap-1 p-[18px]`}>
                 <span className="font-display text-[15px] font-semibold text-ink">
                   {person.name}
                 </span>
@@ -252,6 +284,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 <span className="mt-1 font-mono text-xs text-graphite-500">
                   Since {person.since}
                   {person.prior ? ` · prev. ${person.prior}` : ''}
+                  <Citation citations={citations} entityId={person.id} />
                 </span>
                 {person.linkedinUrl && (
                   <OutboundLink href={person.linkedinUrl}>LinkedIn</OutboundLink>
@@ -282,11 +315,12 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             <ul className={`${panel} grid-cols-1`}>
               {company.acquisitions.map((deal) => (
                 <Deal
-                  key={deal.target}
+                  key={deal.id}
                   name={deal.target}
                   amount={formatUsd(deal.amountUsd)}
                   date={formatDate(deal.date)}
                   note={deal.rationale}
+                  cite={<Citation citations={citations} entityId={deal.id} />}
                 />
               ))}
             </ul>
@@ -310,13 +344,14 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         <Block title="Exits">
           {company.exits && company.exits.length > 0 ? (
             <ul className={`${panel} grid-cols-1`}>
-              {company.exits.map((exit, i) => (
+              {company.exits.map((exit) => (
                 <Deal
-                  key={i}
+                  key={exit.id}
                   name={exit.type}
                   amount={formatUsd(exit.valueUsd)}
                   date={formatDate(exit.date)}
                   note={exit.detail}
+                  cite={<Citation citations={citations} entityId={exit.id} />}
                 />
               ))}
             </ul>
@@ -339,12 +374,15 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         {company.diversity && company.diversity.length > 0 ? (
           <div className={`${panel} grid-cols-3 max-[860px]:grid-cols-1`}>
             {company.diversity.map((d) => (
-              <div key={d.label} className={`${cell} flex flex-col gap-1.5 px-[18px] py-5`}>
+              <div key={d.id} className={`${cell} flex flex-col gap-1.5 px-[18px] py-5`}>
                 <span className="font-mono text-2xl font-medium tracking-tight text-ink">
                   {d.value}
                 </span>
                 <span className="text-[13px] font-medium text-graphite-900">{d.label}</span>
-                <span className="text-xs text-graphite-500">{d.note}</span>
+                <span className="text-xs text-graphite-500">
+                  {d.note}
+                  <Citation citations={citations} entityId={d.id} />
+                </span>
               </div>
             ))}
           </div>
@@ -445,11 +483,22 @@ function OutboundLink({ href, children }: { href: string; children: React.ReactN
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({
+  label,
+  value,
+  cite,
+}: {
+  label: string;
+  value: string;
+  cite?: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-1">
       <dt className="text-[11px] tracking-[0.04em] text-graphite-500 uppercase">{label}</dt>
-      <dd className="font-mono text-sm text-ink">{value}</dd>
+      <dd className="font-mono text-sm text-ink">
+        {value}
+        {cite}
+      </dd>
     </div>
   );
 }
@@ -459,11 +508,13 @@ function Deal({
   amount,
   date,
   note,
+  cite,
 }: {
   name: string;
   amount: string;
   date: string;
   note: string;
+  cite?: React.ReactNode;
 }) {
   return (
     <li className={`${cell} flex flex-col gap-1 px-[18px] py-4`}>
@@ -471,7 +522,10 @@ function Deal({
         <span className="font-display text-[15px] font-semibold text-ink">{name}</span>
         <span className="font-mono text-sm text-ink">{amount}</span>
       </div>
-      <span className="font-mono text-xs text-graphite-500">{date}</span>
+      <span className="font-mono text-xs text-graphite-500">
+        {date}
+        {cite}
+      </span>
       <p className="mt-0.5 text-[13px] text-graphite-700">{note}</p>
     </li>
   );

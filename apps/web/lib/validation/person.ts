@@ -16,6 +16,7 @@ export const personFormSchema = z.object({
   title: z.string().trim(),
   prior: z.string().trim(),
   linkedinUrl: urlOrEmpty,
+  sourceUrl: urlOrEmpty,
 });
 
 export type PersonFormValues = z.infer<typeof personFormSchema>;
@@ -27,6 +28,7 @@ export const personFormDefaults: PersonFormValues = {
   title: '',
   prior: '',
   linkedinUrl: '',
+  sourceUrl: '',
 };
 
 export function toPersonInput(v: PersonFormValues): CreatePersonInput {
@@ -37,5 +39,6 @@ export function toPersonInput(v: PersonFormValues): CreatePersonInput {
     ...(v.title ? { title: v.title } : {}),
     ...(v.prior ? { prior: v.prior } : {}),
     ...(v.linkedinUrl ? { linkedinUrl: v.linkedinUrl } : {}),
+    ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
   };
 }

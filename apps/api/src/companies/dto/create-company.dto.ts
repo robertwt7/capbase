@@ -122,4 +122,10 @@ export class CreateCompanyDto implements CreateCompanyInput {
   @IsOptional()
   @IsIn([...SECTORS])
   primarySector?: Sector | null;
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }

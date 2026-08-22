@@ -104,3 +104,36 @@ describe('CompaniesService.proposeChange', () => {
     expect(call.data.changes).toEqual({ primarySector: null });
   });
 });
+
+describe('CompaniesService.proposeChange (source URL)', () => {
+  it('stores the cited URL on the proposal, never inside the changes diff', async () => {
+    const { service, create } = makeService();
+
+    await service.proposeChange(
+      'helia',
+      {
+        changes: { headcount: 25 },
+        sourceUrl: 'https://example.com/10-k',
+      } as CreateChangeProposalDto,
+      'u1',
+    );
+
+    const call = (create.mock.calls[0] as unknown[])[0] as { data: Record<string, unknown> };
+    expect(call.data.sourceUrl).toBe('https://example.com/10-k');
+    // `changes` is the editable-column whitelist; sourceUrl must not leak in.
+    expect(call.data.changes).toEqual({ headcount: 25 });
+  });
+
+  it('stores null when the contributor cited nothing', async () => {
+    const { service, create } = makeService();
+
+    await service.proposeChange(
+      'helia',
+      { changes: { headcount: 25 } } as CreateChangeProposalDto,
+      'u1',
+    );
+
+    const call = (create.mock.calls[0] as unknown[])[0] as { data: Record<string, unknown> };
+    expect(call.data.sourceUrl).toBeNull();
+  });
+});

@@ -1,4 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { toJsonValue } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -50,14 +52,31 @@ interface InvestorIndex {
 const SEC_ONE_LINER_PREFIX = 'Private securities offering disclosed';
 const SEC_DESCRIPTION_MARKER = 'filed a Form D';
 
+/** Field-level equality for revision diffs. Arrays compare element-wise (i.e.
+ *  `industry`); BigInt money columns compare fine with `===`. */
+const sameValue = (a: unknown, b: unknown): boolean =>
+  Array.isArray(a) && Array.isArray(b)
+    ? a.length === b.length && a.every((v, i) => v === b[i])
+    : a === b;
+
 @Injectable()
 export class IngestService {
   private readonly logger = new Logger(IngestService.name);
+  /**
+   * Whether a company update writes to the public timeline. On by default; a
+   * from-scratch rebuild (`make ingest-all`) creates the entire corpus, and a
+   * "history" of that creation is noise rather than signal — turn it off for
+   * those (see docs/DATA_REBUILD.md).
+   */
+  private readonly recordRevisions: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(INGESTION_SOURCES) private readonly sources: IngestionSource[],
-  ) {}
+    config: ConfigService,
+  ) {
+    this.recordRevisions = (config.get<string>('INGEST_RECORD_REVISIONS') ?? 'true') !== 'false';
+  }
 
   /** Run the configured sources and upsert their records. Idempotent: rows are
    *  keyed by (externalSource, externalId), so re-runs update in place. Records
@@ -421,15 +440,14 @@ export class IngestService {
 
     const ownId = index.byKey.get(key);
     if (ownId) {
-      await this.prisma.company.update({
-        where: { id: ownId },
-        data: {
-          name: c.name,
-          hq: c.hq || 'Undisclosed',
-          industry: c.industry,
-          stage: c.stage,
-          totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
-        },
+      // Our own row: the source is authoritative, but these are published
+      // figures, so the timeline records whichever of them actually move.
+      await this.writeCompany(ownId, r.source, {
+        name: c.name,
+        hq: c.hq || 'Undisclosed',
+        industry: c.industry,
+        stage: c.stage,
+        totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
       });
       return ownId;
     }
@@ -493,9 +511,64 @@ export class IngestService {
       data.description = c.description;
     }
 
-    if (Object.keys(data).length > 0) {
-      await this.prisma.company.update({ where: { id: companyId }, data });
+    // `row` is the pre-update state, so writeCompany needs no second read.
+    await this.writeCompany(companyId, r.source, data, row as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Apply a company update, recording one Revision per field that actually
+   * moves. Enrichment and the own-key update are the two paths that mutate
+   * already-published data, and until now neither left any trace.
+   *
+   * The before-state is read inside this call (unless the caller already holds
+   * it) rather than taken from the run-start match index, so a company touched
+   * twice in one run diffs against the row as it stands.
+   */
+  private async writeCompany(
+    companyId: string,
+    source: string,
+    data: Record<string, unknown>,
+    known?: Record<string, unknown>,
+  ): Promise<void> {
+    if (Object.keys(data).length === 0) return;
+
+    const update = { where: { id: companyId }, data };
+    if (!this.recordRevisions) {
+      await this.prisma.company.update(update);
+      return;
     }
+
+    const before =
+      known ??
+      ((await this.prisma.company.findUnique({ where: { id: companyId } })) as unknown as Record<
+        string,
+        unknown
+      > | null) ??
+      {};
+
+    const revisions = Object.keys(data)
+      .filter((field) => !sameValue(before[field], data[field]))
+      .map((field) => ({
+        companyId,
+        entityType: 'company',
+        entityId: companyId,
+        field,
+        before: toJsonValue(before[field]),
+        after: toJsonValue(data[field]),
+        action: 'UPDATE',
+        actor: 'INGEST',
+        actorSource: source,
+      }));
+
+    if (revisions.length === 0) {
+      await this.prisma.company.update(update);
+      return;
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.company.update(update),
+      this.prisma.revision.createMany({ data: revisions }),
+    ]);
   }
 
   private uniqueSlug(name: string, externalId: string, index: MatchIndex): string {

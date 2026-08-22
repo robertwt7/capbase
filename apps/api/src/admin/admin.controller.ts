@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { PendingSubmissionsResponse, ReviewableType, ReviewStatus } from '@repo/api';
 
+import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -48,10 +49,12 @@ export class AdminController {
     @Param('type') type: string,
     @Param('id') id: string,
     @Body() dto: ModerationDecisionDto,
+    @CurrentUser() user: RequestUser,
   ) {
     if (!REVIEWABLE_TYPES.includes(type as ReviewableType)) {
       throw new BadRequestException(`Invalid submission type "${type}"`);
     }
-    return this.admin.moderate(type as ReviewableType, id, dto.status);
+    // The acting admin is recorded on every revision this decision writes.
+    return this.admin.moderate(type as ReviewableType, id, dto.status, user.id);
   }
 }

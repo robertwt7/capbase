@@ -13,17 +13,24 @@ import { cache } from 'react';
 import {
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
+  type AcquisitionDeal,
   type Company,
   type CompanyDetailResponse,
+  type CompanyHistoryResponse,
   type CompanyListQuery,
   type CompanySlugEntry,
+  type DiversitySignal,
+  type ExitEvent,
+  type FundingRound,
   type InvestorDetailResponse,
+  type InvestorHolding,
   type InvestorListQuery,
   type InvestorSlugEntry,
   type InvestorSummary,
   type MarketStat,
   type MarketTotals,
   type Paginated,
+  type Person,
 } from '@repo/api';
 
 import { apiFetch } from './api';
@@ -50,7 +57,41 @@ export type {
   MarketTotals,
 } from '@repo/api';
 
-const fallbackCompanies: Company[] = [
+/** The fallback rows below are hand-written literals with no database identity.
+    Rather than inventing ids inline on every one, they are declared without and
+    stamped by `withMockIds` — a Citation or Revision can never resolve against
+    them anyway, since they only exist when the API is unreachable. */
+type Idless<T> = Omit<T, 'id'>;
+
+type MockCompany = Omit<
+  Company,
+  'rounds' | 'people' | 'investors' | 'acquisitions' | 'exits' | 'diversity'
+> & {
+  rounds?: Idless<FundingRound>[];
+  people?: Idless<Person>[];
+  investors?: Idless<InvestorHolding>[];
+  acquisitions?: Idless<AcquisitionDeal>[];
+  exits?: Idless<ExitEvent>[];
+  diversity?: Idless<DiversitySignal>[];
+};
+
+/** Stamp deterministic synthetic ids onto a fallback company's child rows. */
+function withMockIds(company: MockCompany): Company {
+  const stamp = <T>(kind: string, rows: T[] | undefined): (T & { id: string })[] | undefined =>
+    rows?.map((row, i) => ({ ...row, id: `${company.slug}-${kind}-${i}` }));
+
+  return {
+    ...company,
+    rounds: stamp('round', company.rounds),
+    people: stamp('person', company.people),
+    investors: stamp('investor', company.investors),
+    acquisitions: stamp('acquisition', company.acquisitions),
+    exits: stamp('exit', company.exits),
+    diversity: stamp('diversity', company.diversity),
+  };
+}
+
+const mockCompanies: MockCompany[] = [
   {
     slug: 'helia',
     name: 'Helia',
@@ -316,6 +357,8 @@ const fallbackCompanies: Company[] = [
   },
 ];
 
+const fallbackCompanies: Company[] = mockCompanies.map(withMockIds);
+
 const fallbackMarketStats: MarketStat[] = [
   { sector: 'Artificial intelligence', companyCount: 2, dealCount: 1284, totalRaisedUsd: 48_200_000_000, medianValuationUsd: 240_000_000, trendPct: 31 },
   { sector: 'Fintech', companyCount: 2, dealCount: 962, totalRaisedUsd: 19_400_000_000, medianValuationUsd: 95_000_000, trendPct: -6 },
@@ -449,9 +492,30 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
           diversity: company.diversity?.length ?? 0,
         },
       },
+      // The fallback rows have no database identity, so nothing can cite them.
+      citations: [],
     };
   }
 });
+
+/**
+ * One page of a company's public change timeline. Returns null when the slug is
+ * unknown (the page renders notFound) — there is no offline fallback: an
+ * invented audit trail would be worse than none.
+ */
+export async function getCompanyHistory(
+  slug: string,
+  page = 1,
+): Promise<CompanyHistoryResponse | null> {
+  try {
+    return await apiFetch<CompanyHistoryResponse>(
+      `/companies/${encodeURIComponent(slug)}/history?page=${page}`,
+    );
+  } catch (err) {
+    console.warn(`[data] getCompanyHistory(${slug}) failed:`, err);
+    return null;
+  }
+}
 
 /** Every approved company's slug + last update, for the sitemap. */
 export async function getCompanySlugs(): Promise<CompanySlugEntry[]> {

@@ -48,6 +48,7 @@ export function toRoundInvestor(row: DbRoundInvestor): RoundInvestor {
 
 export function toFundingRound(row: DbRoundWithInvestors): FundingRound {
   return {
+    id: row.id,
     name: row.name,
     date: dateOnly(row.date),
     amountUsd: Number(row.amountUsd),
@@ -59,6 +60,7 @@ export function toFundingRound(row: DbRoundWithInvestors): FundingRound {
 
 export function toPerson(row: DbPerson): Person {
   return {
+    id: row.id,
     name: row.name,
     role: row.role,
     since: row.since,
@@ -76,6 +78,7 @@ type DbHoldingWithInvestor = DbInvestorHolding & {
 
 export function toInvestorHolding(row: DbHoldingWithInvestor): InvestorHolding {
   return {
+    id: row.id,
     slug: row.investor?.moderationStatus === 'APPROVED' ? row.investor.slug : null,
     name: row.name,
     type: row.type as InvestorType,
@@ -88,6 +91,7 @@ export function toInvestorHolding(row: DbHoldingWithInvestor): InvestorHolding {
 
 export function toAcquisition(row: DbAcquisitionDeal): AcquisitionDeal {
   return {
+    id: row.id,
     target: row.target,
     date: dateOnly(row.date),
     amountUsd: numN(row.amountUsd),
@@ -97,6 +101,7 @@ export function toAcquisition(row: DbAcquisitionDeal): AcquisitionDeal {
 
 export function toExit(row: DbExitEvent): ExitEvent {
   return {
+    id: row.id,
     type: row.type as ExitType,
     date: dateOnly(row.date),
     valueUsd: numN(row.valueUsd),
@@ -105,7 +110,7 @@ export function toExit(row: DbExitEvent): ExitEvent {
 }
 
 export function toDiversity(row: DbDiversitySignal): DiversitySignal {
-  return { label: row.label, value: row.value, note: row.note };
+  return { id: row.id, label: row.label, value: row.value, note: row.note };
 }
 
 /** The proposal-editable view of a Company row, in `CompanyEditFields` value

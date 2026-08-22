@@ -15,3 +15,6 @@ export function createPrismaClient(connectionString: string): PrismaClient {
 // Re-export the full generated client surface (PrismaClient, model row types,
 // enums) so consumers import everything from `@repo/db`.
 export * from './generated/prisma/client';
+
+// Prisma-typed helpers shared by every app that writes through the client.
+export { toJsonValue, type JsonColumnValue } from './json';

@@ -1,4 +1,5 @@
 import { describe, it, expect, jest } from '@jest/globals';
+import type { ConfigService } from '@nestjs/config';
 
 import { IngestService, normalizeInvestorName, normalizeName } from './ingest.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -87,15 +88,48 @@ function mockPrisma(
         async () => ({ id: 'c-new' }),
       ),
     },
-    fundingRound: { upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})) },
-    person: { upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})) },
-    investorHolding: { upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})) },
-    acquisitionDeal: { upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})) },
-    exitEvent: { upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})) },
+    fundingRound: {
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+    },
+    person: {
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+    },
+    investorHolding: {
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+    },
+    acquisitionDeal: {
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+    },
+    exitEvent: {
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+    },
+    revision: {
+      createMany: jest.fn<(args: { data: Record<string, unknown>[] }) => Promise<unknown>>(
+        async () => ({}),
+      ),
+    },
+    // The array form of $transaction: the mocked members return plain promises,
+    // so awaiting them all is a faithful stand-in.
+    $transaction: jest.fn<(ops: Promise<unknown>[]) => Promise<unknown[]>>((ops) =>
+      Promise.all(ops),
+    ),
   };
 }
 
-function stubSource(records: NormalizedRecord[], firms?: NormalizedInvestorFirm[]): IngestionSource {
+/** ConfigService stand-in: `env` supplies the vars the service reads. */
+function config(env: Record<string, string> = {}): ConfigService {
+  return { get: (key: string) => env[key] } as unknown as ConfigService;
+}
+
+/** Every revision row written across all $transaction calls, flattened. */
+function revisionsFrom(prisma: ReturnType<typeof mockPrisma>): Record<string, unknown>[] {
+  return prisma.revision.createMany.mock.calls.flatMap((call) => call[0].data);
+}
+
+function stubSource(
+  records: NormalizedRecord[],
+  firms?: NormalizedInvestorFirm[],
+): IngestionSource {
   return {
     name: 'STUB',
     fetch: async () => records,
@@ -134,8 +168,12 @@ function record(overrides: Partial<NormalizedRecord> = {}): NormalizedRecord {
   };
 }
 
-function serviceWith(prisma: ReturnType<typeof mockPrisma>, records: NormalizedRecord[]) {
-  return new IngestService(prisma as unknown as PrismaService, [stubSource(records)]);
+function serviceWith(
+  prisma: ReturnType<typeof mockPrisma>,
+  records: NormalizedRecord[],
+  env: Record<string, string> = {},
+) {
+  return new IngestService(prisma as unknown as PrismaService, [stubSource(records)], config(env));
 }
 
 const RUN = { days: 7, limit: 100 };
@@ -167,13 +205,23 @@ describe('IngestService.run', () => {
   it('upserts the round keyed by (source, round.externalId)', async () => {
     const prisma = mockPrisma();
     const r = record({
-      round: { externalId: 'acc-1', name: 'Private placement (Form D)', date: '2026-06-15', amountUsd: 7_500_000 },
+      round: {
+        externalId: 'acc-1',
+        name: 'Private placement (Form D)',
+        date: '2026-06-15',
+        amountUsd: 7_500_000,
+      },
     });
     await serviceWith(prisma, [r]).run(RUN);
 
     expect(prisma.fundingRound.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { externalSource_externalId: { externalSource: 'STUB', externalId: 'acc-1' } },
+        where: {
+          externalSource_externalId: {
+            externalSource: 'STUB',
+            externalId: 'acc-1',
+          },
+        },
         create: expect.objectContaining({
           companyId: 'c-new',
           moderationStatus: 'APPROVED',
@@ -186,16 +234,53 @@ describe('IngestService.run', () => {
   it('upserts people, investors, acquisitions and exits with provenance keys', async () => {
     const prisma = mockPrisma();
     const r = record({
-      people: [{ externalId: 'X1:person:jane', name: 'Jane Founder', role: 'Executive Officer', since: 2026, title: 'CEO' }],
-      investors: [{ externalId: 'X1:investor:q9', name: 'Big Fund', type: 'Venture', firstRound: 'Undisclosed', rounds: 1 }],
-      acquisitions: [{ externalId: 'X1:acq:q8', target: 'Small Co', date: '2024-01-02', amountUsd: null, rationale: 'Tuck-in.' }],
-      exits: [{ externalId: 'X1:exit:ipo', type: 'IPO', date: '2025-05-05', valueUsd: 1_000_000_000, detail: 'Initial public offering.' }],
+      people: [
+        {
+          externalId: 'X1:person:jane',
+          name: 'Jane Founder',
+          role: 'Executive Officer',
+          since: 2026,
+          title: 'CEO',
+        },
+      ],
+      investors: [
+        {
+          externalId: 'X1:investor:q9',
+          name: 'Big Fund',
+          type: 'Venture',
+          firstRound: 'Undisclosed',
+          rounds: 1,
+        },
+      ],
+      acquisitions: [
+        {
+          externalId: 'X1:acq:q8',
+          target: 'Small Co',
+          date: '2024-01-02',
+          amountUsd: null,
+          rationale: 'Tuck-in.',
+        },
+      ],
+      exits: [
+        {
+          externalId: 'X1:exit:ipo',
+          type: 'IPO',
+          date: '2025-05-05',
+          valueUsd: 1_000_000_000,
+          detail: 'Initial public offering.',
+        },
+      ],
     });
     await serviceWith(prisma, [r]).run(RUN);
 
     expect(prisma.person.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { externalSource_externalId: { externalSource: 'STUB', externalId: 'X1:person:jane' } },
+        where: {
+          externalSource_externalId: {
+            externalSource: 'STUB',
+            externalId: 'X1:person:jane',
+          },
+        },
         create: expect.objectContaining({
           companyId: 'c-new',
           name: 'Jane Founder',
@@ -208,17 +293,29 @@ describe('IngestService.run', () => {
     );
     expect(prisma.investorHolding.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ name: 'Big Fund', type: 'Venture', moderationStatus: 'APPROVED' }),
+        create: expect.objectContaining({
+          name: 'Big Fund',
+          type: 'Venture',
+          moderationStatus: 'APPROVED',
+        }),
       }),
     );
     expect(prisma.acquisitionDeal.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ target: 'Small Co', amountUsd: null, moderationStatus: 'APPROVED' }),
+        create: expect.objectContaining({
+          target: 'Small Co',
+          amountUsd: null,
+          moderationStatus: 'APPROVED',
+        }),
       }),
     );
     expect(prisma.exitEvent.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ type: 'IPO', valueUsd: 1_000_000_000n, moderationStatus: 'APPROVED' }),
+        create: expect.objectContaining({
+          type: 'IPO',
+          valueUsd: 1_000_000_000n,
+          moderationStatus: 'APPROVED',
+        }),
       }),
     );
   });
@@ -231,14 +328,21 @@ describe('IngestService.run', () => {
     expect(prisma.company.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'c-sec' },
-        data: expect.objectContaining({ name: 'Acme Robotics, Inc.', stage: 'Series A' }),
+        data: expect.objectContaining({
+          name: 'Acme Robotics, Inc.',
+          stage: 'Series A',
+        }),
       }),
     );
   });
 
   it('filters sources by name when opts.sources is provided', async () => {
     const prisma = mockPrisma();
-    const service = new IngestService(prisma as unknown as PrismaService, [stubSource([record()])]);
+    const service = new IngestService(
+      prisma as unknown as PrismaService,
+      [stubSource([record()])],
+      config(),
+    );
     const result = await service.run({ ...RUN, sources: ['OTHER'] });
     expect(result).toEqual({ processed: 0, upserted: 0, investors: 0 });
     expect(prisma.company.create).not.toHaveBeenCalled();
@@ -266,7 +370,14 @@ describe('IngestService match-&-enrich', () => {
         description: 'Acme Robotics builds industrial robots.',
         headcount: 500,
       },
-      people: [{ externalId: 'Q42:person:q7:CEO', name: 'Jane Founder', role: 'CEO', since: 2019 }],
+      people: [
+        {
+          externalId: 'Q42:person:q7:CEO',
+          name: 'Jane Founder',
+          role: 'CEO',
+          since: 2019,
+        },
+      ],
     });
     await serviceWith(prisma, [r]).run(RUN);
 
@@ -290,7 +401,12 @@ describe('IngestService match-&-enrich', () => {
     // Children still attach to the matched row, with the enriching source's provenance.
     expect(prisma.person.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { externalSource_externalId: { externalSource: 'WIKIDATA', externalId: 'Q42:person:q7:CEO' } },
+        where: {
+          externalSource_externalId: {
+            externalSource: 'WIKIDATA',
+            externalId: 'Q42:person:q7:CEO',
+          },
+        },
         create: expect.objectContaining({ companyId: 'c-sec' }),
       }),
     );
@@ -298,7 +414,10 @@ describe('IngestService match-&-enrich', () => {
 
   it('keeps human-written copy: only SEC placeholder text is replaced', async () => {
     const prisma = mockPrisma([
-      companyRow({ oneLiner: 'Hand-written pitch.', description: 'Curated description.' }),
+      companyRow({
+        oneLiner: 'Hand-written pitch.',
+        description: 'Curated description.',
+      }),
     ]);
     const r = record({
       source: 'WIKIDATA',
@@ -313,7 +432,9 @@ describe('IngestService match-&-enrich', () => {
     });
     await serviceWith(prisma, [r]).run(RUN);
 
-    const { data } = prisma.company.update.mock.calls[0]![0] as { data: Record<string, unknown> };
+    const { data } = prisma.company.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
     expect(data.domain).toBe('acme.com');
     expect(data).not.toHaveProperty('oneLiner');
     expect(data).not.toHaveProperty('description');
@@ -324,7 +445,11 @@ describe('IngestService match-&-enrich', () => {
     const r = record({
       source: 'WIKIDATA',
       companyExternalId: 'Q42',
-      company: { ...record().company, name: 'Acme Robotics', domain: 'acme.com' },
+      company: {
+        ...record().company,
+        name: 'Acme Robotics',
+        domain: 'acme.com',
+      },
     });
     await serviceWith(prisma, [r]).run(RUN);
     expect(prisma.company.create).not.toHaveBeenCalled();
@@ -346,15 +471,104 @@ describe('IngestService match-&-enrich', () => {
     const r = record({
       source: 'WIKIDATA',
       companyExternalId: 'Q42',
-      company: { ...record().company, name: 'Acme Robotics', domain: 'acme.com', headcount: 900 },
+      company: {
+        ...record().company,
+        name: 'Acme Robotics',
+        domain: 'acme.com',
+        headcount: 900,
+      },
     });
     await serviceWith(prisma, [r]).run(RUN);
     expect(prisma.company.update).not.toHaveBeenCalled();
   });
 
+  it('records one revision per field the enrichment fills', async () => {
+    const prisma = mockPrisma([companyRow()]);
+    const r = record({
+      source: 'WIKIDATA',
+      companyExternalId: 'Q42',
+      company: {
+        ...record().company,
+        name: 'Acme Robotics',
+        domain: 'acme.com',
+        primarySector: 'Enterprise SaaS',
+      },
+    });
+    await serviceWith(prisma, [r]).run(RUN);
+
+    const rows = revisionsFrom(prisma);
+    expect(rows.map((row) => row.field).sort()).toEqual(['domain', 'founded', 'primarySector']);
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        companyId: 'c-sec',
+        entityType: 'company',
+        entityId: 'c-sec',
+        field: 'domain',
+        before: '',
+        after: 'acme.com',
+        action: 'UPDATE',
+        actor: 'INGEST',
+        actorSource: 'WIKIDATA',
+      }),
+    );
+    // The update and its revisions commit together.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes no revisions when INGEST_RECORD_REVISIONS=false', async () => {
+    const prisma = mockPrisma([companyRow()]);
+    const r = record({
+      source: 'WIKIDATA',
+      companyExternalId: 'Q42',
+      company: {
+        ...record().company,
+        name: 'Acme Robotics',
+        domain: 'acme.com',
+      },
+    });
+    await serviceWith(prisma, [r], { INGEST_RECORD_REVISIONS: 'false' }).run(RUN);
+
+    expect(prisma.company.update).toHaveBeenCalledTimes(1);
+    expect(prisma.revision.createMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('records the own-key update, but only for fields that actually move', async () => {
+    // hq/industry/stage are unchanged; only the raise total and name differ.
+    const prisma = mockPrisma([companyRow({ externalSource: 'STUB', externalId: 'X1' })]);
+    const r = record({
+      company: { ...record().company, totalRaisedUsd: 9_000_000 },
+    });
+    await serviceWith(prisma, [r]).run(RUN);
+
+    const rows = revisionsFrom(prisma);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      field: 'totalRaisedUsd',
+      before: 7_500_000,
+      after: 9_000_000,
+      actor: 'INGEST',
+      actorSource: 'STUB',
+    });
+  });
+
+  it('skips the transaction when an own-key update changes nothing', async () => {
+    const prisma = mockPrisma([companyRow({ externalSource: 'STUB', externalId: 'X1' })]);
+    await serviceWith(prisma, [record()]).run(RUN);
+
+    expect(prisma.company.update).toHaveBeenCalledTimes(1);
+    expect(prisma.revision.createMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('appends the external id to the slug on collision', async () => {
     const prisma = mockPrisma([
-      companyRow({ id: 'c-other', slug: 'acme', name: 'Acme Capital Partners', domain: 'other.com' }),
+      companyRow({
+        id: 'c-other',
+        slug: 'acme',
+        name: 'Acme Capital Partners',
+        domain: 'other.com',
+      }),
     ]);
     const r = record({
       source: 'WIKIDATA',
@@ -375,7 +589,11 @@ describe('IngestService investor firms', () => {
     firms: NormalizedInvestorFirm[],
     records: NormalizedRecord[] = [],
   ) {
-    return new IngestService(prisma as unknown as PrismaService, [stubSource(records, firms)]);
+    return new IngestService(
+      prisma as unknown as PrismaService,
+      [stubSource(records, firms)],
+      config(),
+    );
   }
 
   it('creates a standalone investor with provenance and no holding', async () => {
@@ -402,7 +620,13 @@ describe('IngestService investor firms', () => {
   it('updates its own provenance-keyed row instead of creating a duplicate', async () => {
     const prisma = mockPrisma(
       [],
-      [investorRow({ id: 'i-adv', externalSource: 'STUB', externalId: '123456' })],
+      [
+        investorRow({
+          id: 'i-adv',
+          externalSource: 'STUB',
+          externalId: '123456',
+        }),
+      ],
     );
     await serviceWithFirms(prisma, [firm({ fundCount: 9 })]).run(RUN);
 
@@ -410,7 +634,10 @@ describe('IngestService investor firms', () => {
     expect(prisma.investor.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'i-adv' },
-        data: expect.objectContaining({ name: 'Next Coast Ventures', fundCount: 9 }),
+        data: expect.objectContaining({
+          name: 'Next Coast Ventures',
+          fundCount: 9,
+        }),
       }),
     );
   });
@@ -442,10 +669,29 @@ describe('IngestService investor firms', () => {
 
   it('does not merge ADV false friends into a different firm of a similar name', async () => {
     // Both are real SEC ADV rows. Neither may collapse into Sequoia Capital.
-    const prisma = mockPrisma([], [investorRow({ id: 'i-seq', name: 'Sequoia Capital', domain: 'sequoiacap.com' })]);
+    const prisma = mockPrisma(
+      [],
+      [
+        investorRow({
+          id: 'i-seq',
+          name: 'Sequoia Capital',
+          domain: 'sequoiacap.com',
+        }),
+      ],
+    );
     await serviceWithFirms(prisma, [
-      firm({ externalId: '111', name: 'Sequoia Planning & Investments LLC', websiteUrl: null, domain: null }),
-      firm({ externalId: '222', name: 'Benchmark Capital Group Ltd.', websiteUrl: null, domain: null }),
+      firm({
+        externalId: '111',
+        name: 'Sequoia Planning & Investments LLC',
+        websiteUrl: null,
+        domain: null,
+      }),
+      firm({
+        externalId: '222',
+        name: 'Benchmark Capital Group Ltd.',
+        websiteUrl: null,
+        domain: null,
+      }),
     ]).run(RUN);
 
     expect(prisma.investor.create).toHaveBeenCalledTimes(2);
@@ -476,7 +722,10 @@ describe('IngestService investor firms', () => {
     });
     expect(prisma.investorHolding.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ investorId: 'i-new-1', name: 'Big Fund' }),
+        create: expect.objectContaining({
+          investorId: 'i-new-1',
+          name: 'Big Fund',
+        }),
         update: expect.objectContaining({ investorId: 'i-new-1' }),
       }),
     );
@@ -508,9 +757,17 @@ describe('IngestService investor firms', () => {
   it('never matches on a platform domain the source refused to publish', async () => {
     // Founders Fund and Menlo Ventures both list the same medium.com blog. The
     // parser strips the domain, so they must stay two distinct investors.
-    const prisma = mockPrisma([], [investorRow({ id: 'i-ff', name: 'Founders Fund', domain: null })]);
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-ff', name: 'Founders Fund', domain: null })],
+    );
     await serviceWithFirms(prisma, [
-      firm({ externalId: '900', name: 'Menlo Ventures', websiteUrl: 'https://medium.com/@menlo', domain: null }),
+      firm({
+        externalId: '900',
+        name: 'Menlo Ventures',
+        websiteUrl: 'https://medium.com/@menlo',
+        domain: null,
+      }),
     ]).run(RUN);
 
     expect(prisma.investor.create).toHaveBeenCalledTimes(1);
@@ -522,7 +779,16 @@ describe('IngestService investor firms', () => {
   });
 
   it('suffixes the slug when one is already taken', async () => {
-    const prisma = mockPrisma([], [investorRow({ id: 'i-other', slug: 'next-coast-ventures', name: 'Unrelated' })]);
+    const prisma = mockPrisma(
+      [],
+      [
+        investorRow({
+          id: 'i-other',
+          slug: 'next-coast-ventures',
+          name: 'Unrelated',
+        }),
+      ],
+    );
     await serviceWithFirms(prisma, [firm()]).run(RUN);
     expect(prisma.investor.create.mock.calls[0]![0].data.slug).toBe('next-coast-ventures-123456');
   });

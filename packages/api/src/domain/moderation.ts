@@ -25,6 +25,9 @@ export interface PendingSubmission {
   moderationStatus: ReviewStatus;
   submittedBy: { id: string; name: string; email: string } | null;
   createdAt: string;
+  /** The primary document the contributor cited, so a moderator can check the
+      source before approving. Null when they cited nothing. */
+  sourceUrl: string | null;
   /** The contribution payload itself. */
   data: unknown;
 }

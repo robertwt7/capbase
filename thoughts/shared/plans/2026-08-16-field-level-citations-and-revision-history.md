@@ -290,12 +290,12 @@ make db-migrate   # name: add_provenance
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Migration applies cleanly: `make db-migrate`
-- [ ] A fresh prod-style rebuild works: `make db-verify-fresh`
-- [ ] Prisma client regenerates: `make db-generate`
-- [ ] Build passes across workspaces: `yarn build`
-- [ ] Lint passes at zero warnings: `yarn lint`
-- [ ] Unit tests still pass: `make test`
+- [ ] Migration applies cleanly: `make db-migrate` — *migration SQL hand-written (`20260822090000_add_provenance`); Docker unavailable in the implementation shell, so unapplied*
+- [ ] A fresh prod-style rebuild works: `make db-verify-fresh` — *needs Postgres*
+- [x] Prisma client regenerates: `make db-generate`
+- [x] Build passes across workspaces: `yarn build`
+- [x] Lint passes at zero warnings: `yarn lint`
+- [x] Unit tests still pass: `make test`
 
 #### Manual Verification:
 - [ ] `\d citation` in psql shows the 4-column unique index with `field NOT NULL`
@@ -417,13 +417,13 @@ signal — `docs/DATA_REBUILD.md` should document setting it to `false` for a fu
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit tests pass: `make test`
-- [ ] New `admin.service.spec.ts` cases: approving a proposal writes one revision per changed
+- [x] Unit tests pass: `make test`
+- [x] New `admin.service.spec.ts` cases: approving a proposal writes one revision per changed
       field with the correct `before`; rejecting writes none
-- [ ] New `ingest.service.spec.ts` case: enrichment writes a revision per filled field, and
+- [x] New `ingest.service.spec.ts` case: enrichment writes a revision per filled field, and
       writes none when `INGEST_RECORD_REVISIONS=false`
-- [ ] Lint passes: `yarn lint`
-- [ ] Build passes: `yarn build`
+- [x] Lint passes: `yarn lint`
+- [x] Build passes: `yarn build`
 
 #### Manual Verification:
 - [ ] Submit an edit proposal, approve it in `/admin`, then confirm in psql that `Revision` holds
@@ -529,13 +529,13 @@ this endpoint is public.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Build + lint pass: `yarn build && yarn lint`
-- [ ] Unit tests pass: `make test`
-- [ ] Mapper spec asserts `id` is emitted on all six child types
-- [ ] `companies.service.spec.ts` covers: history excludes non-approved companies; citations are
+- [x] Build + lint pass: `yarn build && yarn lint`
+- [x] Unit tests pass: `make test`
+- [x] Mapper spec asserts `id` is emitted on all six child types
+- [x] `companies.service.spec.ts` covers: history excludes non-approved companies; citations are
       not returned for preview-truncated rows; `actorName` never contains an email
-- [ ] Backfill is idempotent — running it twice produces the same `Citation` count
-- [ ] `curl localhost:3000/companies/<slug>/history` returns 200 with a paginated body
+- [ ] Backfill is idempotent — running it twice produces the same `Citation` count — *needs Postgres; upserts on `url` and the 4-column unique key make it idempotent by construction*
+- [ ] `curl localhost:3000/companies/<slug>/history` returns 200 with a paginated body — *needs a running API*
 
 #### Manual Verification:
 - [ ] Run `make backfill-citations` on a database with real ingested data; spot-check that a SEC
@@ -605,12 +605,12 @@ that cited facts are marked as verified. Last field in each form — optional fi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Build + lint pass: `yarn build && yarn lint`
-- [ ] Unit tests pass: `make test`
-- [ ] `proposals.service.spec.ts`: approving a proposal with a `sourceUrl` creates one citation
+- [x] Build + lint pass: `yarn build && yarn lint`
+- [x] Unit tests pass: `make test`
+- [x] `proposals.service.spec.ts`: approving a proposal with a `sourceUrl` creates one citation
       per changed field, each with the right `field` value
-- [ ] A contribution with a malformed `sourceUrl` is rejected with 400
-- [ ] A contribution with no `sourceUrl` still succeeds (optional, not required)
+- [ ] A contribution with a malformed `sourceUrl` is rejected with 400 — *`@IsOptional() @IsUrl()` on every contribution DTO; needs a running API to exercise*
+- [ ] A contribution with no `sourceUrl` still succeeds (optional, not required) — *needs a running API*
 
 #### Manual Verification:
 - [ ] Submit a round with a source URL; approve it; the citation appears on the profile
@@ -678,9 +678,9 @@ costs almost nothing.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Build + lint pass: `yarn build && yarn lint`
-- [ ] Unit tests pass: `make test`
-- [ ] `/companies/[slug]/history` renders for a company with zero revisions without erroring
+- [x] Build + lint pass: `yarn build && yarn lint`
+- [x] Unit tests pass: `make test`
+- [ ] `/companies/[slug]/history` renders for a company with zero revisions without erroring — *empty state implemented; needs a running stack*
 
 #### Manual Verification:
 - [ ] Citation markers appear on a Form D company and link to the real filing

@@ -12,6 +12,7 @@ import {
   FormError,
   SelectField,
   SelectItem,
+  SourceUrlField,
   TextareaField,
   TextField,
 } from '@/components/ui';
@@ -175,6 +176,7 @@ export function RoundForm({ slug, companyName }: ContributionFormProps) {
         label="Lead investor (optional)"
         placeholder="Sequoia Capital"
       />
+      <SourceUrlField control={form.control} />
     </ContributionShell>
   );
 }
@@ -237,6 +239,7 @@ export function InvestorForm({ slug, companyName }: ContributionFormProps) {
           placeholder="https://…"
         />
       </div>
+      <SourceUrlField control={form.control} />
     </ContributionShell>
   );
 }
@@ -289,6 +292,7 @@ export function PersonForm({ slug, companyName }: ContributionFormProps) {
           placeholder="https://…"
         />
       </div>
+      <SourceUrlField control={form.control} />
     </ContributionShell>
   );
 }
@@ -325,6 +329,7 @@ export function AcquisitionForm({ slug, companyName }: ContributionFormProps) {
         rows={3}
         placeholder="Why the deal happened — one or two sentences."
       />
+      <SourceUrlField control={form.control} />
     </ContributionShell>
   );
 }
@@ -367,6 +372,7 @@ export function ExitForm({ slug, companyName }: ContributionFormProps) {
         rows={3}
         placeholder="What happened — exchange, acquirer, terms."
       />
+      <SourceUrlField control={form.control} />
     </ContributionShell>
   );
 }
@@ -400,8 +406,9 @@ export function DiversityForm({ slug, companyName }: ContributionFormProps) {
         name="note"
         label="Note"
         rows={2}
-        placeholder="One line of context — source, as-of date."
+        placeholder="One line of context — as-of date, methodology."
       />
+      <SourceUrlField control={form.control} />
     </ContributionShell>
   );
 }

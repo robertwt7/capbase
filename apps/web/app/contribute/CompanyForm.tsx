@@ -13,6 +13,7 @@ import {
   FormError,
   SelectField,
   SelectItem,
+  SourceUrlField,
   TextareaField,
   TextField,
 } from '@/components/ui';
@@ -180,6 +181,8 @@ export function CompanyForm() {
             label="Last valuation (USD, optional)"
             inputMode="numeric"
           />
+
+          <SourceUrlField control={form.control} />
 
           {formError ? <FormError>{formError}</FormError> : null}
 

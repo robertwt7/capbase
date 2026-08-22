@@ -105,7 +105,14 @@ export default async function AdminQueue({
                     ▸
                   </span>
                   <span className={styles.subjectText}>
-                    <span className={styles.label}>{item.label}</span>
+                    <span className={styles.label}>
+                      {item.label}
+                      {/* Cited / uncited is visible without expanding the row,
+                          so a moderator can triage the queue at a glance. */}
+                      <span className={styles.sourceFlag}>
+                        {item.sourceUrl ? 'cited' : 'uncited'}
+                      </span>
+                    </span>
                     {item.companyName ? (
                       <span className={styles.company}>{item.companyName}</span>
                     ) : null}

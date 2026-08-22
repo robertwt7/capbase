@@ -125,4 +125,11 @@ export class CreateChangeProposalDto implements CreateChangeProposalInput {
   @IsOptional()
   @IsString()
   note?: string | null;
+
+  /** Sits on the proposal, NOT on CompanyEditFieldsDto: that class is the
+      editable-column whitelist and the ValidationPipe strips anything else, so
+      adding a key there would make it look editable. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }

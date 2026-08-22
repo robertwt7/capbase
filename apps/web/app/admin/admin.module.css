@@ -397,3 +397,19 @@ summary.row:hover {
     margin-top: 0;
   }
 }
+
+/* Queue-row provenance flag: whether the contributor cited a source. Monochrome
+   — "uncited" is quieter, not alarming; red is reserved for validation errors. */
+.sourceFlag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--graphite-500);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 8px;
+  white-space: nowrap;
+  vertical-align: middle;
+}

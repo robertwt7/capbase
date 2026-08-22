@@ -110,6 +110,8 @@ export interface RoundInvestor {
 }
 
 export interface FundingRound {
+  /** Row identity — what a Citation or Revision anchors to. */
+  id: string;
   /** Round label, e.g. "Series B". Rounds are an ordered sequence. */
   name: string;
   date: string; // ISO date the round was announced
@@ -120,6 +122,8 @@ export interface FundingRound {
 }
 
 export interface Person {
+  /** Row identity — what a Citation or Revision anchors to. */
+  id: string;
   name: string;
   role: string;
   since: number; // year joined
@@ -129,6 +133,8 @@ export interface Person {
 }
 
 export interface InvestorHolding {
+  /** Row identity — what a Citation or Revision anchors to. */
+  id: string;
   /** Slug of the linked Investor profile; null when the firm is not yet approved. */
   slug?: string | null;
   name: string;
@@ -140,6 +146,8 @@ export interface InvestorHolding {
 }
 
 export interface AcquisitionDeal {
+  /** Row identity — what a Citation or Revision anchors to. */
+  id: string;
   /** The company Capbase's subject acquired. */
   target: string;
   date: string;
@@ -148,6 +156,8 @@ export interface AcquisitionDeal {
 }
 
 export interface ExitEvent {
+  /** Row identity — what a Citation or Revision anchors to. */
+  id: string;
   type: ExitType;
   date: string;
   valueUsd: number | null;
@@ -155,6 +165,8 @@ export interface ExitEvent {
 }
 
 export interface DiversitySignal {
+  /** Row identity — what a Citation or Revision anchors to. */
+  id: string;
   label: string;
   value: string;
   note: string;

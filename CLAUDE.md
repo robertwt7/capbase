@@ -104,6 +104,12 @@ Forms use **react-hook-form** with **zod** validation (shadcn `Form` pattern):
   (`components/ui/fields.tsx`) — label + control + inline `FormMessage` per field.
   `SelectField` drives the Radix Select via the `FormField` `Controller` (`onValueChange`);
   pass `<SelectItem>` children and an optional `placeholder` for the empty state.
+- Every contribution form ends with a `<SourceUrlField>` (`components/ui/`): an optional
+  but always-prompted `sourceUrl`. Child contributions mint a whole-row `Citation` at
+  submission; an edit proposal stores the URL on `ChangeProposal.sourceUrl` and
+  `applyProposal` materialises **one citation per changed field** on approval.
+  `<Citation>` (`components/Citation.tsx`) renders the marker — a mono bracketed
+  publisher tag, or a muted em dash when a fact is uncited, so the two never look alike.
 - Server stays authoritative: the server action re-runs `schema.safeParse` (never trust
   the client), maps with `to*Input`, and returns an `ActionResult`
   (`{ ok } | { ok:false, formError?, fieldErrors? }`, see `lib/validation/utils.ts`).
@@ -132,6 +138,10 @@ types are re-exported from `@repo/api` (single source of truth). Company logos r
 - `/investors` — investor directory (URL-driven filters, same pattern as companies);
   `/investors/[slug]` — investor profile: facts, fund assets, portfolio grid, or an
   empty state inviting a contribution.
+- `/companies/[slug]/history` — public, paginated change timeline for one company
+  (what changed, from what to what, who, when). Deliberately ungated: it shows data
+  past the `PREVIEW_LIMIT` contribution gate, which is the right trade for an
+  open-data project's audit trail.
 - `/admin` — moderation queue (ADMIN only). `/admin/login` signs in via
   `app/api/admin/login` which stores the JWT in an httpOnly `capbase_token` cookie.
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
@@ -168,6 +178,32 @@ compose seed profile); plain `seed` is bootstrap-only and safe on prod. To add s
 append a new `NNN-*.ts` phase (idempotent upserts, never `deleteMany`; never edit a shipped
 phase). `make db-baseline` marks all phases applied without running (pre-runner DBs);
 `make db-reset` is the explicit destructive wipe-and-reseed for local dev.
+
+### Provenance: citations & revision history
+
+Three tables make published facts traceable. **`Source`** is one primary document,
+deduplicated by `url`. **`Citation`** binds a source to a fact: polymorphic
+(`entityType` + `entityId`, one of `CITABLE_TYPES`) plus a `field` that is `''` for a
+whole-row attestation or a column name for a field-level one. `field` is **non-nullable**
+because Postgres treats NULLs as distinct, which would defeat the
+`@@unique([sourceId, entityType, entityId, field])`. **`Revision`** is the append-only
+change log, anchored to a company so one timeline covers the company row and every child.
+
+- Revisions are written on **APPROVED transitions only** — `AdminService.applyProposal`
+  captures the before-state *inside* the transaction (applying a diff destroys what it
+  replaces), `moderate` writes a `CREATE` entry per newly published row, and
+  `IngestService.writeCompany` records enrichment/own-key updates as `actor: 'INGEST'`.
+  Rejections write nothing; the row never became public.
+- Values entering `before`/`after` must go through **`toJsonValue`** (`@repo/db`):
+  `BigInt` → `Number` (money columns would throw in `JSON.stringify`), `Date` → ISO, and a
+  genuine null → `Prisma.JsonNull`, never bare `null` (which means SQL NULL, i.e. "not
+  recorded" — a different fact).
+- **History is not backfillable** — the old values were never stored. It starts empty.
+- Citations *are* backfillable, because every source URL is derivable from identifiers
+  already on the row: `make backfill-citations` (see Jobs below).
+- The child domain types (`FundingRound`, `Person`, `InvestorHolding`, `AcquisitionDeal`,
+  `ExitEvent`, `DiversitySignal`) expose `id` for exactly this reason — a citation must
+  anchor to *this* round. `RoundInvestor` is excluded: no independent citable identity.
 
 ### Controlled vocabularies & entity metadata
 
@@ -246,6 +282,15 @@ classifies a URL host as identifying, social, or platform; sources publish a
 `domain` only for the first kind. This is not theoretical: 3,295 ADV filers list a
 linkedin.com URL as their website and 21 list the same medium.com blog — matching
 on those merges unrelated firms into one investor.
+
+`make backfill-citations` (`src/backfill-citations.ts`, the last step of `ingest-all`)
+mints `Source`/`Citation` rows for the whole corpus with **no network access** — the URLs
+are constructed from stored identifiers via `sources/sec-edgar/edgar.urls.ts` and
+`sources/wikidata/wikidata.urls.ts` (CIK + accession → the Form D archive path, QID →
+the Wikidata page, CRD → the IAPD firm summary). Idempotent, so re-run it after each
+ingest. A row with no derivable URL is skipped and counted rather than given a guessed
+link. `INGEST_RECORD_REVISIONS=false` turns off timeline writes for a from-scratch
+rebuild (see `docs/DATA_REBUILD.md`).
 
 Unit tests: `yarn workspace jobs test` (jest, pure parser/mapper/service specs).
 Rebuilding the whole dataset from scratch, locally or on prod: **`docs/DATA_REBUILD.md`**.

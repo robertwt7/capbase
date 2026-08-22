@@ -146,6 +146,7 @@ ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See d
 	cd apps/jobs && node dist/backfill.js 1 1000000 WIKIDATA
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV
 	cd apps/jobs && node dist/backfill-sectors.js
+	cd apps/jobs && node dist/backfill-citations.js
 
 .PHONY: backfill-sectors
 backfill-sectors: ## Fill missing Company.primarySector from stored industry values
@@ -155,6 +156,15 @@ backfill-sectors: ## Fill missing Company.primarySector from stored industry val
 .PHONY: backfill-sectors-prod
 backfill-sectors-prod: ## [VPS] Fill missing sectors inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-sectors.js
+
+.PHONY: backfill-citations
+backfill-citations: ## Mint Source/Citation rows for every ingested row (no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-citations.js
+
+.PHONY: backfill-citations-prod
+backfill-citations-prod: ## [VPS] Mint citations inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-citations.js
 
 # ---------------------------------------------------------------------------
 # Production-like stack (everything in Docker)

@@ -58,6 +58,8 @@ export function editDefaultsFromCompany(company: Company): EditFormValues {
     legalName: company.legalName ?? '',
     operatingStatus: company.operatingStatus ?? '',
     companyType: company.companyType ?? '',
+    // The source is about *this* edit, so it never pre-fills from the company.
+    sourceUrl: '',
     note: '',
   };
 }
@@ -132,5 +134,9 @@ export function toProposalInput(
   if (Object.keys(changes).length === 0) return null;
 
   const note = v.note.trim();
-  return { changes, ...(note ? { note } : {}) };
+  return {
+    changes,
+    ...(note ? { note } : {}),
+    ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+  };
 }

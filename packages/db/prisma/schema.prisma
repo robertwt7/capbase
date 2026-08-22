@@ -46,6 +46,80 @@ model User {
   diversity      DiversitySignal[]
   proposals      ChangeProposal[]
   savedCompanies SavedCompany[]
+  citations      Citation[]
+  revisions      Revision[]
+}
+
+/// A primary document a fact came from. Deduplicated by URL, so many citations
+/// share one row (every round from one Form D cites the same filing).
+model Source {
+  id         String  @id @default(cuid())
+  url        String  @unique
+  sourceType String // one of SOURCE_TYPES
+  title      String?
+  publisher  String? // 'SEC', 'Wikidata', …
+  /// Source-native reference: SEC accession, Wikidata QID, CRD number.
+  reference  String?
+  /// When the content behind `url` was last read. Backfilled rows use the
+  /// cited row's updatedAt as the best available proxy.
+  retrievedAt DateTime
+  createdAt   DateTime @default(now())
+
+  citations Citation[]
+
+  @@index([sourceType])
+}
+
+/// Binds a Source to a specific fact. `field` is '' when the whole row is
+/// attested, or a column name for a field-level citation. Non-nullable
+/// because Postgres treats NULLs as distinct, which would defeat @@unique.
+model Citation {
+  id       String @id @default(cuid())
+  sourceId String
+  source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// One of CITABLE_TYPES. Polymorphic by design: a typed FK per entity would
+  /// mean seven nullable columns and seven joins on every profile read.
+  entityType String
+  entityId   String
+  field      String  @default("")
+  note       String?
+
+  submittedById String?
+  submittedBy   User?    @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+
+  @@unique([sourceId, entityType, entityId, field])
+  @@index([entityType, entityId])
+}
+
+/// One recorded change to published data. Anchored to a company so the profile
+/// renders a single timeline across the company row and all its children.
+model Revision {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  entityType String
+  entityId   String
+  /// Column that changed; '' for whole-row CREATE events.
+  field      String @default("")
+  /// JSON-encoded values. BigInt columns are converted with Number() first.
+  before     Json?
+  after      Json?
+
+  action      String // 'CREATE' | 'UPDATE'
+  actor       String // 'USER' | 'ADMIN' | 'INGEST'
+  actorUserId String?
+  actorUser   User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  /// Ingest source name when actor = 'INGEST' (SEC_EDGAR, WIKIDATA, SEC_ADV).
+  actorSource String?
+  /// The proposal that produced this entry, when applicable.
+  proposalId  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([entityType, entityId])
 }
 
 model Company {
@@ -97,6 +171,7 @@ model Company {
   diversity    DiversitySignal[]
   proposals    ChangeProposal[]
   savedBy      SavedCompany[]
+  revisions    Revision[]
 
   @@unique([externalSource, externalId])
   @@index([moderationStatus])
@@ -130,6 +205,9 @@ model ChangeProposal {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   changes   Json
   note      String?
+  /// Optional source URL the contributor attached; materialised into per-field
+  /// Citations when the proposal is approved.
+  sourceUrl String?
 
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?

@@ -245,6 +245,14 @@ export function SubmissionDetail({ item }: { item: PendingSubmission }) {
             <dd className={styles.detailValue}>{companyLink}</dd>
           </>
         ) : null}
+        {/* The cited source, so a moderator can check it before approving —
+            the single highest-value use of the whole citation feature. */}
+        {item.sourceUrl ? (
+          <>
+            <dt className={styles.detailLabel}>Source</dt>
+            <dd className={styles.detailValue}>{extLink(item.sourceUrl)}</dd>
+          </>
+        ) : null}
         {fields.map((f) => (
           <Fragment key={f.label}>
             <dt className={styles.detailLabel}>{f.label}</dt>

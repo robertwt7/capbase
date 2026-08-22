@@ -12,6 +12,7 @@ export const investorFormSchema = z.object({
   rounds: z.string().trim().regex(/^\d+$/, 'Enter a whole number.'),
   websiteUrl: urlOrEmpty,
   linkedinUrl: urlOrEmpty,
+  sourceUrl: urlOrEmpty,
 });
 
 export type InvestorFormValues = z.infer<typeof investorFormSchema>;
@@ -23,6 +24,7 @@ export const investorFormDefaults: InvestorFormValues = {
   rounds: '',
   websiteUrl: '',
   linkedinUrl: '',
+  sourceUrl: '',
 };
 
 export function toInvestorInput(v: InvestorFormValues): CreateInvestorInput {
@@ -33,5 +35,6 @@ export function toInvestorInput(v: InvestorFormValues): CreateInvestorInput {
     rounds: Number(v.rounds),
     ...(v.websiteUrl ? { websiteUrl: v.websiteUrl } : {}),
     ...(v.linkedinUrl ? { linkedinUrl: v.linkedinUrl } : {}),
+    ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
   };
 }

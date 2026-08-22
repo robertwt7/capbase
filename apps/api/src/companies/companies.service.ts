@@ -3,17 +3,24 @@ import {
   CONTRIBUTION_WINDOW_DAYS,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
+  type CitableType,
+  type Citation,
   type Company,
   type CompanyDetailResponse,
   type CompanyEditFields,
+  type CompanyHistoryResponse,
   type CompanyListQuery,
   type CompanySlugEntry,
   type Paginated,
+  type Revision,
+  type RevisionAction,
+  type RevisionActor,
   type Role,
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { toCitation } from '../provenance/citation.mapper';
 import { toCompany, toCompanyEditFields } from './company.mapper';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
@@ -155,7 +162,200 @@ export class CompaniesService {
       if (company.diversity) company.diversity = company.diversity.slice(0, PREVIEW_LIMIT);
     }
 
-    return { company, access: { unlocked, previewLimit: PREVIEW_LIMIT, unlockedUntil, totals } };
+    // Loaded *after* truncation, so a locked viewer never receives a citation
+    // for a row they can't see.
+    const citations = await this.loadCitations(row.id, company);
+
+    return {
+      company,
+      access: { unlocked, previewLimit: PREVIEW_LIMIT, unlockedUntil, totals },
+      citations,
+    };
+  }
+
+  /** Every citation attaching to the company row or any child row in the
+   *  response, in one query over a bounded id list (indexed by entityId). */
+  private async loadCitations(companyId: string, company: Company): Promise<Citation[]> {
+    const ids = [
+      companyId,
+      ...(company.rounds ?? []).map((r) => r.id),
+      ...(company.people ?? []).map((p) => p.id),
+      ...(company.investors ?? []).map((i) => i.id),
+      ...(company.acquisitions ?? []).map((a) => a.id),
+      ...(company.exits ?? []).map((e) => e.id),
+      ...(company.diversity ?? []).map((d) => d.id),
+    ];
+
+    const rows = await this.prisma.citation.findMany({
+      where: { entityId: { in: ids } },
+      include: { source: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(toCitation);
+  }
+
+  /**
+   * Attach a contributor's source URL to the row they just submitted.
+   *
+   * Created at submission, against a still-PENDING row — which is what avoids
+   * adding a `sourceUrl` column to seven tables. The read path only ever loads
+   * citations for rows it is already returning (all APPROVED), so a citation
+   * left behind on a rejected row is inert.
+   *
+   * `field: ''` because a contributed row is attested as a whole; per-field
+   * citations come from edit proposals, which change named columns.
+   */
+  private async attachCitation(
+    entityType: CitableType,
+    entityId: string,
+    sourceUrl: string | null | undefined,
+    userId: string,
+  ): Promise<void> {
+    if (!sourceUrl) return;
+
+    const source = await this.prisma.source.upsert({
+      where: { url: sourceUrl },
+      // A contributor's link is unclassified: we have not fetched it, so
+      // `retrievedAt` is the submission time and the type is 'Other'.
+      create: { url: sourceUrl, sourceType: 'Other', retrievedAt: new Date() },
+      update: {},
+      select: { id: true },
+    });
+
+    await this.prisma.citation.upsert({
+      where: {
+        sourceId_entityType_entityId_field: {
+          sourceId: source.id,
+          entityType,
+          entityId,
+          field: '',
+        },
+      },
+      create: { sourceId: source.id, entityType, entityId, field: '', submittedById: userId },
+      update: {},
+    });
+  }
+
+  /**
+   * The company's public change timeline: every recorded change to the company
+   * row and its children, newest first.
+   *
+   * Deliberately public and ungated — an open-data project's audit trail is
+   * worth more open than it is as a contribution incentive. It reports display
+   * names only; the submitter emails the admin queue shows never appear here.
+   */
+  async getCompanyHistory(
+    slug: string,
+    page = 1,
+    pageSize = DEFAULT_PAGE_SIZE,
+  ): Promise<CompanyHistoryResponse> {
+    const company = await this.prisma.company.findFirst({
+      where: { slug, moderationStatus: 'APPROVED' },
+      select: { id: true },
+    });
+    if (!company) throw new NotFoundException(`Company "${slug}" not found`);
+
+    const where = { companyId: company.id };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.revision.count({ where }),
+      this.prisma.revision.findMany({
+        where,
+        include: { actorUser: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    const labels = await this.resolveEntityLabels(rows);
+    const items: Revision[] = rows.map((row) => ({
+      id: row.id,
+      entityType: row.entityType as CitableType,
+      entityId: row.entityId,
+      entityLabel: labels.get(row.entityId) ?? row.entityType,
+      field: row.field,
+      before: row.before,
+      after: row.after,
+      action: row.action as RevisionAction,
+      actor: row.actor as RevisionActor,
+      // Never the email — this endpoint is public.
+      actorName: row.actor === 'INGEST' ? row.actorSource : (row.actorUser?.name ?? null),
+      createdAt: row.createdAt.toISOString(),
+    }));
+
+    return { total, page, pageSize, items };
+  }
+
+  /** Human-readable subject per revision, so the timeline says "Series B round"
+   *  rather than a cuid. One batched query per entity type on the page. */
+  private async resolveEntityLabels(
+    rows: { entityType: string; entityId: string }[],
+  ): Promise<Map<string, string>> {
+    const idsByType = new Map<string, string[]>();
+    for (const row of rows) {
+      const ids = idsByType.get(row.entityType) ?? [];
+      ids.push(row.entityId);
+      idsByType.set(row.entityType, ids);
+    }
+
+    const labels = new Map<string, string>();
+    await Promise.all(
+      [...idsByType].map(async ([type, ids]) => {
+        for (const [id, label] of await this.labelsForType(type, ids)) labels.set(id, label);
+      }),
+    );
+    return labels;
+  }
+
+  private async labelsForType(type: string, ids: string[]): Promise<[string, string][]> {
+    const where = { id: { in: ids } };
+    switch (type) {
+      case 'company': {
+        const rows = await this.prisma.company.findMany({ where, select: { id: true, name: true } });
+        return rows.map((r) => [r.id, r.name]);
+      }
+      case 'round': {
+        const rows = await this.prisma.fundingRound.findMany({
+          where,
+          select: { id: true, name: true },
+        });
+        return rows.map((r) => [r.id, `${r.name} round`]);
+      }
+      case 'person': {
+        const rows = await this.prisma.person.findMany({ where, select: { id: true, name: true } });
+        return rows.map((r) => [r.id, r.name]);
+      }
+      case 'investor': {
+        const rows = await this.prisma.investorHolding.findMany({
+          where,
+          select: { id: true, name: true },
+        });
+        return rows.map((r) => [r.id, r.name]);
+      }
+      case 'acquisition': {
+        const rows = await this.prisma.acquisitionDeal.findMany({
+          where,
+          select: { id: true, target: true },
+        });
+        return rows.map((r) => [r.id, `Acquired ${r.target}`]);
+      }
+      case 'exit': {
+        const rows = await this.prisma.exitEvent.findMany({
+          where,
+          select: { id: true, type: true },
+        });
+        return rows.map((r) => [r.id, `${r.type} exit`]);
+      }
+      case 'diversity': {
+        const rows = await this.prisma.diversitySignal.findMany({
+          where,
+          select: { id: true, label: true },
+        });
+        return rows.map((r) => [r.id, r.label]);
+      }
+      default:
+        return [];
+    }
   }
 
   async createCompany(dto: CreateCompanyDto, userId: string) {
@@ -190,6 +390,7 @@ export class CompaniesService {
         submittedById: userId,
       },
     });
+    await this.attachCitation('company', created.id, dto.sourceUrl, userId);
     return { id: created.id, slug: created.slug, moderationStatus: created.moderationStatus };
   }
 
@@ -208,6 +409,7 @@ export class CompaniesService {
         investors: { create: dto.investors.map((i) => ({ name: i.name, lead: i.lead })) },
       },
     });
+    await this.attachCitation('round', created.id, dto.sourceUrl, userId);
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
@@ -226,6 +428,7 @@ export class CompaniesService {
         submittedById: userId,
       },
     });
+    await this.attachCitation('person', created.id, dto.sourceUrl, userId);
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
@@ -246,6 +449,7 @@ export class CompaniesService {
         submittedById: userId,
       },
     });
+    await this.attachCitation('investor', created.id, dto.sourceUrl, userId);
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
@@ -291,6 +495,7 @@ export class CompaniesService {
         submittedById: userId,
       },
     });
+    await this.attachCitation('acquisition', created.id, dto.sourceUrl, userId);
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
@@ -307,6 +512,7 @@ export class CompaniesService {
         submittedById: userId,
       },
     });
+    await this.attachCitation('exit', created.id, dto.sourceUrl, userId);
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
@@ -322,6 +528,7 @@ export class CompaniesService {
         submittedById: userId,
       },
     });
+    await this.attachCitation('diversity', created.id, dto.sourceUrl, userId);
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
@@ -347,6 +554,9 @@ export class CompaniesService {
         companyId: company.id,
         changes: cleaned as Prisma.InputJsonValue,
         note: dto.note ?? null,
+        // Held on the proposal, not minted yet: applyProposal turns it into one
+        // citation per changed field once the edit is actually published.
+        sourceUrl: dto.sourceUrl ?? null,
         moderationStatus: 'PENDING',
         submittedById: userId,
       },

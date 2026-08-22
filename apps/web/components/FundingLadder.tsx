@@ -1,14 +1,19 @@
+import type { Citation as CitationRow } from '@repo/api';
+
+import { Citation } from '@/components/Citation';
 import type { FundingRound } from '@/lib/data';
 import { formatDate, formatUsd } from '@/lib/format';
 
 interface FundingLadderProps {
   rounds: FundingRound[];
+  /** The profile's citations; each rung resolves its own from this list. */
+  citations?: CitationRow[];
 }
 
 // The signature view: funding rounds are an ordered sequence, so we render them
 // as a vertical ledger where each rung's bar width encodes the capital raised.
 // Reading top to bottom traces the company's trajectory like a cap table.
-export function FundingLadder({ rounds }: FundingLadderProps) {
+export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
   const max = Math.max(...rounds.map((r) => r.amountUsd));
 
   return (
@@ -18,7 +23,7 @@ export function FundingLadder({ rounds }: FundingLadderProps) {
         const last = i === rounds.length - 1;
         return (
           <li
-            key={round.name}
+            key={round.id}
             className={
               'grid items-center gap-x-5 border-t border-line py-[18px] first:border-t-0 ' +
               'grid-cols-[24px_150px_1fr_200px] ' +
@@ -39,7 +44,10 @@ export function FundingLadder({ rounds }: FundingLadderProps) {
               <span className="font-display text-base font-semibold tracking-tight text-ink">
                 {round.name}
               </span>
-              <span className="font-mono text-xs text-graphite-500">{formatDate(round.date)}</span>
+              <span className="font-mono text-xs text-graphite-500">
+                {formatDate(round.date)}
+                <Citation citations={citations} entityId={round.id} />
+              </span>
             </div>
 
             <div className="flex h-[34px] items-center max-md:col-start-2">

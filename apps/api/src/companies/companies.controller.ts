@@ -1,5 +1,11 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import type { Company, CompanyDetailResponse, CompanySlugEntry, Paginated } from '@repo/api';
+import type {
+  Company,
+  CompanyDetailResponse,
+  CompanyHistoryResponse,
+  CompanySlugEntry,
+  Paginated,
+} from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,6 +22,7 @@ import {
 } from './dto/contributions.dto';
 import { CreateChangeProposalDto } from './dto/create-proposal.dto';
 import { ListCompaniesDto } from './dto/list-companies.dto';
+import { CompanyHistoryDto } from './dto/company-history.dto';
 
 @Controller('companies')
 export class CompaniesController {
@@ -32,6 +39,16 @@ export class CompaniesController {
   @Get('sitemap')
   sitemap(): Promise<CompanySlugEntry[]> {
     return this.companies.listSlugs();
+  }
+
+  // Declared before @Get(':slug') so the more specific path wins over the param
+  // route. Public and ungated by design — see getCompanyHistory.
+  @Get(':slug/history')
+  history(
+    @Param('slug') slug: string,
+    @Query() query: CompanyHistoryDto,
+  ): Promise<CompanyHistoryResponse> {
+    return this.companies.getCompanyHistory(slug, query.page, query.pageSize);
   }
 
   @UseGuards(OptionalJwtAuthGuard)

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { SEC_ARCHIVES, primaryDocUrl } from './edgar.urls';
+
 export interface FormDRef {
   cik: string;
   accession: string;
@@ -8,7 +10,7 @@ export interface FormDRef {
   dateFiled: string;
 }
 
-const SEC_BASE = 'https://www.sec.gov/Archives';
+const SEC_BASE = SEC_ARCHIVES;
 const MIN_INTERVAL_MS = 160; // ~6 req/s — comfortably under SEC's 10 req/s limit.
 const REQUEST_TIMEOUT_MS = 30_000; // a stalled response must not wedge the pipeline
 
@@ -62,9 +64,7 @@ export class EdgarClient {
 
   /** Fetch a filing's structured Form D document, or null if unavailable. */
   async fetchPrimaryDoc(ref: FormDRef): Promise<string | null> {
-    const folder = ref.accession.replace(/-/g, '');
-    const url = `${SEC_BASE}/edgar/data/${ref.cik}/${folder}/primary_doc.xml`;
-    return this.fetchText(url);
+    return this.fetchText(primaryDocUrl(ref.cik, ref.accession));
   }
 
   private async fetchText(url: string): Promise<string | null> {

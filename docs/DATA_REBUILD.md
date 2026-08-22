@@ -40,6 +40,35 @@ make ingest-all       # every source, then backfill sectors
 i.e. ten years). A ten-year Form D walk takes hours because of the 10 req/s SEC
 rate limit; use `DAYS=90` for a quick, representative dataset.
 
+**Turn revision recording off for a full rebuild.** Ingest normally writes a
+public `Revision` whenever it changes an already-published company field, so the
+profile timeline attributes the change to its source. A rebuild creates the
+entire corpus at once, and a "history" of that creation is noise, not signal —
+and it is the slowest possible time to be writing it. Prefix the rebuild with
+`INGEST_RECORD_REVISIONS=false`:
+
+```bash
+INGEST_RECORD_REVISIONS=false make ingest-all
+```
+
+Leave it at its default (`true`) for the daily cron and for incremental
+backfills against a live dataset, where the changes are real edits to published
+figures.
+
+## Citations
+
+`make backfill-citations` (already the last step of `make ingest-all`) mints the
+`Source` and `Citation` rows that put a source link next to every ingested fact.
+It touches no network: every URL is *constructed* from identifiers the rows
+already carry — CIK + accession for a Form D filing, the QID for Wikidata, the
+CRD for Form ADV. It is idempotent, so re-run it after any incremental ingest to
+cite the newly created rows.
+
+A row is skipped (and counted in the run's log) when no URL can be derived — most
+often a SEC round whose company was created by a different source, so there is no
+CIK to build the archive path from. A wrong link is worse than no link on a
+feature whose whole purpose is traceability.
+
 ## Full rebuild, production
 
 ```bash
@@ -49,6 +78,7 @@ make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR
 make ingest-investors-prod     # SEC_ADV + Wikidata investor firms
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=WIKIDATA
 make backfill-sectors-prod
+make backfill-citations-prod    # source links for every ingested row
 ```
 
 This is "Flow B" in [`infra/README.md`](../infra/README.md); `make deploy-all` is

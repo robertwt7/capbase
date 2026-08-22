@@ -60,6 +60,12 @@ export class CreateFundingRoundDto implements CreateFundingRoundInput {
   @ValidateNested({ each: true })
   @Type(() => RoundInvestorDto)
   investors!: RoundInvestorDto[];
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }
 
 export class CreatePersonDto implements CreatePersonInput {
@@ -85,6 +91,12 @@ export class CreatePersonDto implements CreatePersonInput {
   @IsOptional()
   @IsString()
   title?: string | null;
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }
 
 export class CreateInvestorDto implements CreateInvestorInput {
@@ -110,6 +122,12 @@ export class CreateInvestorDto implements CreateInvestorInput {
   @IsOptional()
   @IsUrl()
   linkedinUrl?: string | null;
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }
 
 export class CreateAcquisitionDto implements CreateAcquisitionInput {
@@ -128,6 +146,12 @@ export class CreateAcquisitionDto implements CreateAcquisitionInput {
   @IsString()
   @MinLength(1)
   rationale!: string;
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }
 
 export class CreateExitDto implements CreateExitInput {
@@ -145,6 +169,12 @@ export class CreateExitDto implements CreateExitInput {
   @IsString()
   @MinLength(1)
   detail!: string;
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }
 
 export class CreateDiversityDto implements CreateDiversityInput {
@@ -159,4 +189,10 @@ export class CreateDiversityDto implements CreateDiversityInput {
   @IsString()
   @MinLength(1)
   note!: string;
+
+  /** Primary document backing this contribution. Optional, but prompted: an
+      uncited fact renders as explicitly uncited rather than looking sourced. */
+  @IsOptional()
+  @IsUrl()
+  sourceUrl?: string | null;
 }

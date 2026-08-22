@@ -12,7 +12,13 @@ import {
   type Company,
 } from '@repo/api';
 
-import { SelectField, SelectItem, TextareaField, TextField } from '@/components/ui';
+import {
+  SelectField,
+  SelectItem,
+  SourceUrlField,
+  TextareaField,
+  TextField,
+} from '@/components/ui';
 import {
   editDefaultsFromCompany,
   editFormSchema,
@@ -177,12 +183,14 @@ export function EditCompanyForm({ slug, companyName, company }: {
       </div>
 
       <GroupLabel>Source</GroupLabel>
+      {/* One URL, cited against every field this proposal changes. */}
+      <SourceUrlField control={form.control} />
       <TextareaField
         control={form.control}
         name="note"
-        label="Source / why this change? (optional)"
+        label="Note for the reviewer (optional)"
         rows={2}
-        placeholder="Link or one line on where the corrected data comes from."
+        placeholder="One line on why this change is right."
       />
     </ContributionShell>
   );

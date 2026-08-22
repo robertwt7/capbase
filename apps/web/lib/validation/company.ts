@@ -1,6 +1,8 @@
 import { COMPANY_STATUSES, SECTORS, STAGES, type CreateCompanyInput } from '@repo/api';
 import { z } from 'zod';
 
+import { urlOrEmpty } from './utils';
+
 // Form values are all strings (that's what the inputs hold); numeric fields are
 // validated as digit-strings and converted in `toCompanyInput`. Keeping the form
 // shape string-only makes react-hook-form defaults and typing trivial.
@@ -36,6 +38,7 @@ export const companyFormSchema = z.object({
     message: 'Pick a valid status.',
   }),
   stage: z.enum(STAGES as readonly [string, ...string[]], { message: 'Pick a valid stage.' }),
+  sourceUrl: urlOrEmpty,
 });
 
 export type CompanyFormValues = z.infer<typeof companyFormSchema>;
@@ -54,6 +57,7 @@ export const companyFormDefaults: CompanyFormValues = {
   primarySector: '' as CompanyFormValues['primarySector'],
   status: 'Private' as CompanyFormValues['status'],
   stage: 'Seed' as CompanyFormValues['stage'],
+  sourceUrl: '',
 };
 
 /** Map validated form values to the API payload (`@repo/api` is the source of truth). */
@@ -75,5 +79,6 @@ export function toCompanyInput(v: CompanyFormValues): CreateCompanyInput {
     status: v.status as CreateCompanyInput['status'],
     stage: v.stage as CreateCompanyInput['stage'],
     ...(v.lastValuationUsd ? { lastValuationUsd: Number(v.lastValuationUsd) } : {}),
+    ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
   };
 }

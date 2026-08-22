@@ -29,6 +29,11 @@ export interface CompanyEditFields {
 export interface CreateChangeProposalInput {
   changes: CompanyEditFields;
   note?: string | null;
+  /** Primary document backing the edit. Materialised into one Citation per
+      changed field when the proposal is approved — this is where field-level
+      citation earns its name. Deliberately NOT part of `CompanyEditFields`:
+      that is the editable-column whitelist and must not grow. */
+  sourceUrl?: string | null;
 }
 
 /** Payload the admin queue carries for a proposal: the diff + live current values. */

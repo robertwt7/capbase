@@ -4,6 +4,7 @@
 
 import type { Company, ReviewStatus } from './company';
 import type { ReviewableType } from './moderation';
+import type { Citation } from './provenance';
 
 // Rows shown per detail section to a locked (non-contributing) viewer.
 export const PREVIEW_LIMIT = 2;
@@ -32,6 +33,10 @@ export interface CompanyDetailResponse {
   /** Sections are already truncated to previewLimit when access is locked. */
   company: Company;
   access: CompanyAccess;
+  /** Every citation attaching to the company row or a child row *in this
+      response*, flat. The client indexes by `entityId` + `field`. Truncated
+      rows contribute none, so a locked viewer learns nothing extra from them. */
+  citations: Citation[];
 }
 
 export interface MyContribution {
