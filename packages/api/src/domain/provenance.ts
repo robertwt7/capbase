@@ -4,11 +4,19 @@
 
 import type { ReviewableType } from './moderation';
 
-export type SourceType = 'SEC filing' | 'Wikidata' | 'Company website' | 'Press' | 'Other';
+export type SourceType =
+  | 'SEC filing'
+  | 'Wikidata'
+  /** A government bulk dataset — SBIR.gov award data, and future federal files. */
+  | 'Government dataset'
+  | 'Company website'
+  | 'Press'
+  | 'Other';
 
 export const SOURCE_TYPES: readonly SourceType[] = [
   'SEC filing',
   'Wikidata',
+  'Government dataset',
   'Company website',
   'Press',
   'Other',

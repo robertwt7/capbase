@@ -73,6 +73,8 @@ export class MarketService {
         WHERE r."moderationStatus" = 'APPROVED'
           AND c."moderationStatus" = 'APPROVED'
           AND c."primarySector" IS NOT NULL
+          -- Non-dilutive government awards are capital events, not deals.
+          AND r."kind" <> 'Grant'
         GROUP BY c."primarySector"
       `,
     ]);
@@ -104,6 +106,8 @@ export class MarketService {
           SELECT COUNT(*) FROM "FundingRound" r
           JOIN "Company" c ON c.id = r."companyId"
           WHERE r."moderationStatus" = 'APPROVED' AND c."moderationStatus" = 'APPROVED'
+            -- Non-dilutive government awards are capital events, not deals.
+            AND r."kind" <> 'Grant'
         )::int AS "dealCount",
         (
           SELECT COUNT(*) FROM "Company"

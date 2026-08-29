@@ -4,11 +4,30 @@ import type { CitableType, SourceType } from '@repo/api';
 
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import { SBIR } from './sources/sbir/sbir.parser';
+import {
+  SBIR_AWARD_DATA_URL,
+  SBIR_DATASET_TITLE,
+  SBIR_PUBLISHER,
+  awardReference,
+} from './sources/sbir/sbir.urls';
 import { SEC_ADV } from './sources/sec-adv/adv.parser';
-import { advFirmUrl, filerFormDUrl, primaryDocUrl } from './sources/sec-edgar/edgar.urls';
+import {
+  advFirmUrl,
+  filerFormCUrl,
+  filerFormDUrl,
+  formCOfferingUrl,
+  primaryDocUrl,
+} from './sources/sec-edgar/edgar.urls';
 import { SEC_EDGAR } from './sources/sec-edgar/sec-edgar.source';
+import { SEC_FORM_C } from './sources/sec-form-c/form-c.parser';
+import { SEC_S1 } from './sources/sec-s1/sec-s1.source';
+import { filerS1Url } from './sources/sec-s1/s1.urls';
 import { WIKIDATA } from './sources/wikidata/wikidata.mapper';
 import { wikidataEntityUrl } from './sources/wikidata/wikidata.urls';
+
+/** Every source whose company rows carry a derivable document URL. */
+const CITED_COMPANY_SOURCES = [SEC_EDGAR, WIKIDATA, SEC_FORM_C, SBIR, SEC_S1];
 
 const BATCH = 500;
 
@@ -52,6 +71,10 @@ interface Target {
   publisher: string;
   title: string;
   reference: string | null;
+  /** Row-level detail when the Source itself cannot carry it. Sources are
+   *  deduplicated by URL, so every SBIR row shares one — the award's contract
+   *  number belongs on the citation, which is per row. */
+  note?: string | null;
   /**
    * Best available proxy for "when we read this": the cited row's `updatedAt`.
    * It is when we last *wrote* what the document said, not when we read the
@@ -89,7 +112,7 @@ class CitationBackfill {
     await this.walkCompanies();
     await this.walkRounds();
     await this.walkPeople();
-    await this.walkChildren('investor', (c) => this.prisma.investorHolding.findMany(childArgs(c)));
+    await this.walkHoldings();
     await this.walkChildren('acquisition', (c) =>
       this.prisma.acquisitionDeal.findMany(childArgs(c)),
     );
@@ -146,6 +169,18 @@ class CitationBackfill {
     return own?.externalSource === WIKIDATA ? own.externalId : null;
   }
 
+  /** The CIK for a company, when a Form C filing is what created it. */
+  private formCCikFor(companyId: string): string | null {
+    const own = this.companies.get(companyId);
+    return own?.externalSource === SEC_FORM_C ? own.externalId : null;
+  }
+
+  /** The CIK for a company, when an S-1 filing is what created it. */
+  private s1CikFor(companyId: string): string | null {
+    const own = this.companies.get(companyId);
+    return own?.externalSource === SEC_S1 ? own.externalId : null;
+  }
+
   // --- table walks ---------------------------------------------------------
 
   private async walkCompanies(): Promise<void> {
@@ -154,7 +189,7 @@ class CitationBackfill {
       (cursor) =>
         this.prisma.company.findMany({
           where: {
-            externalSource: { in: [SEC_EDGAR, WIKIDATA] },
+            externalSource: { in: CITED_COMPANY_SOURCES },
             externalId: { not: null },
           },
           select: {
@@ -169,17 +204,41 @@ class CitationBackfill {
         }),
       (row) => {
         const id = row.externalId!;
-        if (row.externalSource === SEC_EDGAR) {
-          return secTarget(
-            'company',
-            row.id,
-            filerFormDUrl(id),
-            `SEC EDGAR Form D filings (CIK ${id})`,
-            id,
-            row.updatedAt,
-          );
+        switch (row.externalSource) {
+          case SEC_EDGAR:
+            return secTarget(
+              'company',
+              row.id,
+              filerFormDUrl(id),
+              `SEC EDGAR Form D filings (CIK ${id})`,
+              id,
+              row.updatedAt,
+            );
+          case SEC_FORM_C:
+            return secTarget(
+              'company',
+              row.id,
+              filerFormCUrl(id),
+              `SEC EDGAR Form C filings (CIK ${id})`,
+              id,
+              row.updatedAt,
+            );
+          case SBIR:
+            // The firm key (`uei:…`) is not a public page, so the citation
+            // points at the dataset the fact was read from, unreferenced.
+            return sbirTarget('company', row.id, null, row.updatedAt);
+          case SEC_S1:
+            return secTarget(
+              'company',
+              row.id,
+              filerS1Url(id),
+              `SEC EDGAR Form S-1 filings (CIK ${id})`,
+              id,
+              row.updatedAt,
+            );
+          default:
+            return wikidataTarget('company', row.id, id, row.updatedAt);
         }
-        return wikidataTarget('company', row.id, id, row.updatedAt);
       },
     );
   }
@@ -189,10 +248,14 @@ class CitationBackfill {
       'round',
       (cursor) =>
         this.prisma.fundingRound.findMany({
-          where: { externalSource: SEC_EDGAR, externalId: { not: null } },
+          where: {
+            externalSource: { in: [SEC_EDGAR, SEC_FORM_C, SBIR] },
+            externalId: { not: null },
+          },
           select: {
             id: true,
             companyId: true,
+            externalSource: true,
             externalId: true,
             updatedAt: true,
           },
@@ -201,19 +264,39 @@ class CitationBackfill {
           ...cursor,
         }),
       (row) => {
+        const externalId = row.externalId!;
+
+        // A Reg CF round is keyed on its EDGAR file number, which addresses the
+        // offering directly — no CIK join needed.
+        if (row.externalSource === SEC_FORM_C) {
+          return secTarget(
+            'round',
+            row.id,
+            formCOfferingUrl(externalId),
+            `SEC Regulation Crowdfunding offering ${externalId}`,
+            externalId,
+            row.updatedAt,
+          );
+        }
+
+        // An SBIR award has no derivable public page, so it cites the dataset
+        // it was read from, referenced by its contract number.
+        if (row.externalSource === SBIR) {
+          return sbirTarget('round', row.id, awardReference(externalId), row.updatedAt);
+        }
+
         // The accession alone cannot address a filing — EDGAR's archive path is
         // keyed by CIK. A round whose company was created by another source has
         // no CIK to join to, and a wrong URL is worse than no citation on a
         // feature whose whole point is traceability.
         const cik = this.cikFor(row.companyId);
         if (!cik) return null;
-        const accession = row.externalId!;
         return secTarget(
           'round',
           row.id,
-          primaryDocUrl(cik, accession),
-          `SEC Form D filing ${accession}`,
-          accession,
+          primaryDocUrl(cik, externalId),
+          `SEC Form D filing ${externalId}`,
+          externalId,
           row.updatedAt,
         );
       },
@@ -226,7 +309,7 @@ class CitationBackfill {
       (cursor) =>
         this.prisma.person.findMany({
           where: {
-            externalSource: { in: [SEC_EDGAR, WIKIDATA] },
+            externalSource: { in: CITED_COMPANY_SOURCES },
             externalId: { not: null },
           },
           select: {
@@ -243,6 +326,25 @@ class CitationBackfill {
         if (row.externalSource === WIKIDATA) {
           const qid = this.qidFor(row.companyId);
           return qid ? wikidataTarget('person', row.id, qid, row.updatedAt) : null;
+        }
+        if (row.externalSource === SBIR) {
+          // The contact came from the award file, not from any one award page.
+          return sbirTarget('person', row.id, null, row.updatedAt);
+        }
+        if (row.externalSource === SEC_FORM_C) {
+          // A signer is named on the offering's filings, so the filer's Form C
+          // history is the honest target — the person is not keyed to one of them.
+          const formCCik = this.formCCikFor(row.companyId);
+          return formCCik
+            ? secTarget(
+                'person',
+                row.id,
+                filerFormCUrl(formCCik),
+                `SEC EDGAR Form C filings (CIK ${formCCik})`,
+                formCCik,
+                row.updatedAt,
+              )
+            : null;
         }
         const cik = this.cikFor(row.companyId);
         if (!cik) return null;
@@ -269,19 +371,58 @@ class CitationBackfill {
   }
 
   /**
-   * Investor holdings, acquisitions and exits are Wikidata-only — Form D names
-   * the issuer and its officers, never who bought or what was acquired — so
-   * they all cite their company's QID page. The three tables differ only in
-   * which delegate they read, hence the passed-in fetcher.
+   * Acquisitions and exits are Wikidata-only — Form D names the issuer and its
+   * officers, never who bought or what was acquired — so they cite their
+   * company's QID page. The two tables differ only in which delegate they read,
+   * hence the passed-in fetcher.
    */
   private async walkChildren(
-    entityType: Extract<CitableType, 'investor' | 'acquisition' | 'exit'>,
+    entityType: Extract<CitableType, 'acquisition' | 'exit'>,
     fetch: (cursor: Cursor) => Promise<ChildRow[]>,
   ): Promise<void> {
     await this.eachBatch(entityType, fetch, (row) => {
       const qid = this.qidFor(row.companyId);
       return qid ? wikidataTarget(entityType, row.id, qid, row.updatedAt) : null;
     });
+  }
+
+  /**
+   * Investor holdings come from two sources now: Wikidata's P1951 edges, which
+   * cite the company's QID page, and S-1 principal-stockholder tables, which
+   * cite the filer's S-1 history.
+   */
+  private async walkHoldings(): Promise<void> {
+    await this.eachBatch(
+      'investor',
+      (cursor) =>
+        this.prisma.investorHolding.findMany({
+          where: {
+            externalSource: { in: [WIKIDATA, SEC_S1] },
+            externalId: { not: null },
+          },
+          select: { id: true, companyId: true, externalSource: true, updatedAt: true },
+          orderBy: { id: 'asc' as const },
+          take: BATCH,
+          ...cursor,
+        }),
+      (row) => {
+        if (row.externalSource === SEC_S1) {
+          const cik = this.s1CikFor(row.companyId);
+          return cik
+            ? secTarget(
+                'investor',
+                row.id,
+                filerS1Url(cik),
+                `SEC EDGAR Form S-1 filings (CIK ${cik})`,
+                cik,
+                row.updatedAt,
+              )
+            : null;
+        }
+        const qid = this.qidFor(row.companyId);
+        return qid ? wikidataTarget('investor', row.id, qid, row.updatedAt) : null;
+      },
+    );
   }
 
   /** Standalone investor firms carry their own identifier: a CRD from Form ADV
@@ -372,6 +513,7 @@ class CitationBackfill {
         entityType: t.entityType,
         entityId: t.entityId,
         field: '',
+        note: t.note ?? null,
       },
       update: {},
     });
@@ -438,6 +580,29 @@ function secTarget(
     publisher: 'SEC',
     title,
     reference,
+    retrievedAt,
+  };
+}
+
+/** SBIR rows all cite the same bulk file — the document they were actually read
+ *  from — with the award's contract number as the reference where there is one. */
+function sbirTarget(
+  entityType: CitableType,
+  entityId: string,
+  reference: string | null,
+  retrievedAt: Date,
+): Target {
+  return {
+    entityType,
+    entityId,
+    url: SBIR_AWARD_DATA_URL,
+    sourceType: 'Government dataset',
+    publisher: SBIR_PUBLISHER,
+    title: SBIR_DATASET_TITLE,
+    // The whole corpus shares one Source row (deduplicated by URL), so the
+    // per-award identifier goes on the citation instead, which is per row.
+    reference: null,
+    note: reference ? `Contract ${reference}` : null,
     retrievedAt,
   };
 }

@@ -11,6 +11,9 @@ empty Postgres with the commands below — locally or on production.
 | `SEC_EDGAR` | Companies + funding rounds + people, from Form D filings | Daily index; walk N days | 4.8k companies, 5.3k rounds |
 | `WIKIDATA` | Company metadata, investors, founders/CEOs, acquisitions, exits, **and** ~640 investor firms enumerated by `P31` class | Snapshot; changes slowly | 6.3k companies, ~1.5k investor edges |
 | `SEC_ADV` | **Investor firms only** (VC/PE), from the monthly Investment Adviser bulk files | Monthly full snapshot | ~7.0k firms |
+| `SEC_FORM_C` | Regulation Crowdfunding issuers + their raises + signing officers, from the quarterly Form C data sets | 41 quarterly snapshots (2016Q2→) | 9.0k issuers, 4.3k rounds, 19.6k people |
+| `SBIR` | Deep-tech companies + their federal research awards (`kind: 'Grant'`), from the monthly SBIR.gov bulk file | Monthly full snapshot | 15.3k companies, 124k grant rounds ($56bn) |
+| `SEC_S1` | **Investor→company edges only**, from S-1 principal-stockholder tables | Document walk from `S1_START_DATE` | ~1,000 filings/year |
 
 Two properties make this reproducible:
 
@@ -21,12 +24,34 @@ Two properties make this reproducible:
   moderation queue. A rebuild therefore produces a fully public dataset with no
   manual step.
 
-**What no free source provides:** investor→portfolio-company edges at scale.
-Form D discloses the issuer and its officers, never who bought; Form ADV
-discloses a firm's funds and service providers, never its portfolio. Wikidata's
-~1,500 `P1951` edges are the realistic automated ceiling. Everything beyond that
-is crowdsourced — which is why investor profiles with an empty portfolio render a
-"contribute" empty state rather than being hidden.
+**Where investor→portfolio-company edges come from.** Form D discloses the issuer
+and its officers, never who bought; Form ADV discloses a firm's funds and service
+providers, never its portfolio. Two sources do disclose edges: Wikidata's ~1,500
+`P1951` statements, and **S-1 principal-stockholder tables**, which name the firms
+that own a company about to register securities. `SEC_S1` publishes an edge only
+when the holder resolves to a firm already in the investor universe — an ownership
+table gives no type signal at all (a row can be a VC fund, a corporate parent, a
+family trust or a founder), and `InvestorType` must come from source structure,
+never from a name. Everything beyond those two is crowdsourced, which is why an
+investor profile with an empty portfolio renders a "contribute" empty state rather
+than being hidden.
+
+**Form C proceeds are text-extracted, and an offering without one gets no round.**
+The crowdfunding data sets publish the *target* and *maximum* offering amounts as
+columns and never the proceeds; the money that actually arrived appears as prose on
+a `C-U` progress update ("has raised a total of $119,700."). About 88% of C-U
+filings yield an amount; the rest are honest misses — "Offering closed
+unsuccessfully", "End of offering" — and those offerings contribute the issuer's
+metadata and officers but **no funding round**. Printing a target as though it were
+proceeds would make ~6,000 offerings look funded that never closed.
+
+**SBIR awards are grants, and grants are not raises.** Every SBIR/STTR round lands
+with `kind: 'Grant'` and the firm's `totalRaisedUsd` set to `0`. Grants are real
+capital events and render on the company's funding ladder with a `Grant` tag, but
+`MarketService` excludes them from the market tape's deal count, and the tape's
+raised total sums `Company.totalRaisedUsd`, which SBIR never writes. Without that,
+adding SBIR would have moved the deal count from 9,880 to 134,359 and silently
+absorbed $56bn of federal money into "capital raised".
 
 ## Full rebuild, local
 
@@ -61,8 +86,15 @@ figures.
 `Source` and `Citation` rows that put a source link next to every ingested fact.
 It touches no network: every URL is *constructed* from identifiers the rows
 already carry — CIK + accession for a Form D filing, the QID for Wikidata, the
-CRD for Form ADV. It is idempotent, so re-run it after any incremental ingest to
-cite the newly created rows.
+CRD for Form ADV, the EDGAR file number for a Reg CF offering, the filer's CIK for
+a Form C or S-1 company. It is idempotent, so re-run it after any incremental
+ingest to cite the newly created rows.
+
+SBIR rows are the one case with no per-row public page: the bulk award file has no
+per-award URL that can be derived from what it publishes. Those rows cite **the
+dataset itself**, with the award's contract number as the citation's reference.
+That is honest — the file *is* the document the fact came from — and it is the
+same rule as everywhere else: a guessed award URL would be worse than none.
 
 A row is skipped (and counted in the run's log) when no URL can be derived — most
 often a SEC round whose company was created by a different source, so there is no
@@ -77,6 +109,9 @@ make deploy-seed               # admin user
 make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR
 make ingest-investors-prod     # SEC_ADV + Wikidata investor firms
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=WIKIDATA
+make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_FORM_C
+make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SBIR
+make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_S1
 make backfill-sectors-prod
 make backfill-citations-prod    # source links for every ingested row
 ```
@@ -191,10 +226,24 @@ Expected shape after a full rebuild (August 2026 sources):
 
 | Table | Rows |
 |---|---|
-| `Company` | ~11,000 |
-| `FundingRound` | ~5,300 |
+| `Company` | ~35,000 |
+| `FundingRound` | ~134,000 (of which ~124,000 are `kind: 'Grant'`) |
 | `Investor` | ~7,400 |
-| `InvestorHolding` | ~1,150 |
+| `InvestorHolding` | ~1,150 plus whatever `SEC_S1` resolved |
+
+```sql
+-- Must be zero: SBIR contributes grants, never raised capital.
+SELECT count(*) FROM "FundingRound" WHERE "externalSource" = 'SBIR' AND kind <> 'Grant';
+SELECT coalesce(sum("totalRaisedUsd"), 0) FROM "Company" WHERE "externalSource" = 'SBIR';
+
+-- Must be zero: a Reg CF raise cannot exceed the statutory ceiling.
+SELECT count(*) FROM "FundingRound"
+WHERE "externalSource" = 'SEC_FORM_C' AND "amountUsd" > 5250000;
+
+-- Must be zero: an S-1 edge only ever attaches to a firm we already knew.
+SELECT count(*) FROM "InvestorHolding"
+WHERE "externalSource" = 'SEC_S1' AND "investorId" IS NULL;
+```
 
 ## Gotchas
 
@@ -205,5 +254,40 @@ Expected shape after a full rebuild (August 2026 sources):
   names.
 - **`make db-reset` is destructive** and re-runs every seed phase. It does not
   re-ingest — follow it with `make ingest-all`.
-- **A Form D ten-year walk is long.** It is the only slow step; the investor
-  sources finish in about a minute.
+- **A Form D ten-year walk is long.** So is a 2015-onward S-1 walk (~11,000
+  documents at ~800 KB each, six a second). The bulk-file sources are fast: Form C
+  is 41 requests totalling 13 MB, and SBIR is one 91 MB stream. For SBIR the long
+  pole is the 124,000 round upserts, not the download.
+- **The SBIR file is never buffered.** It is ~91 MB, 55 of its records span more
+  than one physical line (so a line split is wrong), and `JOBS_MEM_LIMIT` defaults
+  to `1536m`. `util/csv.ts`'s `createCsvParser` streams it and the source
+  aggregates per firm as rows arrive; a full run completes under
+  `--max-old-space-size=512`.
+
+## Adding a source to an existing dataset
+
+The rebuild commands above create a corpus from nothing. Adding one new source to
+a corpus you already have is a different job, and `make ingest-all` is the wrong
+tool for it — it would re-walk ten years of Form D daily indexes for hours to
+arrive back where it started. Run just the new source, locally, then ship the
+result:
+
+```bash
+INGEST_RECORD_REVISIONS=false make ingest SOURCE=SEC_FORM_C DAYS=1 LIMIT=1000000
+make backfill-sectors
+make backfill-citations
+make db-dump
+make deploy-restore FILE=backups/capbase-<stamp>.dump VPS=user@host CONFIRM=yes
+```
+
+This is the right call for the bulk sources in particular: SBIR alone is a 91 MB
+download and 124,000 upserts, and paying for it twice buys nothing. The dump
+carries `_prisma_migrations`, so any migration the new source needed arrives with
+the data and the api container's `prisma migrate deploy` is a no-op on next boot.
+
+**Two caveats before running it.** `deploy-restore` replaces *every* row in
+production, including the `User` table and any contribution or moderation made on
+prod since the last dump — so either accept that, or take a production backup first
+(`make deploy-backup`) and reconcile. And the local database must be on the same
+migration as the deployed code, which it will be if the migration was applied
+locally before the ingest ran.

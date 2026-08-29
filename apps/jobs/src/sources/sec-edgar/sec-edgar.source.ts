@@ -95,12 +95,14 @@ export class SecEdgarSource implements IngestionSource {
         stage: stageFromAmount(parsed.amountSoldUsd),
         totalRaisedUsd: parsed.amountSoldUsd,
       },
-      round: {
-        externalId: roundExternalId,
-        name: 'Private placement (Form D)',
-        date,
-        amountUsd: parsed.amountSoldUsd,
-      },
+      rounds: [
+        {
+          externalId: roundExternalId,
+          name: 'Private placement (Form D)',
+          date,
+          amountUsd: parsed.amountSoldUsd,
+        },
+      ],
       people,
     };
   }

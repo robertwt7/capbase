@@ -1,11 +1,11 @@
 import { describe, it, expect } from '@jest/globals';
 
+import { parseCsv } from '../../util/csv';
+import { titleCaseFirm } from '../../util/text';
 import {
   classifyAdvWebsite,
   investorTypeForAdv,
   mapAdvRows,
-  parseCsv,
-  titleCaseFirm,
   type AdvRow,
 } from './adv.parser';
 

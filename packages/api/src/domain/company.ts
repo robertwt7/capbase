@@ -97,6 +97,13 @@ export const INVESTOR_TYPES: readonly InvestorType[] = [
   'Sovereign wealth',
 ];
 
+/** Capital type of a funding round. Grants are non-dilutive government awards
+ *  (SBIR/STTR); they are capital events, not raises, so money aggregates skip
+ *  them. Debt covers Reg CF debt offerings. */
+export type RoundKind = 'Equity' | 'Debt' | 'Grant';
+
+export const ROUND_KINDS: readonly RoundKind[] = ['Equity', 'Debt', 'Grant'];
+
 export type ExitType = 'IPO' | 'Acquisition' | 'Secondary';
 
 export const EXIT_TYPES: readonly ExitType[] = ['IPO', 'Acquisition', 'Secondary'];
@@ -116,6 +123,8 @@ export interface FundingRound {
   name: string;
   date: string; // ISO date the round was announced
   amountUsd: number; // capital raised in this round
+  /** Equity unless the source says otherwise. */
+  kind: RoundKind;
   postMoneyUsd: number | null; // post-money valuation, when disclosed
   lead: string | null;
   investors: RoundInvestor[];

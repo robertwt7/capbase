@@ -6,7 +6,8 @@ Workspaces:
 
 - `apps/web` — Next.js 16 frontend (public site + `/admin` moderation portal).
 - `apps/api` — NestJS REST API (auth, moderation, public reads).
-- `apps/jobs` — NestJS worker that ingests SEC EDGAR Form D filings on a cron.
+- `apps/jobs` — NestJS worker that ingests public filings and bulk datasets (SEC
+  Form D on a cron; Form C, SBIR, Form S-1, Form ADV and Wikidata by hand).
 - `packages/api` (`@repo/api`) — shared domain types consumed by every app.
 - `packages/db` (`@repo/db`) — shared Prisma schema, migrations, seed, client.
 - `packages/{ui,eslint-config,jest-config,typescript-config}` — shared tooling.
@@ -213,9 +214,13 @@ website, and for ADV rows CRD/CIK/fund count/gross fund assets); `InvestorHoldin
 `002` shipped before the column existed and seed phases are immutable — every write path (ingest
 and contribution) populates it, so treat non-null as an invariant. `/investors` and
 `/investors/[slug]` read the table directly. **Most firms have an empty portfolio and that is
-expected**: no free source discloses investor→company edges (Form D names the issuer, Form ADV the
-funds; only Wikidata's ~1.5k P1951 edges are automatable), so empty profiles invite a contribution
-rather than being hidden.
+expected**: neither Form D nor Form ADV discloses investor→company edges (Form D names the issuer,
+Form ADV the funds). Two sources do — Wikidata's ~1.5k P1951 statements, and **S-1
+principal-stockholder tables** (`SEC_S1`), which name the firms owning a company about to
+register. An S-1 edge is published only when the holder resolves to a firm the universe already
+holds (`onlyIfKnown`): an ownership table carries no type signal, and `InvestorType` comes from
+source structure, never from a name. Empty profiles still invite a contribution rather than being
+hidden.
 
 Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
 (`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
@@ -238,13 +243,24 @@ link): `Company` — `websiteUrl`, `linkedinUrl`, `twitterUrl`, `legalName`, `op
 `companyType`, `primarySector`; `Person` — `linkedinUrl`, `title`; `InvestorHolding` —
 `websiteUrl`, `linkedinUrl`. They render as outbound links / facts on the company profile.
 SEC rows get `primarySector` via the deterministic Form D map
-(`apps/jobs/src/sources/sec-edgar/sector-map.ts`); Wikidata rows via the `SECTOR_RULES`
-keyword heuristic. `make backfill-sectors` fills missing sectors from stored `industry[]`.
+(`apps/jobs/src/sources/sec-edgar/sector-map.ts`); Wikidata and SBIR rows via the `SECTOR_RULES`
+keyword heuristic (SBIR falls back to `AGENCY_SECTOR_MAP`, which is null for the agencies that fund
+every sector). Form C has no industry field, so those rows are honestly unclassified.
+`make backfill-sectors` fills missing sectors from stored `industry[]`.
+
+**`FundingRound.kind`** (`Equity | Debt | Grant`, `ROUND_KINDS` in `@repo/api`) says what sort of
+capital a round is. Grants — SBIR/STTR awards — are real capital events but not raises, so they are
+excluded from `Company.totalRaisedUsd` (the SBIR source writes 0) and from `MarketService`'s deal
+count (`AND r."kind" <> 'Grant'`), while still rendering on the Funding Ladder with a mono badge.
+The column is ingest-only: it defaults to `Equity` and no contribution form sets it.
 
 ## Jobs (apps/jobs)
 
-NestJS worker (port 3002, health endpoint) with two pluggable `IngestionSource`s
-(`src/sources/`, add OpenCorporates etc. later):
+NestJS worker (port 3002, health endpoint) with six pluggable `IngestionSource`s
+(`src/sources/`, add OpenCorporates etc. later). A source contributes a
+`NormalizedRecord` whose `rounds[]` is **plural** — a Reg CF issuer runs several offerings and an
+SBIR grantee wins many awards, and one record per round would re-run the company upsert and let the
+last one clobber `totalRaisedUsd`:
 
 - **SEC_EDGAR** — Form D filings (free, official source for US private-placement
   funding). Walks N days of daily indexes (`INGEST_DAYS`), **skips pooled
@@ -262,9 +278,30 @@ NestJS worker (port 3002, health endpoint) with two pluggable `IngestionSource`s
   *monthly snapshot*, so `days` is ignored and it stays off the daily cron; pin a
   month with `ADV_SNAPSHOT` for a reproducible run. Contributes **no** company
   records — Form ADV never names portfolio companies.
+- **SEC_FORM_C** — ~9k Regulation Crowdfunding issuers from the 41 quarterly DERA
+  data sets (`FORM_C_MIN_QUARTER` bounds the walk), with website, HQ, incorporation
+  year, headcount and signing officers. The offering identity is `FILE_NUMBER`, not
+  an accession — one offering can have up to 13 `C-U` progress updates. **The amount
+  raised is not a column**: it is prose on the `C-U`, extracted by
+  `progress-update.ts` (keyword-anchored and capped by the registered maximum), and
+  an offering with no parseable amount deliberately gets **no round**. The TSVs are
+  line-splittable — verified across all 268 members — unlike the ADV CSVs.
+- **SBIR** — ~15k deep-tech companies and ~124k federal research awards from
+  SBIR.gov's monthly bulk CSV (the documented JSON API 403s). Identity is UEI → DUNS
+  → name; `SBIR_MIN_YEAR` (default 2015) keeps a firm on any recent award and then
+  ingests its whole history. Every award is `kind: 'Grant'` with `totalRaisedUsd: 0`.
+  The 91 MB file is **streamed**, never buffered (`util/csv.ts`'s `createCsvParser`),
+  and aggregated per firm as rows arrive.
+- **SEC_S1** — investor→company edges from S-1 principal-stockholder tables, found
+  via EDGAR full-text search (`S1_START_DATE` bounds the walk). `ownership.parser.ts`
+  anchors on the section heading rather than "any table with a % column" (that finds
+  the table of contents) and scores each row on structural signals only
+  (`S1_MIN_CONFIDENCE`, default 0.6). Contributes **no** rounds and no money — an S-1
+  says who owns the company, not what it raised.
 
 The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
-SEC-only). Backfills: `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV`
+SEC Form D only — every other source is a snapshot, run by hand). Backfills:
+`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_FORM_C|SBIR|SEC_S1`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
 (ADV + Wikidata firms) and `make ingest-all` (everything). All ingested rows —
 companies, rounds, the child entities (people/investors/acquisitions/exits) and
@@ -285,9 +322,13 @@ on those merges unrelated firms into one investor.
 
 `make backfill-citations` (`src/backfill-citations.ts`, the last step of `ingest-all`)
 mints `Source`/`Citation` rows for the whole corpus with **no network access** — the URLs
-are constructed from stored identifiers via `sources/sec-edgar/edgar.urls.ts` and
+are constructed from stored identifiers via `sources/sec-edgar/edgar.urls.ts`,
+`sources/sbir/sbir.urls.ts`, `sources/sec-s1/s1.urls.ts` and
 `sources/wikidata/wikidata.urls.ts` (CIK + accession → the Form D archive path, QID →
-the Wikidata page, CRD → the IAPD firm summary). Idempotent, so re-run it after each
+the Wikidata page, CRD → the IAPD firm summary, EDGAR file number → the Reg CF offering,
+CIK → a filer's Form C / S-1 history). SBIR has no derivable per-award page, so those
+rows cite the **dataset itself** (`sourceType: 'Government dataset'`, rendered `[GOV]`)
+with the contract number as the reference. Idempotent, so re-run it after each
 ingest. A row with no derivable URL is skipped and counted rather than given a guessed
 link. `INGEST_RECORD_REVISIONS=false` turns off timeline writes for a from-scratch
 rebuild (see `docs/DATA_REBUILD.md`).

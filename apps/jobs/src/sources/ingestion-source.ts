@@ -1,4 +1,24 @@
-import type { CompanyStatus, ExitType, InvestorType, Sector, Stage } from '@repo/api';
+import type {
+  CompanyStatus,
+  ExitType,
+  InvestorType,
+  RoundKind,
+  Sector,
+  Stage,
+} from '@repo/api';
+
+/** One capital event contributed by a source. */
+export interface NormalizedRound {
+  /** Stable id of this round within the source (Form D accession, Reg CF file
+   *  number, SBIR contract number). */
+  externalId: string;
+  name: string;
+  /** ISO date (YYYY-MM-DD). */
+  date: string;
+  amountUsd: number;
+  /** Defaults to 'Equity'. */
+  kind?: RoundKind;
+}
 
 /** An executive/director/founder attached to a company. */
 export interface NormalizedPerson {
@@ -24,6 +44,16 @@ export interface NormalizedInvestor {
   /** 'Undisclosed' when unknown. */
   firstRound: string;
   rounds: number;
+  /**
+   * Drop this holding unless the firm already exists.
+   *
+   * S-1 ownership tables name holders with no type signal at all — a row can be
+   * a VC fund, a corporate parent, a family trust or a founder — and the rule
+   * is that InvestorType comes from source structure, never from a firm's name.
+   * So these edges attach to firms the ADV/Wikidata sweeps already typed, and
+   * are dropped otherwise.
+   */
+  onlyIfKnown?: boolean;
 }
 
 /** An acquisition the company made. */
@@ -76,14 +106,11 @@ export interface NormalizedRecord {
     status?: CompanyStatus;
   };
 
-  round?: {
-    /** Stable id of this specific filing/round within the source (e.g. accession). */
-    externalId: string;
-    name: string;
-    /** ISO date (YYYY-MM-DD). */
-    date: string;
-    amountUsd: number;
-  };
+  /** Every round this record contributes. Plural because a Reg CF issuer runs
+   *  several offerings and an SBIR grantee wins many awards — one record per
+   *  round would re-run the company upsert per round and let the last one
+   *  overwrite totalRaisedUsd. */
+  rounds?: NormalizedRound[];
 
   people?: NormalizedPerson[];
   investors?: NormalizedInvestor[];

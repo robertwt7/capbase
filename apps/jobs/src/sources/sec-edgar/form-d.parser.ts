@@ -1,5 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 
+import { looksLikeEntityName } from '../../util/text';
+
 export interface ParsedPerson {
   name: string;
   role: string;
@@ -76,11 +78,6 @@ export function parseFormD(xml: string): ParsedFormD | null {
   };
 }
 
-/** Fund administrators and similar entities file as "related persons" too —
- *  skip anything whose name reads like a company rather than an individual. */
-const ENTITY_RE =
-  /\b(llc|l\.l\.c\.?|lp|l\.p\.?|inc|ltd|corp|fund|capital|management|advis[oe]rs?|partners)\b/i;
-
 function parseRelatedPersons(raw: unknown): ParsedPerson[] {
   const out: ParsedPerson[] = [];
   for (const info of toArray<Record<string, any>>(raw)) {
@@ -89,7 +86,9 @@ function parseRelatedPersons(raw: unknown): ParsedPerson[] {
       .map(str)
       .filter(Boolean)
       .join(' ');
-    if (!name || ENTITY_RE.test(name)) continue;
+    // Fund administrators and similar entities file as "related persons" too —
+    // skip anything whose name reads like a company rather than an individual.
+    if (!name || looksLikeEntityName(name)) continue;
 
     const relationships = toArray(info.relatedPersonRelationshipList?.relationship).map(str);
     const role = relationships.find(Boolean) ?? '';

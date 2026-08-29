@@ -121,6 +121,7 @@ const mockCompanies: MockCompany[] = [
         name: 'Seed',
         date: '2016-09-01',
         amountUsd: 3_200_000,
+        kind: 'Equity',
         postMoneyUsd: 14_000_000,
         lead: 'Founders Collective',
         investors: [
@@ -132,6 +133,7 @@ const mockCompanies: MockCompany[] = [
         name: 'Series A',
         date: '2018-03-12',
         amountUsd: 22_000_000,
+        kind: 'Equity',
         postMoneyUsd: 120_000_000,
         lead: 'Index Ventures',
         investors: [
@@ -143,6 +145,7 @@ const mockCompanies: MockCompany[] = [
         name: 'Series B',
         date: '2019-11-04',
         amountUsd: 75_000_000,
+        kind: 'Equity',
         postMoneyUsd: 600_000_000,
         lead: 'Sequoia Capital',
         investors: [
@@ -155,6 +158,7 @@ const mockCompanies: MockCompany[] = [
         name: 'Series C',
         date: '2021-05-20',
         amountUsd: 230_000_000,
+        kind: 'Equity',
         postMoneyUsd: 4_100_000_000,
         lead: 'Tiger Global',
         investors: [
@@ -167,6 +171,7 @@ const mockCompanies: MockCompany[] = [
         name: 'Series D',
         date: '2022-10-18',
         amountUsd: 420_000_000,
+        kind: 'Equity',
         postMoneyUsd: 12_500_000_000,
         lead: 'Founders Fund',
         investors: [
@@ -179,6 +184,7 @@ const mockCompanies: MockCompany[] = [
         name: 'Series E',
         date: '2024-06-11',
         amountUsd: 600_000_000,
+        kind: 'Equity',
         postMoneyUsd: 24_000_000_000,
         lead: 'Thrive Capital',
         investors: [

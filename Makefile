@@ -114,11 +114,11 @@ db-tunnel: ## [laptop] SSH-tunnel the VPS Postgres to localhost (VPS=user@host [
 	ssh -N -L $(TUNNEL_PORT):127.0.0.1:5432 $(VPS)
 
 # ---------------------------------------------------------------------------
-# Ingestion (SEC EDGAR Form D, Wikidata, SEC Form ADV)
+# Ingestion (SEC EDGAR Form D/S-1, Wikidata, SEC Form ADV, SEC Form C, SBIR awards)
 # ---------------------------------------------------------------------------
 
 .PHONY: ingest
-ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV)
+ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_FORM_C|SBIR|SEC_S1)
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
@@ -145,6 +145,9 @@ ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See d
 	cd apps/jobs && node dist/backfill.js $(or $(DAYS),3650) 1000000 SEC_EDGAR
 	cd apps/jobs && node dist/backfill.js 1 1000000 WIKIDATA
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV
+	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_FORM_C
+	cd apps/jobs && node dist/backfill.js 1 1000000 SBIR
+	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_S1
 	cd apps/jobs && node dist/backfill-sectors.js
 	cd apps/jobs && node dist/backfill-citations.js
 

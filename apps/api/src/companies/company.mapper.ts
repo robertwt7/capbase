@@ -13,6 +13,7 @@ import type {
   OperatingStatus,
   Person,
   RoundInvestor,
+  RoundKind,
   Sector,
   Stage,
 } from '@repo/api';
@@ -52,6 +53,7 @@ export function toFundingRound(row: DbRoundWithInvestors): FundingRound {
     name: row.name,
     date: dateOnly(row.date),
     amountUsd: Number(row.amountUsd),
+    kind: row.kind as RoundKind,
     postMoneyUsd: numN(row.postMoneyUsd),
     lead: row.lead,
     investors: (row.investors ?? []).map(toRoundInvestor),

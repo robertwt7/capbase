@@ -228,6 +228,11 @@ model FundingRound {
   amountUsd    BigInt
   postMoneyUsd BigInt?
   lead         String?
+  /// Capital type: 'Equity' | 'Debt' | 'Grant' (ROUND_KINDS). Grants — SBIR/STTR
+  /// awards — are real capital events but not raised capital, so they are
+  /// excluded from Company.totalRaisedUsd and from the market tape's deal count
+  /// while still rendering on the funding ladder.
+  kind         String   @default("Equity")
 
   // Provenance for ingested rows (e.g. SEC_EDGAR). Null for human contributions.
   externalSource String?

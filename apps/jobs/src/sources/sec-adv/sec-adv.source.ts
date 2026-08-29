@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { INVESTOR_TYPES, type InvestorType } from '@repo/api';
 
+import { parseCsv } from '../../util/csv';
 import type { FetchOptions, IngestionSource, NormalizedInvestorFirm, NormalizedRecord } from '../ingestion-source';
 import { AdvClient } from './adv.client';
-import { SEC_ADV, mapAdvRows, parseCsv } from './adv.parser';
+import { SEC_ADV, mapAdvRows } from './adv.parser';
 
 /** Hedge funds are opt-in: many are public-markets-only and would dilute a
  *  directory aimed at private-company investors. */

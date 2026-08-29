@@ -196,21 +196,23 @@ describe('IngestService.run', () => {
     });
   });
 
-  it('skips the round upsert when the record has no round', async () => {
+  it('skips the round upsert when the record has no rounds', async () => {
     const prisma = mockPrisma();
     await serviceWith(prisma, [record()]).run(RUN);
     expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
   });
 
-  it('upserts the round keyed by (source, round.externalId)', async () => {
+  it('upserts each round keyed by (source, round.externalId), defaulting to Equity', async () => {
     const prisma = mockPrisma();
     const r = record({
-      round: {
-        externalId: 'acc-1',
-        name: 'Private placement (Form D)',
-        date: '2026-06-15',
-        amountUsd: 7_500_000,
-      },
+      rounds: [
+        {
+          externalId: 'acc-1',
+          name: 'Private placement (Form D)',
+          date: '2026-06-15',
+          amountUsd: 7_500_000,
+        },
+      ],
     });
     await serviceWith(prisma, [r]).run(RUN);
 
@@ -226,9 +228,31 @@ describe('IngestService.run', () => {
           companyId: 'c-new',
           moderationStatus: 'APPROVED',
           amountUsd: 7_500_000n,
+          kind: 'Equity',
         }),
+        update: expect.objectContaining({ kind: 'Equity' }),
       }),
     );
+  });
+
+  it('upserts every round of a record without re-running the company upsert', async () => {
+    // One SBIR grantee wins many awards; one Reg CF issuer runs several
+    // offerings. A record per round would let the last one clobber the company.
+    const prisma = mockPrisma();
+    const r = record({
+      rounds: [
+        { externalId: 'a-1', name: 'SBIR Phase I award (NASA)', date: '2019-03-01', amountUsd: 125_000, kind: 'Grant' },
+        { externalId: 'a-2', name: 'SBIR Phase II award (NASA)', date: '2021-07-01', amountUsd: 750_000, kind: 'Grant' },
+      ],
+    });
+    await serviceWith(prisma, [r]).run(RUN);
+
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fundingRound.upsert).toHaveBeenCalledTimes(2);
+    const kinds = prisma.fundingRound.upsert.mock.calls.map(
+      (call) => (call[0] as { create: { kind: string } }).create.kind,
+    );
+    expect(kinds).toEqual(['Grant', 'Grant']);
   });
 
   it('upserts people, investors, acquisitions and exits with provenance keys', async () => {
@@ -752,6 +776,57 @@ describe('IngestService investor firms', () => {
 
     expect(prisma.investor.create).toHaveBeenCalledTimes(1);
     expect(prisma.investorHolding.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops an onlyIfKnown holding when no firm matches', async () => {
+    // S-1 ownership rows carry no type signal, so an unmatched holder must not
+    // become an Investor row typed from its name.
+    const prisma = mockPrisma();
+    const r = record({
+      investors: [
+        {
+          externalId: 'X1:holder:some-family-trust',
+          name: 'The Smith Family Trust',
+          type: 'Venture',
+          firstRound: 'Undisclosed',
+          rounds: 0,
+          onlyIfKnown: true,
+        },
+      ],
+    });
+    await serviceWithFirms(prisma, [], [r]).run(RUN);
+
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.investorHolding.upsert).not.toHaveBeenCalled();
+  });
+
+  it('attaches an onlyIfKnown holding to a known firm, using the firm own type', async () => {
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-nea', name: 'New Enterprise Associates', type: 'Private equity' })],
+    );
+    const r = record({
+      investors: [
+        {
+          externalId: 'X1:holder:new-enterprise-associates',
+          name: 'New Enterprise Associates',
+          // The source's guess, which the resolved firm's structural type beats.
+          type: 'Venture',
+          firstRound: 'Undisclosed',
+          rounds: 0,
+          onlyIfKnown: true,
+        },
+      ],
+    });
+    await serviceWithFirms(prisma, [], [r]).run(RUN);
+
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.investorHolding.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ investorId: 'i-nea', type: 'Private equity' }),
+        update: expect.objectContaining({ investorId: 'i-nea', type: 'Private equity' }),
+      }),
+    );
   });
 
   it('never matches on a platform domain the source refused to publish', async () => {

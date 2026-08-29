@@ -6,6 +6,7 @@ import type { Citation as CitationRow, SourceType } from '@repo/api';
 const SOURCE_LABELS: Record<SourceType, string> = {
   'SEC filing': 'SEC',
   Wikidata: 'WD',
+  'Government dataset': 'GOV',
   'Company website': 'WEB',
   Press: 'PR',
   Other: 'SRC',

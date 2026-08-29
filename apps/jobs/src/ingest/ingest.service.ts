@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { InvestorType } from '@repo/api';
 import { toJsonValue } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,6 +46,9 @@ interface InvestorIndex {
   byDomain: Map<string, string>;
   /** normalizeInvestorName(name) → investor id (first wins). */
   byName: Map<string, string>;
+  /** investor id → its own InvestorType, which came from source structure and
+   *  therefore beats whatever a holding guessed. */
+  types: Map<string, InvestorType>;
   slugs: Set<string>;
 }
 
@@ -168,12 +172,21 @@ export class IngestService {
 
   private async loadInvestorIndex(): Promise<InvestorIndex> {
     const existing = await this.prisma.investor.findMany({
-      select: { id: true, slug: true, name: true, domain: true, externalSource: true, externalId: true },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        type: true,
+        domain: true,
+        externalSource: true,
+        externalId: true,
+      },
     });
     const index: InvestorIndex = {
       byKey: new Map(),
       byDomain: new Map(),
       byName: new Map(),
+      types: new Map(),
       slugs: new Set(),
     };
     for (const i of existing) {
@@ -183,6 +196,7 @@ export class IngestService {
       if (i.domain && !index.byDomain.has(i.domain)) index.byDomain.set(i.domain, i.id);
       const norm = normalizeInvestorName(i.name);
       if (norm && !index.byName.has(norm)) index.byName.set(norm, i.id);
+      index.types.set(i.id, i.type as InvestorType);
       index.slugs.add(i.slug);
     }
     return index;
@@ -195,23 +209,25 @@ export class IngestService {
   ): Promise<void> {
     const companyId = await this.upsertCompany(r, index);
 
-    if (r.round) {
+    for (const round of r.rounds ?? []) {
       await this.prisma.fundingRound.upsert({
         where: {
-          externalSource_externalId: { externalSource: r.source, externalId: r.round.externalId },
+          externalSource_externalId: { externalSource: r.source, externalId: round.externalId },
         },
         create: {
           companyId,
-          name: r.round.name,
-          date: new Date(r.round.date),
-          amountUsd: BigInt(Math.round(r.round.amountUsd)),
+          name: round.name,
+          date: new Date(round.date),
+          amountUsd: BigInt(Math.round(round.amountUsd)),
+          kind: round.kind ?? 'Equity',
           externalSource: r.source,
-          externalId: r.round.externalId,
+          externalId: round.externalId,
           moderationStatus: 'APPROVED',
         },
         update: {
-          amountUsd: BigInt(Math.round(r.round.amountUsd)),
-          date: new Date(r.round.date),
+          amountUsd: BigInt(Math.round(round.amountUsd)),
+          date: new Date(round.date),
+          kind: round.kind ?? 'Equity',
         },
       });
     }
@@ -237,25 +253,37 @@ export class IngestService {
     }
 
     for (const i of r.investors ?? []) {
-      // Every holding resolves to a first-class Investor row, minting one if the
-      // firm is new. This is the invariant the nullable investorId column relies on.
-      const investorId = await this.resolveInvestor(i, r.source, investorIndex);
+      // Every holding WRITTEN resolves to a first-class Investor row, minting
+      // one if the firm is new — the invariant the nullable investorId column
+      // relies on. A holding the source will only publish against a known firm
+      // (onlyIfKnown), where none matched, is dropped rather than written null.
+      const resolved = await this.resolveInvestor(i, r.source, investorIndex);
+      if (!resolved) continue;
+
+      // The resolved firm's own type wins: it came from source structure (a
+      // Wikidata P31 class or the ADV fund columns), which a holding never has.
+      const type = resolved.type ?? i.type;
       await this.prisma.investorHolding.upsert({
         where: {
           externalSource_externalId: { externalSource: r.source, externalId: i.externalId },
         },
         create: {
           companyId,
-          investorId,
+          investorId: resolved.id,
           name: i.name,
-          type: i.type,
+          type,
           firstRound: i.firstRound,
           rounds: i.rounds,
           externalSource: r.source,
           externalId: i.externalId,
           moderationStatus: 'APPROVED',
         },
-        update: { investorId, type: i.type, firstRound: i.firstRound, rounds: i.rounds },
+        update: {
+          investorId: resolved.id,
+          type,
+          firstRound: i.firstRound,
+          rounds: i.rounds,
+        },
       });
     }
 
@@ -300,20 +328,31 @@ export class IngestService {
     }
   }
 
-  /** Resolve a holding's investor to an Investor id, creating a minimal row when
-   *  the firm is new. Matching order mirrors upsertCompany: provenance key →
-   *  normalized name. Holdings carry no website, so there is no domain to match on. */
+  /**
+   * Resolve a holding's investor to an Investor row, creating a minimal one when
+   * the firm is new. Matching order mirrors upsertCompany: provenance key →
+   * normalized name. Holdings carry no website, so there is no domain to match on.
+   *
+   * Returns the matched firm's own `type` when there was one, so a caller can
+   * prefer it over the holding's guess. Null means "no firm, and none minted" —
+   * either the name was unusable or the source set `onlyIfKnown`.
+   */
   private async resolveInvestor(
     i: NormalizedInvestor,
     source: string,
     index: InvestorIndex,
-  ): Promise<string | null> {
+  ): Promise<{ id: string; type: InvestorType | null } | null> {
     const norm = normalizeInvestorName(i.name);
     if (!norm) return null;
 
     const key = i.investorExternalId ? `${source}:${i.investorExternalId}` : null;
     const known = (key ? index.byKey.get(key) : undefined) ?? index.byName.get(norm);
-    if (known) return known;
+    if (known) return { id: known, type: index.types.get(known) ?? null };
+
+    // The source publishes this edge only against a firm we already know and
+    // have typed from source structure. Minting one here would be inventing an
+    // InvestorType out of a name.
+    if (i.onlyIfKnown) return null;
 
     const slug = this.uniqueInvestorSlug(i.name, i.investorExternalId ?? i.externalId, index);
     const created = await this.prisma.investor.create({
@@ -330,7 +369,8 @@ export class IngestService {
 
     if (key) index.byKey.set(key, created.id);
     index.byName.set(norm, created.id);
-    return created.id;
+    index.types.set(created.id, i.type);
+    return { id: created.id, type: i.type };
   }
 
   /** Upsert a standalone investor firm: update its own provenance-keyed row,
@@ -399,6 +439,7 @@ export class IngestService {
     if (domain && !index.byDomain.has(domain)) index.byDomain.set(domain, created.id);
     const norm = normalizeInvestorName(firm.name);
     if (norm && !index.byName.has(norm)) index.byName.set(norm, created.id);
+    index.types.set(created.id, firm.type);
   }
 
   /** Fill blank fields on a matched investor. Never touches name, type, or any

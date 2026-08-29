@@ -1,6 +1,7 @@
 import type { Citation as CitationRow } from '@repo/api';
 
 import { Citation } from '@/components/Citation';
+import { Badge } from '@/components/ui';
 import type { FundingRound } from '@/lib/data';
 import { formatDate, formatUsd } from '@/lib/format';
 
@@ -41,8 +42,17 @@ export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
             </div>
 
             <div className="flex flex-col gap-0.5 max-md:col-start-2 max-md:flex-row max-md:items-baseline max-md:gap-2.5">
-              <span className="font-display text-base font-semibold tracking-tight text-ink">
-                {round.name}
+              <span className="flex items-center gap-2">
+                <span className="font-display text-base font-semibold tracking-tight text-ink">
+                  {round.name}
+                </span>
+                {/* Non-equity capital is a different kind of event, and the ladder
+                    must not let a federal grant read as a priced round. */}
+                {round.kind !== 'Equity' && (
+                  <Badge variant="box" mono>
+                    {round.kind}
+                  </Badge>
+                )}
               </span>
               <span className="font-mono text-xs text-graphite-500">
                 {formatDate(round.date)}
