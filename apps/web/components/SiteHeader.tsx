@@ -27,6 +27,9 @@ export async function SiteHeader() {
           <Link href="/investors" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
             Investors
           </Link>
+          <Link href="/funds" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
+            Funds
+          </Link>
           <Link href="/markets" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
             Markets
           </Link>

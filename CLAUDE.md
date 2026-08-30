@@ -7,7 +7,8 @@ Workspaces:
 - `apps/web` — Next.js 16 frontend (public site + `/admin` moderation portal).
 - `apps/api` — NestJS REST API (auth, moderation, public reads).
 - `apps/jobs` — NestJS worker that ingests public filings and bulk datasets (SEC
-  Form D on a cron; Form C, SBIR, Form S-1, Form ADV and Wikidata by hand).
+  Form D on a cron; Form C, SBIR, Form S-1, Form ADV + its Schedule D funds, and
+  Wikidata by hand).
 - `packages/api` (`@repo/api`) — shared domain types consumed by every app.
 - `packages/db` (`@repo/db`) — shared Prisma schema, migrations, seed, client.
 - `packages/{ui,eslint-config,jest-config,typescript-config}` — shared tooling.
@@ -136,6 +137,10 @@ types are re-exported from `@repo/api` (single source of truth). Company logos r
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle).
+- `/funds` — fund directory (URL-driven filters, same pattern as companies): search,
+  strategy filter, sort by size/vintage/name, `?manager=<slug>` scoping. **Sorted by
+  size by default** — AngelList-style SPV platforms report tens of thousands of
+  near-empty funds and would otherwise own every page. No per-fund page.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies);
   `/investors/[slug]` — investor profile: facts, fund assets, portfolio grid, or an
   empty state inviting a contribution.
@@ -168,8 +173,8 @@ Single source of truth for the schema. Holds `prisma/schema.prisma`, `prisma/mig
 `apps/api` and `apps/jobs` both import `@repo/db` (a thin `PrismaService` extends its
 `PrismaClient`). Prisma 7 is Rust-free + uses `@prisma/adapter-pg`; the datasource URL lives
 in `prisma.config.ts` (reads `DATABASE_URL`), not the schema. Money is `BigInt`. Contributable
-Company/FundingRound rows also have `externalSource`/`externalId` (`@@unique`) for idempotent
-ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
+Company/FundingRound rows — and the ingest-only `Fund` — also have
+`externalSource`/`externalId` (`@@unique`) for idempotent ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
 
 **Seeding is phased** (Flyway-style): `prisma/seeds/` holds ordered `Seed` phases
 (`001-admin-user` bootstrap, `002-demo-companies` demo, …) registered in `seeds/index.ts`;
@@ -189,6 +194,12 @@ whole-row attestation or a column name for a field-level one. `field` is **non-n
 because Postgres treats NULLs as distinct, which would defeat the
 `@@unique([sourceId, entityType, entityId, field])`. **`Revision`** is the append-only
 change log, anchored to a company so one timeline covers the company row and every child.
+
+`CitableType` is a **superset** of the reviewable types, not an alias for them: it is
+`Exclude<ReviewableType, 'proposal'> | 'fund'`. Funds are citable without being reviewable —
+they are ingest-only, so widening it gives them citations without dragging them into
+`countsByType` or `moderate()`. `RevisableType` (`apps/api/src/provenance/revision.util.ts`)
+stays narrow.
 
 - Revisions are written on **APPROVED transitions only** — `AdminService.applyProposal`
   captures the before-state *inside* the transaction (applying a diff destroys what it
@@ -222,12 +233,32 @@ holds (`onlyIfKnown`): an ownership table carries no type signal, and `InvestorT
 source structure, never from a name. Empty profiles still invite a contribution rather than being
 hidden.
 
+**Funds are a first-class entity too, and ingest-only.** `Fund` is one row per private fund
+with a **required** `managerId` FK to `Investor` — a fund whose manager cannot be resolved
+structurally is dropped, never written against a guess (measured: name-prefix guessing added
++0.8% coverage and its first hit was a false positive). Two SEC sources fill it and neither is
+sufficient alone: Form ADV Schedule D gives the manager link (via CRD), the name, the strategy
+and `grossAssetsUsd` — which is **NAV at filing time, not capital raised** — while pooled Form D
+filings give `vintageYear`/`targetUsd`/`closedUsd` but never name the manager. They are joined on
+the fund's normalized name (`normalizeFundName`, `ingest.service.ts`), and a name claimed by two
+managers matches **neither** — 191 of 94,399 ADV fund names collide and they are degenerate
+(`fund 5`, `94`). `targetUsd` is nullable because half to two thirds of pooled filings declare an
+"Indefinite" offering; `0` would be a claim the filing never made. `Fund` keeps a
+`moderationStatus` column so its read path matches its siblings, but nothing ever leaves it
+`PENDING`, it never enters the admin queue, and it writes **no revisions** (`Revision.companyId`
+is required and a fund has no company). There is **no per-fund page and no `slug`** — `/funds` is
+a directory, and minting ~95k slugs buys no reader anything.
+
 Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
 (`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
 — not Prisma enums. `InvestorType` covers `Venture`/`Growth`/`Angel`/`Corporate`/`Private equity`/
 `Accelerator`/`Hedge fund`/`Sovereign wealth` — the last three are derived from source *structure*
-(Wikidata P31 class, ADV fund-type columns), never guessed from the firm's name. Besides
-`Stage`/`CompanyStatus`/`InvestorType`/`ExitType`, there is a
+(Wikidata P31 class, ADV fund-type columns), never guessed from the firm's name.
+`FundStrategy`/`FUND_STRATEGIES` (`Venture capital`/`Private equity`/`Hedge fund`/`Real estate`/
+`Securitized asset`/`Liquidity`/`Other`) is read the same way — both SEC sources publish a fund
+type as a *structured field*, so the two publisher vocabularies are renamed into one canonical
+set, never inferred from a fund's name. Besides
+`Stage`/`CompanyStatus`/`InvestorType`/`ExitType`/`FundStrategy`, there is a
 **`Sector`/`SECTORS`** vocabulary (14 canonical sectors: the original `Artificial intelligence`/
 `Fintech`/`Healthcare`/`Climate`/`Enterprise SaaS` plus `Technology`, `Financial services`,
 `Energy`, `Real estate`, `Industrials`, `Consumer & retail`, `Transport`, `Media & telecom`,
@@ -256,17 +287,20 @@ The column is ingest-only: it defaults to `Equity` and no contribution form sets
 
 ## Jobs (apps/jobs)
 
-NestJS worker (port 3002, health endpoint) with six pluggable `IngestionSource`s
+NestJS worker (port 3002, health endpoint) with seven pluggable `IngestionSource`s
 (`src/sources/`, add OpenCorporates etc. later). A source contributes a
 `NormalizedRecord` whose `rounds[]` is **plural** — a Reg CF issuer runs several offerings and an
 SBIR grantee wins many awards, and one record per round would re-run the company upsert and let the
 last one clobber `totalRaisedUsd`:
 
 - **SEC_EDGAR** — Form D filings (free, official source for US private-placement
-  funding). Walks N days of daily indexes (`INGEST_DAYS`), **skips pooled
-  funds/SPVs** by default (`INGEST_SKIP_FUNDS`), keys D/A amendments to the
-  original filing's accession, and extracts executives/directors from
-  `relatedPersonsList`. Client sets `SEC_USER_AGENT`, throttles ≤10 req/s.
+  funding). Walks N days of daily indexes (`INGEST_DAYS`), **keeps pooled
+  funds/SPVs out of `Company`** by default (`INGEST_SKIP_FUNDS`), keys D/A
+  amendments to the original filing's accession, and extracts
+  executives/directors from `relatedPersonsList`. Pooled filings — ~63% of the
+  feed — are **routed to `Fund`** rather than dropped: they carry the vintage,
+  target and capital closed that Form ADV never asks for. Client sets
+  `SEC_USER_AGENT`, throttles ≤10 req/s.
 - **WIKIDATA** — enrichment for the ~6.4k notable companies carrying investor
   (P1951) statements: metadata (website/LinkedIn/HQ/sector), investors,
   founders/CEOs, acquisitions, exits. Throttled ~1 req/s SPARQL
@@ -278,6 +312,18 @@ last one clobber `totalRaisedUsd`:
   *monthly snapshot*, so `days` is ignored and it stays off the daily cron; pin a
   month with `ADV_SNAPSHOT` for a reproducible run. Contributes **no** company
   records — Form ADV never names portfolio companies.
+- **SEC_ADV_FUNDS** — the private funds themselves: ~95k rows across ~5.5k
+  managers from Form ADV **Schedule D 7.B.(1)**, with strategy and gross asset
+  value. That table is *not* in the monthly roster: it ships in the Form ADV
+  Part 1 data archives on the SEC FOIA page (700 MB + 429 MB, scraped for the
+  link, `ADV_ARCHIVE` pins a cut), read by **HTTP range request** —
+  `util/zip-range.ts` fetches the central directory from the archive tail, then
+  just the four members it needs (~180 MB) and inflates them through
+  `createCsvParser`. Member names must be anchored precisely: the archives ship
+  ~15 `*_7B1A*` sub-tables that sort *before* `*_7B1_`, and the IA base file is
+  split with only `_A` carrying `1E1` (the CRD). Schedule D has **no inception
+  date and no fund size** — those come from Form D. A frozen archive
+  (2011-11-05 → 2024-12-31), so it stays off the daily cron.
 - **SEC_FORM_C** — ~9k Regulation Crowdfunding issuers from the 41 quarterly DERA
   data sets (`FORM_C_MIN_QUARTER` bounds the walk), with website, HQ, incorporation
   year, headcount and signing officers. The offering identity is `FILE_NUMBER`, not
@@ -301,12 +347,14 @@ last one clobber `totalRaisedUsd`:
 
 The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
 SEC Form D only — every other source is a snapshot, run by hand). Backfills:
-`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_FORM_C|SBIR|SEC_S1`
+`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
-(ADV + Wikidata firms) and `make ingest-all` (everything). All ingested rows —
-companies, rounds, the child entities (people/investors/acquisitions/exits) and
-standalone investor firms — upsert keyed on `(externalSource, externalId)` and are
-**auto-APPROVED** (trusted sources). `IngestService` also **matches & enriches**: a
+(ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D) and `make ingest-all`
+(everything, in a **forced order**: managers → their funds → the Form D walk that
+dates and sizes them). All ingested rows — companies, rounds, the child entities
+(people/investors/acquisitions/exits), standalone investor firms and funds —
+upsert keyed on `(externalSource, externalId)` and are **auto-APPROVED** (trusted
+sources). `IngestService` also **matches & enriches**: a
 record whose company matches an existing row by domain or normalized name fills
 that row's blank fields instead of creating a duplicate (never overwriting
 name/stage/status or human-written copy). The same match-and-enrich runs for

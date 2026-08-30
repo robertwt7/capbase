@@ -11,6 +11,7 @@ empty Postgres with the commands below — locally or on production.
 | `SEC_EDGAR` | Companies + funding rounds + people, from Form D filings | Daily index; walk N days | 4.8k companies, 5.3k rounds |
 | `WIKIDATA` | Company metadata, investors, founders/CEOs, acquisitions, exits, **and** ~640 investor firms enumerated by `P31` class | Snapshot; changes slowly | 6.3k companies, ~1.5k investor edges |
 | `SEC_ADV` | **Investor firms only** (VC/PE), from the monthly Investment Adviser bulk files | Monthly full snapshot | ~7.0k firms |
+| `SEC_ADV_FUNDS` | **Private funds only** — one row per fund a firm reports on Form ADV Schedule D 7.B.(1), with its type and gross assets | Frozen archive cut; re-cut occasionally | ~95k funds across ~5.5k managers |
 | `SEC_FORM_C` | Regulation Crowdfunding issuers + their raises + signing officers, from the quarterly Form C data sets | 41 quarterly snapshots (2016Q2→) | 9.0k issuers, 4.3k rounds, 19.6k people |
 | `SBIR` | Deep-tech companies + their federal research awards (`kind: 'Grant'`), from the monthly SBIR.gov bulk file | Monthly full snapshot | 15.3k companies, 124k grant rounds ($56bn) |
 | `SEC_S1` | **Investor→company edges only**, from S-1 principal-stockholder tables | Document walk from `S1_START_DATE` | ~1,000 filings/year |
@@ -53,6 +54,41 @@ raised total sums `Company.totalRaisedUsd`, which SBIR never writes. Without tha
 adding SBIR would have moved the deal count from 9,880 to 134,359 and silently
 absorbed $56bn of federal money into "capital raised".
 
+**Funds come from two SEC sources and neither is sufficient alone.** Form ADV
+Schedule D 7.B.(1) names each private fund a filer reports and gives its type and
+gross asset value — but Form ADV never asks when a fund was raised or how much it
+targeted, so it supplies **no vintage and no fund size**. Pooled-fund Form D
+filings supply exactly those (`yearOfInc`, `totalOfferingAmount`,
+`totalAmountSold`) but **never name the manager** — a fund's Form D lists the GP's
+individuals, not the firm. The two are joined on the fund's own name, which works
+for about 35% of pooled filings in the years the ADV archive covers.
+
+Four consequences worth knowing before reading the numbers:
+
+- **The ADV archive is frozen at 2011-11-05 → 2024-12-31** and is re-cut only
+  occasionally. A fund that closed in 2025 or 2026 has a Form D but no ADV row, so
+  it is skipped until the SEC publishes the next cut. `ADV_ARCHIVE=` pins a cut for
+  a reproducible run; every run logs the label and both URLs it resolved.
+- **A pooled Form D with no matching ADV fund is dropped, not attached to a guessed
+  manager.** Prefix-matching the fund's name against the investor index was measured
+  at +0.8% coverage and its very first hit was a false positive (`Venture Capital
+  Portfolio TE 2023 LP` → an `Investor` row literally named "venture capital").
+  Every `Fund.managerId` is structural or the row does not exist.
+- **A fund name claimed by two different managers matches neither.** 191 of 94,399
+  normalized ADV fund names collide, and they are degenerate (`fund 5`, `fund b`,
+  `94`); since a Form D filing carries no manager to disambiguate with, an ambiguous
+  name must resolve to nothing.
+- **AngelList-style SPV platforms are tens of thousands of the rows.** "Platform
+  Advisor, LLC" (CRD 167700) alone reports 22,277 funds named `AL-<COMPANY>-FUND,
+  LLC`, some with gross assets of $101; Gaingels, Alumni Ventures, EquityBee and
+  Microangel are the same shape. They are genuinely reported private funds and a
+  size floor would discard real small funds too, so they are all ingested and
+  handled in presentation — fund lists sort by gross assets and paginate.
+
+Also note that `Gross Asset Value` is **NAV as of the filing, not capital raised**.
+It sits in its own column (`grossAssetsUsd`) precisely so it is never read as a
+fund size.
+
 ## Full rebuild, local
 
 ```bash
@@ -64,6 +100,12 @@ make ingest-all       # every source, then backfill sectors
 `make ingest-all` accepts `DAYS=` to size the SEC Form D window (default 3650,
 i.e. ten years). A ten-year Form D walk takes hours because of the 10 req/s SEC
 rate limit; use `DAYS=90` for a quick, representative dataset.
+
+**The order inside `ingest-all` is forced, not stylistic.** `SEC_ADV` runs first
+because a fund with no manager in the `Investor` table is dropped; `SEC_ADV_FUNDS`
+runs next because the Form D walk can only date and size a fund that has already
+been named. Running the Form D walk first still produces every company and round —
+it just contributes no vintages.
 
 **Turn revision recording off for a full rebuild.** Ingest normally writes a
 public `Revision` whenever it changes an already-published company field, so the
@@ -106,8 +148,9 @@ feature whose whole purpose is traceability.
 ```bash
 make deploy-all                # whole stack incl. Postgres (migrations run on api boot)
 make deploy-seed               # admin user
-make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR
-make ingest-investors-prod     # SEC_ADV + Wikidata investor firms
+make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_ADV        # managers first…
+make ingest-funds-prod                                     # …then their funds…
+make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR  # …then vintages/sizes
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=WIKIDATA
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_FORM_C
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SBIR
@@ -141,6 +184,17 @@ run can be pinned to an exact snapshot:
 ```bash
 ADV_SNAPSHOT=ia07012026 make ingest SOURCE=SEC_ADV LIMIT=1000000 DAYS=1
 ```
+
+The per-fund Schedule D detail is a different, larger publication — the Form ADV
+Part 1 data archives on the SEC's FOIA page — re-cut occasionally rather than
+monthly, with the range it covers in the filename. Pin one the same way:
+
+```bash
+ADV_ARCHIVE=20111105-20241231 make ingest SOURCE=SEC_ADV_FUNDS LIMIT=1000000 DAYS=1
+```
+
+Those archives are 700 MB and 429 MB; the source reads the four members it needs
+(~180 MB compressed) by HTTP range request, never downloading either archive.
 
 Every run logs the snapshot it resolved and the two URLs it fetched, so any
 past run can be reproduced from its logs:
@@ -230,6 +284,7 @@ Expected shape after a full rebuild (August 2026 sources):
 | `FundingRound` | ~134,000 (of which ~124,000 are `kind: 'Grant'`) |
 | `Investor` | ~7,400 |
 | `InvestorHolding` | ~1,150 plus whatever `SEC_S1` resolved |
+| `Fund` | ~95,000 across ~5,500 managers |
 
 ```sql
 -- Must be zero: SBIR contributes grants, never raised capital.
@@ -243,6 +298,12 @@ WHERE "externalSource" = 'SEC_FORM_C' AND "amountUsd" > 5250000;
 -- Must be zero: an S-1 edge only ever attaches to a firm we already knew.
 SELECT count(*) FROM "InvestorHolding"
 WHERE "externalSource" = 'SEC_S1' AND "investorId" IS NULL;
+
+-- Must be zero: "Indefinite" offerings record no target, never a $0 one.
+SELECT count(*) FROM "Fund" WHERE "targetUsd" = 0;
+
+-- How many funds carry a vintage — i.e. how many matched a pooled Form D.
+SELECT count(*) FILTER (WHERE "vintageYear" IS NOT NULL), count(*) FROM "Fund";
 ```
 
 ## Gotchas

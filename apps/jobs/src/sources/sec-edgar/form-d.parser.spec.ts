@@ -29,6 +29,8 @@ function relatedPerson(opts: {
 function formDXml(opts: {
   entityName?: string;
   industry?: string;
+  investmentFundType?: string;
+  totalOfferingAmount?: string;
   isAmendment?: boolean;
   previousAccession?: string;
   relatedPersons?: string[];
@@ -66,6 +68,14 @@ function formDXml(opts: {
   <offeringData>
     <industryGroup>
       <industryGroupType>${opts.industry ?? 'Other Technology'}</industryGroupType>
+      ${
+        opts.investmentFundType
+          ? `<investmentFundInfo>
+        <investmentFundType>${opts.investmentFundType}</investmentFundType>
+        <is40Act>false</is40Act>
+      </investmentFundInfo>`
+          : ''
+      }
     </industryGroup>
     <typeOfFiling>
       <newOrAmendment>
@@ -76,7 +86,7 @@ function formDXml(opts: {
       </dateOfFirstSale>
     </typeOfFiling>
     <offeringSalesAmounts>
-      <totalOfferingAmount>10000000</totalOfferingAmount>
+      <totalOfferingAmount>${opts.totalOfferingAmount ?? '10000000'}</totalOfferingAmount>
       <totalAmountSold>7500000</totalAmountSold>
       <totalRemaining>2500000</totalRemaining>
     </offeringSalesAmounts>
@@ -110,6 +120,56 @@ describe('parseFormD', () => {
       }),
     );
     expect(parsed?.isPooledFund).toBe(true);
+  });
+
+  describe('pooled fund fields', () => {
+    it('reads the structural investmentFundType off a pooled filing', () => {
+      const parsed = parseFormD(
+        formDXml({
+          entityName: 'Andreessen Horowitz Fund X-B, L.P.',
+          industry: 'Pooled Investment Fund',
+          investmentFundType: 'Venture Capital Fund',
+        }),
+      );
+      expect(parsed?.investmentFundType).toBe('Venture Capital Fund');
+    });
+
+    it('maps "Indefinite" to null and explicitly NOT to 0', () => {
+      // 51-67% of pooled filings declare an indefinite offering. num() strips
+      // non-digits, so the naive read would be a target size of zero dollars.
+      const parsed = parseFormD(
+        formDXml({ industry: 'Pooled Investment Fund', totalOfferingAmount: 'Indefinite' }),
+      );
+      expect(parsed?.totalOfferingUsd).toBeNull();
+      expect(parsed?.totalOfferingUsd).not.toBe(0);
+    });
+
+    it('reads a real target amount', () => {
+      expect(parseFormD(formDXml({ totalOfferingAmount: '250000000' }))?.totalOfferingUsd).toBe(
+        250_000_000,
+      );
+    });
+
+    it('reports no target rather than $0 when the amount is zero or blank', () => {
+      expect(parseFormD(formDXml({ totalOfferingAmount: '0' }))?.totalOfferingUsd).toBeNull();
+      expect(parseFormD(formDXml({ totalOfferingAmount: '' }))?.totalOfferingUsd).toBeNull();
+    });
+
+    it('leaves the fund type empty on a non-pooled filing', () => {
+      const parsed = parseFormD(formDXml({}));
+      expect(parsed?.isPooledFund).toBe(false);
+      expect(parsed?.investmentFundType).toBe('');
+    });
+
+    it('keeps amountSoldUsd on the company path unchanged', () => {
+      // The operating-company read still falls back to the offering amount;
+      // "Indefinite" yields 0 there, which the existing `||` chain already
+      // handled, so nothing about the Company path moves.
+      const parsed = parseFormD(
+        formDXml({ totalOfferingAmount: 'Indefinite' }),
+      );
+      expect(parsed?.amountSoldUsd).toBe(7_500_000);
+    });
   });
 
   it('extracts the previous accession from a D/A amendment', () => {

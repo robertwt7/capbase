@@ -21,6 +21,8 @@ import {
   type CompanySlugEntry,
   type DiversitySignal,
   type ExitEvent,
+  type FundListQuery,
+  type FundSummary,
   type FundingRound,
   type InvestorDetailResponse,
   type InvestorHolding,
@@ -53,6 +55,9 @@ export type {
   Investor,
   InvestorSummary,
   InvestorDetailResponse,
+  Fund,
+  FundSummary,
+  FundStrategy,
   MarketStat,
   MarketTotals,
 } from '@repo/api';
@@ -414,6 +419,47 @@ const fallbackInvestors: InvestorSummary[] = [
   },
 ];
 
+// Illustrative offline fallback for /funds (mirrors what the API returns).
+// Not verified — demo figures only.
+const fallbackFunds: FundSummary[] = [
+  {
+    id: 'fund-sequoia-growth-iii',
+    name: 'Sequoia Growth Fund III, L.P.',
+    strategy: 'Venture capital',
+    vintageYear: 2022,
+    targetUsd: null,
+    closedUsd: 2_850_000_000,
+    grossAssetsUsd: 3_100_000_000,
+    currency: 'USD',
+    hq: 'CA, United States',
+    manager: { slug: 'sequoia-capital', name: 'Sequoia Capital', domain: 'sequoiacap.com' },
+  },
+  {
+    id: 'fund-founders-fund-viii',
+    name: 'Founders Fund VIII, L.P.',
+    strategy: 'Venture capital',
+    vintageYear: 2023,
+    targetUsd: 1_800_000_000,
+    closedUsd: 1_800_000_000,
+    grossAssetsUsd: 1_650_000_000,
+    currency: 'USD',
+    hq: 'CA, United States',
+    manager: { slug: 'founders-fund', name: 'Founders Fund', domain: null },
+  },
+  {
+    id: 'fund-tiger-private-xv',
+    name: 'Tiger Global Private Investment Partners XV, L.P.',
+    strategy: 'Private equity',
+    vintageYear: 2021,
+    targetUsd: null,
+    closedUsd: null,
+    grossAssetsUsd: 980_000_000,
+    currency: 'USD',
+    hq: 'NY, United States',
+    manager: { slug: 'tiger-global', name: 'Tiger Global', domain: null },
+  },
+];
+
 /** Build a query string from defined params only. */
 function toSearchParams(query: object): string {
   const params = new URLSearchParams();
@@ -566,13 +612,52 @@ export async function getInvestors(
   }
 }
 
+/** Offline fallback: apply the list query to the mock array client-side. */
+function paginateFallbackFunds(query: FundListQuery): Paginated<FundSummary> {
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+  const needle = (query.q ?? '').trim().toLowerCase();
+  const list = fallbackFunds.filter((fund) => {
+    if (needle && !fund.name.toLowerCase().includes(needle)) return false;
+    if (query.strategy && fund.strategy !== query.strategy) return false;
+    if (query.manager && fund.manager.slug !== query.manager) return false;
+    return true;
+  });
+  // Same ordering rule as the API: nulls last, because an unreported size is
+  // not a small one.
+  const nullsLast = (a: number | null | undefined, b: number | null | undefined) =>
+    (b ?? -Infinity) - (a ?? -Infinity);
+  if (query.sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
+  else if (query.sort === 'vintage')
+    list.sort((a, b) => nullsLast(a.vintageYear, b.vintageYear) || a.name.localeCompare(b.name));
+  else list.sort((a, b) => nullsLast(a.grossAssetsUsd, b.grossAssetsUsd) || a.name.localeCompare(b.name));
+  return {
+    items: list.slice((page - 1) * pageSize, page * pageSize),
+    total: list.length,
+    page,
+    pageSize,
+  };
+}
+
+export async function getFunds(query: FundListQuery = {}): Promise<Paginated<FundSummary>> {
+  try {
+    return await apiFetch<Paginated<FundSummary>>(`/funds${toSearchParams(query)}`);
+  } catch (err) {
+    console.warn('[data] getFunds fell back to mock data:', err);
+    return paginateFallbackFunds(query);
+  }
+}
+
 /** One investor profile, or null when the slug is unknown (renders notFound). */
 export async function getInvestor(slug: string): Promise<InvestorDetailResponse | null> {
   try {
     return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`);
   } catch (err) {
     console.warn(`[data] getInvestor(${slug}) fell back to mock data:`, err);
-    return fallbackInvestors.find((i) => i.slug === slug) ?? null;
+    const match = fallbackInvestors.find((i) => i.slug === slug);
+    if (!match) return null;
+    const funds = fallbackFunds.filter((f) => f.manager.slug === slug);
+    return { ...match, funds, namedFundCount: funds.length, citations: [] };
   }
 }
 

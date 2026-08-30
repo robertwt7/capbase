@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { Citation } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Badge, Button, EmptyState, SectionHeader } from '@/components/ui';
 import { getInvestor } from '@/lib/data';
@@ -88,6 +89,72 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         <Metric label="Portfolio companies" value={formatCount(investor.portfolioCount)} />
         <Metric label="Sectors" value={investor.sectors.length ? String(investor.sectors.length) : '—'} />
         {investor.fundCount ? <Metric label="Private funds" value={formatCount(investor.fundCount)} /> : null}
+      </section>
+
+      <section className="border-t border-line py-8">
+        <SectionHeader
+          title="Funds"
+          note={
+            investor.fundCount
+              ? `${formatCount(investor.namedFundCount)} named of ${formatCount(investor.fundCount)} reported`
+              : investor.namedFundCount > 0
+                ? `${formatCount(investor.namedFundCount)} named`
+                : undefined
+          }
+          size="md"
+          className="mb-5 border-b-0 pb-0"
+        />
+        {investor.funds.length > 0 ? (
+          <>
+            <ul className="overflow-hidden rounded-[10px] border border-line bg-surface">
+              {investor.funds.map((fund) => (
+                <li
+                  key={fund.id}
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-5 border-b border-line px-4 py-3.5 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-y-1.5"
+                >
+                  <span className="min-w-0 font-display text-[15px] font-semibold tracking-tight text-ink">
+                    {fund.name}
+                    <Citation citations={investor.citations} entityId={fund.id} />
+                  </span>
+                  {fund.strategy ? (
+                    <Badge variant="pill" mono>
+                      {fund.strategy}
+                    </Badge>
+                  ) : (
+                    <span className="font-mono text-[13px] text-graphite-500">—</span>
+                  )}
+                  <span className="text-right font-mono text-sm text-ink max-[720px]:text-left">
+                    {fund.vintageYear ?? '—'}
+                  </span>
+                  {/* Never $0: a fund that reported no value shows "Undisclosed". */}
+                  <span className="text-right font-mono text-[15px] font-medium text-ink max-[720px]:text-left">
+                    {formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {/* The API returns a preview, so a shortfall IS the "more" signal —
+                no need to duplicate its page size here. */}
+            {investor.namedFundCount > investor.funds.length && (
+              <Link
+                href={`/funds?manager=${investor.slug}`}
+                className="mt-4 inline-block font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
+              >
+                All {formatCount(investor.namedFundCount)} funds →
+              </Link>
+            )}
+          </>
+        ) : (
+          // The firm told the SEC how many funds it runs; the public archive
+          // just has not named them yet (it stops at 2024-12-31).
+          <EmptyState>
+            <p>
+              {investor.fundCount
+                ? `${investor.name} reports ${formatCount(investor.fundCount)} private ${investor.fundCount === 1 ? 'fund' : 'funds'} to the SEC that the public filing archive does not yet name.`
+                : `No private funds recorded for ${investor.name} yet.`}
+            </p>
+          </EmptyState>
+        )}
       </section>
 
       <section className="border-t border-line py-8">

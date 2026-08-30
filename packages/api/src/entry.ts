@@ -1,5 +1,6 @@
 export * from './domain/company';
 export * from './domain/investor';
+export * from './domain/fund';
 export * from './domain/market';
 export * from './domain/pagination';
 export * from './domain/inputs';

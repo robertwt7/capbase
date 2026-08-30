@@ -95,6 +95,8 @@ class CitationBackfill {
   private companies = new Map<string, CompanyProvenance>();
   /** companyId → the accession of its most recent SEC Form D round. */
   private latestFiling = new Map<string, string>();
+  /** investorId → its CRD, to cite a fund's manager on Form ADV. */
+  private managerCrds = new Map<string, string>();
 
   private sources = 0;
   private citations = 0;
@@ -108,6 +110,7 @@ class CitationBackfill {
   async run(): Promise<void> {
     await this.loadCompanyProvenance();
     await this.loadLatestFilings();
+    await this.loadManagerCrds();
 
     await this.walkCompanies();
     await this.walkRounds();
@@ -118,6 +121,7 @@ class CitationBackfill {
     );
     await this.walkChildren('exit', (c) => this.prisma.exitEvent.findMany(childArgs(c)));
     await this.walkInvestorFirms();
+    await this.walkFunds();
 
     this.logger.log(
       `Backfill done: ${this.citations} citations across ${this.sources} sources ` +
@@ -139,6 +143,18 @@ class CitationBackfill {
       });
     }
     this.logger.log(`Loaded provenance for ${this.companies.size} companies`);
+  }
+
+  /**
+   * Investor id → CRD, for funds. A fund's Schedule D citation is its manager's
+   * IAPD page, and the fund row stores the manager as an FK, not a CRD.
+   */
+  private async loadManagerCrds(): Promise<void> {
+    const rows = await this.prisma.investor.findMany({
+      where: { crdNumber: { not: null } },
+      select: { id: true, crdNumber: true },
+    });
+    for (const row of rows) this.managerCrds.set(row.id, row.crdNumber!);
   }
 
   /**
@@ -463,6 +479,71 @@ class CitationBackfill {
     );
   }
 
+  /**
+   * Funds cite up to two documents, because a fund row's facts genuinely come
+   * from two places and neither supersedes the other:
+   *
+   *  - its own Form D filer history (`cikNumber`) attests the vintage, target
+   *    and capital closed;
+   *  - its manager's Form ADV record (`secFundId` + the manager's CRD) attests
+   *    the manager link and the gross asset value.
+   *
+   * A fund with neither identifier is skipped and counted, as everywhere else.
+   */
+  private async walkFunds(): Promise<void> {
+    await this.eachBatch(
+      'fund',
+      (cursor) =>
+        this.prisma.fund.findMany({
+          where: { OR: [{ cikNumber: { not: null } }, { secFundId: { not: null } }] },
+          select: {
+            id: true,
+            managerId: true,
+            cikNumber: true,
+            secFundId: true,
+            updatedAt: true,
+          },
+          orderBy: { id: 'asc' },
+          take: BATCH,
+          ...cursor,
+        }),
+      (row) => {
+        const targets: Target[] = [];
+        if (row.cikNumber) {
+          targets.push(
+            secTarget(
+              'fund',
+              row.id,
+              filerFormDUrl(row.cikNumber),
+              `SEC EDGAR Form D filings (CIK ${row.cikNumber})`,
+              row.cikNumber,
+              row.updatedAt,
+            ),
+          );
+        }
+        const crd = this.managerCrds.get(row.managerId);
+        if (row.secFundId && crd) {
+          targets.push({
+            ...secTarget(
+              'fund',
+              row.id,
+              advFirmUrl(crd),
+              `SEC Form ADV — CRD ${crd}`,
+              crd,
+              row.updatedAt,
+            ),
+            // The manager's IAPD page is shared by every one of that firm's
+            // funds and Sources deduplicate by URL, so the per-fund 805 id
+            // belongs on the citation — same reasoning as the SBIR contract
+            // number above.
+            note: `Private fund ${row.secFundId}`,
+          });
+        }
+        return targets.length > 0 ? targets : null;
+      },
+    );
+  }
+
   // --- machinery -----------------------------------------------------------
 
   /** Keyset-paginate one table, writing a citation for every row that yields a
@@ -470,7 +551,7 @@ class CitationBackfill {
   private async eachBatch<T extends { id: string }>(
     label: string,
     fetch: (cursor: Cursor) => Promise<T[]>,
-    target: (row: T) => Target | null,
+    target: (row: T) => Target | Target[] | null,
   ): Promise<void> {
     let cursor: string | undefined;
     let scanned = 0;
@@ -483,12 +564,14 @@ class CitationBackfill {
       scanned += rows.length;
 
       for (const row of rows) {
-        const t = target(row);
-        if (!t) {
+        // A row may cite more than one document: a fund's dates come from its
+        // Form D and its manager link from Form ADV, and both are real.
+        const targets = [target(row) ?? []].flat();
+        if (targets.length === 0) {
           this.skipped += 1;
           continue;
         }
-        await this.cite(t);
+        for (const t of targets) await this.cite(t);
         written += 1;
       }
     }

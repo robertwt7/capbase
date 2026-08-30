@@ -10,6 +10,7 @@ const STATIC_PATHS = [
   '',
   '/companies',
   '/investors',
+  '/funds',
   '/markets',
   '/about',
   '/faq',

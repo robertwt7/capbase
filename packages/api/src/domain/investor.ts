@@ -1,4 +1,6 @@
 import type { InvestorType } from './company';
+import type { Fund } from './fund';
+import type { Citation } from './provenance';
 
 /** A first-class investor firm. Exists independently of any portfolio edge, so
  *  firms whose investments we don't know yet still have an identity and a page. */
@@ -32,7 +34,16 @@ export interface InvestorSummary extends Investor {
 }
 
 /** Full investor profile: every approved portfolio company, not a sample. */
-export type InvestorDetailResponse = InvestorSummary;
+export interface InvestorDetailResponse extends InvestorSummary {
+  /** The largest funds we can name, by gross assets. */
+  funds: Fund[];
+  /** How many we can name — distinct from `fundCount`, which is what the firm
+   *  told the SEC. a16z reports 119 and we can name 92; showing both is the
+   *  honest thing. */
+  namedFundCount: number;
+  /** Citations attesting the fund rows above. */
+  citations: Citation[];
+}
 
 /** Lightweight listing entry for the web sitemap: every APPROVED investor. */
 export interface InvestorSlugEntry {

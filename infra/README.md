@@ -148,11 +148,16 @@ Same as Flow A steps 1 and 4, but instead of restoring a dump:
 
 ```sh
 make deploy-seed                # admin user (bootstrap phases only — no demo data)
-make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR
-make ingest-investors-prod      # SEC_ADV + Wikidata investor firms
+make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_ADV       # managers first…
+make ingest-funds-prod                                     # …then their funds…
+make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR  # …then vintages/sizes
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=WIKIDATA
 make backfill-sectors-prod
 ```
+
+The order is forced: a fund whose manager is not yet in the `Investor` table is
+dropped, and the Form D walk can only date and size a fund Schedule D has
+already named.
 
 `deploy-seed` refuses to run with a weak `ADMIN_PASSWORD` (unset, `admin12345`,
 or under 16 chars) — the seed phase's fallback is fine locally and fatal in

@@ -114,11 +114,12 @@ db-tunnel: ## [laptop] SSH-tunnel the VPS Postgres to localhost (VPS=user@host [
 	ssh -N -L $(TUNNEL_PORT):127.0.0.1:5432 $(VPS)
 
 # ---------------------------------------------------------------------------
-# Ingestion (SEC EDGAR Form D/S-1, Wikidata, SEC Form ADV, SEC Form C, SBIR awards)
+# Ingestion (SEC EDGAR Form D/S-1, Wikidata, SEC Form ADV + Schedule D funds,
+# SEC Form C, SBIR awards)
 # ---------------------------------------------------------------------------
 
 .PHONY: ingest
-ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_FORM_C|SBIR|SEC_S1)
+ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1)
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
@@ -139,12 +140,26 @@ ingest-investors-prod: ## [VPS] Rebuild the investor universe inside the deploye
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 100000 SEC_ADV
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 100000 WIKIDATA
 
+# Funds need their managers to exist, so SEC_ADV runs first — a fund whose
+# manager is not in the Investor table is dropped rather than guessed at.
+.PHONY: ingest-funds
+ingest-funds: ## Rebuild the private-fund universe (SEC Form ADV Schedule D 7.B.(1))
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV_FUNDS
+
+.PHONY: ingest-funds-prod
+ingest-funds-prod: ## [VPS] Rebuild the private-fund universe inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 1000000 SEC_ADV_FUNDS
+
 .PHONY: ingest-all
 ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See docs/DATA_REBUILD.md
+# Order is forced: funds need their managers (SEC_ADV) to exist, and the Form D
+# walk can only date and size a fund SEC_ADV_FUNDS has already named.
 	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV
+	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV_FUNDS
 	cd apps/jobs && node dist/backfill.js $(or $(DAYS),3650) 1000000 SEC_EDGAR
 	cd apps/jobs && node dist/backfill.js 1 1000000 WIKIDATA
-	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_ADV
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_FORM_C
 	cd apps/jobs && node dist/backfill.js 1 1000000 SBIR
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_S1

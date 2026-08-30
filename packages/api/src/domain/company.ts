@@ -97,6 +97,33 @@ export const INVESTOR_TYPES: readonly InvestorType[] = [
   'Sovereign wealth',
 ];
 
+/** What kind of capital a fund deploys. Both SEC sources publish a fund type as
+ *  a structured field, so this is read, never guessed:
+ *    Form ADV Schedule D 7.B.(1) `Fund Type` — Hedge Fund | Private Equity Fund |
+ *      Venture Capital Fund | Real Estate Fund | Securitized Asset Fund |
+ *      Liquidity Fund | Other Private Fund
+ *    Form D `investmentFundType` — Hedge Fund | Private Equity Fund |
+ *      Venture Capital Fund | Other Investment Fund
+ */
+export type FundStrategy =
+  | 'Venture capital'
+  | 'Private equity'
+  | 'Hedge fund'
+  | 'Real estate'
+  | 'Securitized asset'
+  | 'Liquidity'
+  | 'Other';
+
+export const FUND_STRATEGIES: readonly FundStrategy[] = [
+  'Venture capital',
+  'Private equity',
+  'Hedge fund',
+  'Real estate',
+  'Securitized asset',
+  'Liquidity',
+  'Other',
+];
+
 /** Capital type of a funding round. Grants are non-dilutive government awards
  *  (SBIR/STTR); they are capital events, not raises, so money aggregates skip
  *  them. Debt covers Reg CF debt offerings. */

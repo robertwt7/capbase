@@ -3,7 +3,9 @@ import { Module } from '@nestjs/common';
 import { INGESTION_SOURCES } from '../sources/ingestion-source';
 import { SbirClient } from '../sources/sbir/sbir.client';
 import { SbirSource } from '../sources/sbir/sbir.source';
+import { AdvArchiveClient } from '../sources/sec-adv/adv-archive.client';
 import { AdvClient } from '../sources/sec-adv/adv.client';
+import { SecAdvFundsSource } from '../sources/sec-adv/sec-adv-funds.source';
 import { SecAdvSource } from '../sources/sec-adv/sec-adv.source';
 import { EdgarClient } from '../sources/sec-edgar/edgar.client';
 import { SecEdgarSource } from '../sources/sec-edgar/sec-edgar.source';
@@ -24,6 +26,8 @@ import { IngestService } from './ingest.service';
     WikidataSource,
     AdvClient,
     SecAdvSource,
+    AdvArchiveClient,
+    SecAdvFundsSource,
     FormCClient,
     SecFormCSource,
     SbirClient,
@@ -39,14 +43,16 @@ import { IngestService } from './ingest.service';
         sec: SecEdgarSource,
         wikidata: WikidataSource,
         adv: SecAdvSource,
+        advFunds: SecAdvFundsSource,
         formC: SecFormCSource,
         sbir: SbirSource,
         s1: SecS1Source,
-      ) => [sec, wikidata, adv, formC, sbir, s1],
+      ) => [sec, wikidata, adv, advFunds, formC, sbir, s1],
       inject: [
         SecEdgarSource,
         WikidataSource,
         SecAdvSource,
+        SecAdvFundsSource,
         SecFormCSource,
         SbirSource,
         SecS1Source,

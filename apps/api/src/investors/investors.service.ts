@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
+  type Citation,
   type InvestorDetailResponse,
   type InvestorListQuery,
   type InvestorSlugEntry,
@@ -9,11 +10,21 @@ import {
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 
+import { toFund } from '../funds/fund.mapper';
 import { PrismaService } from '../prisma/prisma.service';
+import { toCitation } from '../provenance/citation.mapper';
 import { toInvestorSummary, type InvestorWithHoldings } from './investor.mapper';
 
 /** How many portfolio companies to include in each investor's preview sample. */
 const PORTFOLIO_SAMPLE = 6;
+
+/** How many named funds the profile shows before linking to /funds. The SPV
+ *  platforms report tens of thousands, so this is a preview, not a list. */
+export const FUND_PREVIEW = 12;
+
+/** Funds are ingest-only and auto-APPROVED; the filter matches every sibling
+ *  read so a later contribution path needs no change here. */
+const PUBLIC_FUNDS = { moderationStatus: 'APPROVED' } satisfies Prisma.FundWhereInput;
 
 /** Only approved holdings on approved companies count towards a portfolio. */
 const PUBLIC_HOLDINGS = {
@@ -70,7 +81,8 @@ export class InvestorsService {
     return { items: rows.map((r) => toInvestorSummary(r as InvestorWithHoldings)), total, page, pageSize };
   }
 
-  /** Full profile: the whole approved portfolio, not a sample. */
+  /** Full profile: the whole approved portfolio, not a sample, plus the largest
+   *  funds we can name and the citations attesting them. */
   async findOne(slug: string): Promise<InvestorDetailResponse> {
     const row = await this.prisma.investor.findFirst({
       where: { slug, moderationStatus: 'APPROVED' },
@@ -79,11 +91,38 @@ export class InvestorsService {
           where: PUBLIC_HOLDINGS,
           include: { company: COMPANY_SELECT },
         },
-        _count: { select: { holdings: { where: PUBLIC_HOLDINGS } } },
+        funds: {
+          where: PUBLIC_FUNDS,
+          orderBy: [{ grossAssetsUsd: { sort: 'desc', nulls: 'last' } }, { name: 'asc' }],
+          take: FUND_PREVIEW,
+        },
+        _count: {
+          select: { holdings: { where: PUBLIC_HOLDINGS }, funds: { where: PUBLIC_FUNDS } },
+        },
       },
     });
     if (!row) throw new NotFoundException(`Investor "${slug}" not found`);
-    return toInvestorSummary(row as InvestorWithHoldings);
+
+    const funds = row.funds.map(toFund);
+    return {
+      ...toInvestorSummary(row as unknown as InvestorWithHoldings),
+      funds,
+      // What we can name, as against `fundCount` — what the firm told the SEC.
+      namedFundCount: row._count.funds,
+      citations: await this.loadFundCitations(funds.map((f) => f.id)),
+    };
+  }
+
+  /** Citations attaching to the fund rows in the response, in one query over a
+   *  bounded id list — the same shape the company profile uses. */
+  private async loadFundCitations(ids: string[]): Promise<Citation[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.citation.findMany({
+      where: { entityType: 'fund', entityId: { in: ids } },
+      include: { source: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(toCitation);
   }
 
   /** Every approved investor slug, for the web sitemap. */

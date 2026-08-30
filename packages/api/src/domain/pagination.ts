@@ -1,7 +1,7 @@
 // Shared pagination contract for list endpoints. Directory reads are paginated
 // server-side; clients pass query params and receive one page plus the total.
 
-import type { CompanyStatus, InvestorType, Sector, Stage } from './company';
+import type { CompanyStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
 
 export interface Paginated<T> {
   items: T[];
@@ -37,6 +37,20 @@ export interface InvestorListQuery {
   q?: string;
   type?: InvestorType;
   sort?: InvestorSort;
+  page?: number;
+  pageSize?: number;
+}
+
+export type FundSort = 'size' | 'vintage' | 'name';
+
+export const FUND_SORTS: readonly FundSort[] = ['size', 'vintage', 'name'];
+
+export interface FundListQuery {
+  q?: string;
+  strategy?: FundStrategy;
+  /** Restrict to one manager (the investor profile's "see all funds" link). */
+  manager?: string; // investor slug
+  sort?: FundSort;
   page?: number;
   pageSize?: number;
 }

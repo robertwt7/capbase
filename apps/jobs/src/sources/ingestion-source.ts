@@ -1,6 +1,7 @@
 import type {
   CompanyStatus,
   ExitType,
+  FundStrategy,
   InvestorType,
   RoundKind,
   Sector,
@@ -148,6 +149,32 @@ export interface NormalizedInvestorFirm {
   foundedYear?: number | null;
 }
 
+/** One private fund contributed by a source. */
+export interface NormalizedFund {
+  /** Stable id of the fund within the source: the SEC private fund id
+   *  (805-…) for Form ADV, the fund's filer CIK for Form D. */
+  externalId: string;
+  name: string;
+  /**
+   * CRD of the managing firm, when the source knows it structurally.
+   *
+   * Form ADV does (Schedule D is filed BY the manager). Form D does not — its
+   * related persons are the GP's individuals, never the firm — so a Form D fund
+   * leaves this null and resolves its manager by matching an existing Fund row
+   * on name. A fund that resolves neither way is dropped, not guessed at.
+   */
+  managerCrd?: string | null;
+  strategy?: FundStrategy | null;
+  vintageYear?: number | null;
+  /** Null when the offering is indefinite; never 0 for "unknown". */
+  targetUsd?: number | null;
+  closedUsd?: number | null;
+  grossAssetsUsd?: number | null;
+  hq?: string | null;
+  secFundId?: string | null;
+  cikNumber?: string | null;
+}
+
 export const INGESTION_SOURCES = Symbol('INGESTION_SOURCES');
 
 export interface FetchOptions {
@@ -155,6 +182,10 @@ export interface FetchOptions {
   days: number;
   /** Max records to return. */
   limit: number;
+  /** CRDs of investor firms already in the database. A fund-producing source
+   *  uses it to discard filings by managers we don't hold, before they cost
+   *  any memory. Absent for sources that produce no funds. */
+  knownManagerCrds?: ReadonlySet<string>;
 }
 
 /** Contract every ingestion source implements. */
@@ -164,4 +195,15 @@ export interface IngestionSource {
   /** Sources that publish an investor universe implement this too. Keeping it on
    *  the same interface means one DI token and one INGEST_SOURCES env var. */
   fetchInvestors?(opts: FetchOptions): Promise<NormalizedInvestorFirm[]>;
+  /**
+   * Private funds this source contributes. Called once per run, immediately
+   * after `fetch`.
+   *
+   * SEC_ADV_FUNDS fetches independently. SEC_EDGAR instead *drains* funds its
+   * `fetch` collected while walking Form D filings — re-walking the index to
+   * find them again would double the rate-limited SEC traffic for filings we
+   * already downloaded and parsed. Draining is why the call order is fixed and
+   * why a second call returns nothing.
+   */
+  fetchFunds?(opts: FetchOptions): Promise<NormalizedFund[]>;
 }

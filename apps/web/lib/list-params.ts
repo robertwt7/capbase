@@ -5,11 +5,14 @@
 import {
   COMPANY_SORTS,
   COMPANY_STATUSES,
+  FUND_SORTS,
+  FUND_STRATEGIES,
   INVESTOR_SORTS,
   INVESTOR_TYPES,
   SECTORS,
   STAGES,
   type CompanyListQuery,
+  type FundListQuery,
   type InvestorListQuery,
 } from '@repo/api';
 
@@ -39,6 +42,18 @@ export function investorListQuery(sp: SearchParams): InvestorListQuery {
     q: sp.q?.trim() || undefined,
     type: pick(sp.type, INVESTOR_TYPES),
     sort: pick(sp.sort, INVESTOR_SORTS),
+    page: pageOf(sp.page),
+  };
+}
+
+export function fundListQuery(sp: SearchParams): FundListQuery {
+  return {
+    q: sp.q?.trim() || undefined,
+    strategy: pick(sp.strategy, FUND_STRATEGIES),
+    // A manager slug is free text, so it is passed through unvalidated — an
+    // unknown slug simply matches nothing rather than 400ing.
+    manager: sp.manager?.trim() || undefined,
+    sort: pick(sp.sort, FUND_SORTS),
     page: pageOf(sp.page),
   };
 }

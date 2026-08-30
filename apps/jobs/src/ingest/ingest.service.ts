@@ -8,6 +8,7 @@ import {
   INGESTION_SOURCES,
   type FetchOptions,
   type IngestionSource,
+  type NormalizedFund,
   type NormalizedInvestor,
   type NormalizedInvestorFirm,
   type NormalizedRecord,
@@ -19,6 +20,8 @@ export interface IngestResult {
   upserted: number;
   /** Investor firms upserted from sources that publish an investor universe. */
   investors: number;
+  /** Private funds written by sources that publish them. */
+  funds: number;
 }
 
 export interface RunOptions extends FetchOptions {
@@ -37,6 +40,30 @@ interface MatchIndex {
   /** Every slug in use, to mint unique ones without extra queries. */
   slugs: Set<string>;
 }
+
+/** Lookup tables for funds (one query per run). */
+interface FundIndex {
+  /** `${externalSource}:${externalId}` → fund id. */
+  byKey: Map<string, string>;
+  /**
+   * normalizeFundName(name) → fund id. Names claimed by more than one manager
+   * are REMOVED rather than first-wins: 191 of 94,399 ADV fund names collide
+   * (`fund 5`, `fund b`, `94`), and a Form D filing carries no manager to
+   * disambiguate with, so an ambiguous name must match nothing.
+   */
+  byName: Map<string, string>;
+  /** normalizeFundName(name) → manager id, used to detect the collisions above. */
+  managerByName: Map<string, string>;
+  /** Investor.crdNumber → investor id. Keyed on the column, not on
+   *  (externalSource, externalId): investors carry a CRD from enrichment
+   *  without carrying SEC_ADV provenance — Andreessen Horowitz among them. */
+  investorByCrd: Map<string, string>;
+}
+
+/** What upsertFund did with one incoming fund. `skipped` means no manager
+ *  could be resolved structurally, which is the rule that keeps every
+ *  Fund.managerId real. */
+type FundOutcome = 'written' | 'skipped';
 
 /** The same lookup tables for investor firms. */
 interface InvestorIndex {
@@ -92,14 +119,16 @@ export class IngestService {
       : this.sources;
     if (active.length === 0) {
       this.logger.warn(`No ingestion sources match [${(opts.sources ?? []).join(', ')}]`);
-      return { processed: 0, upserted: 0, investors: 0 };
+      return { processed: 0, upserted: 0, investors: 0, funds: 0 };
     }
 
     const index = await this.loadMatchIndex();
     const investorIndex = await this.loadInvestorIndex();
+    const fundIndex = await this.loadFundIndex();
     let processed = 0;
     let upserted = 0;
     let investors = 0;
+    let funds = 0;
 
     for (const source of active) {
       this.logger.log(`Ingesting from ${source.name} (days ${opts.days}, limit ${opts.limit})`);
@@ -124,28 +153,65 @@ export class IngestService {
 
       // Sources that publish a standalone investor universe (SEC Form ADV,
       // Wikidata's class-enumerated firms) contribute rows with no company edge.
-      if (!source.fetchInvestors) continue;
-      const firms = await source.fetchInvestors(opts);
-      let firmsDone = 0;
-      for (const firm of firms) {
+      if (source.fetchInvestors) {
+        const firms = await source.fetchInvestors(opts);
+        let firmsDone = 0;
+        for (const firm of firms) {
+          try {
+            await this.upsertInvestorFirm(firm, source.name, investorIndex);
+            investors += 1;
+          } catch (err) {
+            const e = err as { code?: string; meta?: unknown; message?: string };
+            this.logger.warn(
+              `Investor upsert failed for ${firm.externalId}: code=${e.code} meta=${JSON.stringify(e.meta)} ${e.message?.split('\n')[0]}`,
+            );
+          }
+          firmsDone += 1;
+          if (firmsDone % 1000 === 0) {
+            this.logger.log(`Upserted ${firmsDone}/${firms.length} ${source.name} investor firms`);
+          }
+        }
+      }
+
+      // Private funds. Last, so a source that also publishes its own managers
+      // has already created them — a fund whose manager cannot be resolved is
+      // dropped, never written against a guessed firm.
+      if (!source.fetchFunds) continue;
+      const fundOpts: FetchOptions = {
+        ...opts,
+        knownManagerCrds: new Set(fundIndex.investorByCrd.keys()),
+      };
+      const incoming = await source.fetchFunds(fundOpts);
+      let fundsDone = 0;
+      let written = 0;
+      let unmatched = 0;
+      for (const fund of incoming) {
         try {
-          await this.upsertInvestorFirm(firm, source.name, investorIndex);
-          investors += 1;
+          if ((await this.upsertFund(fund, source.name, fundIndex)) === 'written') written += 1;
+          else unmatched += 1;
         } catch (err) {
           const e = err as { code?: string; meta?: unknown; message?: string };
           this.logger.warn(
-            `Investor upsert failed for ${firm.externalId}: code=${e.code} meta=${JSON.stringify(e.meta)} ${e.message?.split('\n')[0]}`,
+            `Fund upsert failed for ${fund.externalId}: code=${e.code} meta=${JSON.stringify(e.meta)} ${e.message?.split('\n')[0]}`,
           );
         }
-        firmsDone += 1;
-        if (firmsDone % 1000 === 0) {
-          this.logger.log(`Upserted ${firmsDone}/${firms.length} ${source.name} investor firms`);
+        fundsDone += 1;
+        if (fundsDone % 1000 === 0) {
+          this.logger.log(`Upserted ${fundsDone}/${incoming.length} ${source.name} funds`);
         }
+      }
+      funds += written;
+      if (incoming.length > 0) {
+        this.logger.log(
+          `${source.name}: ${incoming.length} funds offered → ${written} written, ${unmatched} unmatched (no manager resolved)`,
+        );
       }
     }
 
-    this.logger.log(`Ingest complete: ${upserted}/${processed} upserted, ${investors} investor firms`);
-    return { processed, upserted, investors };
+    this.logger.log(
+      `Ingest complete: ${upserted}/${processed} upserted, ${investors} investor firms, ${funds} funds`,
+    );
+    return { processed, upserted, investors, funds };
   }
 
   private async loadMatchIndex(): Promise<MatchIndex> {
@@ -200,6 +266,137 @@ export class IngestService {
       index.slugs.add(i.slug);
     }
     return index;
+  }
+
+  private async loadFundIndex(): Promise<FundIndex> {
+    const index: FundIndex = {
+      byKey: new Map(),
+      byName: new Map(),
+      managerByName: new Map(),
+      investorByCrd: new Map(),
+    };
+
+    // Keyed on the crdNumber column rather than (externalSource, externalId):
+    // a firm created by Wikidata and later enriched by the ADV sweep carries a
+    // CRD without carrying SEC_ADV provenance, and its funds still belong to it.
+    const investors = await this.prisma.investor.findMany({
+      where: { crdNumber: { not: null } },
+      select: { id: true, crdNumber: true },
+    });
+    for (const i of investors) {
+      if (i.crdNumber && !index.investorByCrd.has(i.crdNumber)) {
+        index.investorByCrd.set(i.crdNumber, i.id);
+      }
+    }
+
+    const existing = await this.prisma.fund.findMany({
+      select: { id: true, name: true, managerId: true, externalSource: true, externalId: true },
+    });
+    for (const f of existing) {
+      if (f.externalSource && f.externalId) {
+        index.byKey.set(`${f.externalSource}:${f.externalId}`, f.id);
+      }
+      this.indexFundName(index, f.name, f.id, f.managerId);
+    }
+    return index;
+  }
+
+  /** Record a fund under its normalized name, dropping the entry entirely once
+   *  a second manager claims the same name — an ambiguous name must resolve to
+   *  no fund, because a Form D filing carries nothing to disambiguate with. */
+  private indexFundName(index: FundIndex, name: string, fundId: string, managerId: string): void {
+    const norm = normalizeFundName(name);
+    if (!norm) return;
+    const heldBy = index.managerByName.get(norm);
+    if (heldBy === undefined) {
+      index.managerByName.set(norm, managerId);
+      index.byName.set(norm, fundId);
+    } else if (heldBy !== managerId) {
+      index.byName.delete(norm);
+    }
+  }
+
+  /**
+   * Upsert one private fund: update our own provenance-keyed row, enrich a
+   * fund the other SEC source already named, or create a new one.
+   *
+   * Returns 'skipped' when no manager could be resolved. That is the whole
+   * point of the branch: Form ADV Schedule D is the only structural route from
+   * a fund to its manager, and guessing one from the fund's name mis-attributes
+   * (measured: +0.8% coverage, and the first hit was a false positive).
+   */
+  private async upsertFund(
+    fund: NormalizedFund,
+    source: string,
+    index: FundIndex,
+  ): Promise<FundOutcome> {
+    const facts = fundFacts(fund);
+    const key = `${source}:${fund.externalId}`;
+
+    const ownId = index.byKey.get(key);
+    if (ownId) {
+      // Our own row: the source is authoritative for the fields it publishes —
+      // but only those. Writing its blanks would erase what the *other* source
+      // contributed (an ADV re-run must not wipe a Form D vintage).
+      await this.prisma.fund.update({
+        where: { id: ownId },
+        data: { name: fund.name, ...present(facts) },
+      });
+      return 'written';
+    }
+
+    const norm = normalizeFundName(fund.name);
+    const crdManagerId = fund.managerCrd ? index.investorByCrd.get(fund.managerCrd) : undefined;
+    const matchId = norm ? index.byName.get(norm) : undefined;
+    if (norm && matchId) {
+      // A fund that knows its own manager may only merge into that manager's
+      // row. Only Form D funds — which have no manager at all — take a name
+      // match's manager on trust.
+      const matchedManagerId = index.managerByName.get(norm);
+      const sameManager = !fund.managerCrd || (!!crdManagerId && crdManagerId === matchedManagerId);
+      if (sameManager) {
+        await this.enrichFund(matchId, facts);
+        return 'written';
+      }
+    }
+
+    if (!crdManagerId) return 'skipped';
+
+    const created = await this.prisma.fund.create({
+      data: {
+        managerId: crdManagerId,
+        name: fund.name,
+        ...facts,
+        externalSource: source,
+        externalId: fund.externalId,
+        moderationStatus: 'APPROVED',
+      },
+      select: { id: true },
+    });
+
+    index.byKey.set(key, created.id);
+    this.indexFundName(index, fund.name, created.id, crdManagerId);
+    return 'written';
+  }
+
+  /** Fill blank columns on a fund the other source already named. Never
+   *  overwrites — the two SEC sources publish disjoint facts about one fund,
+   *  and a name match is not licence to replace a value already recorded. */
+  private async enrichFund(fundId: string, facts: Record<string, unknown>): Promise<void> {
+    const row = await this.prisma.fund.findUnique({ where: { id: fundId } });
+    if (!row) return;
+
+    const current = row as unknown as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    for (const [field, value] of Object.entries(facts)) {
+      if (value !== null && value !== undefined && (current[field] === null || current[field] === undefined)) {
+        data[field] = value;
+      }
+    }
+
+    if (Object.keys(data).length > 0) {
+      await this.prisma.fund.update({ where: { id: fundId }, data });
+    }
   }
 
   private async upsert(
@@ -709,3 +906,33 @@ export function normalizeInvestorName(name: string): string {
   return tokens.join(' ');
 }
 
+/**
+ * Fund-name key for matching an ADV Schedule D fund to a Form D filing.
+ *
+ * The investor rules are the right ones today — strip trailing legal forms
+ * only, keep every meaning-bearing word — and they were what produced the
+ * measured 35.4% join rate. Kept as its own function so fund-specific rules
+ * (series suffixes, vintage numerals) can be added without touching firm
+ * matching, where the same change would be wrong.
+ */
+export const normalizeFundName = normalizeInvestorName;
+
+/** The columns a source publishes about a fund, with money as BigInt. Nulls are
+ *  meaningful here: they say "this source does not report that fact". */
+function fundFacts(fund: NormalizedFund): Record<string, unknown> {
+  return {
+    strategy: fund.strategy ?? null,
+    vintageYear: fund.vintageYear ?? null,
+    targetUsd: fund.targetUsd != null ? BigInt(Math.round(fund.targetUsd)) : null,
+    closedUsd: fund.closedUsd != null ? BigInt(Math.round(fund.closedUsd)) : null,
+    grossAssetsUsd: fund.grossAssetsUsd != null ? BigInt(Math.round(fund.grossAssetsUsd)) : null,
+    hq: fund.hq ?? null,
+    secFundId: fund.secFundId ?? null,
+    cikNumber: fund.cikNumber ?? null,
+  };
+}
+
+/** Drop the nulls, so an update writes only what the source actually reported. */
+function present(facts: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(facts).filter(([, v]) => v !== null && v !== undefined));
+}

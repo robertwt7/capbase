@@ -26,7 +26,23 @@ function investorRow(over: Record<string, unknown> = {}) {
     assetsUsd: null,
     foundedYear: 1972,
     holdings: [],
-    _count: { holdings: 0 },
+    funds: [],
+    _count: { holdings: 0, funds: 0 },
+    ...over,
+  };
+}
+
+function fundRow(over: Record<string, unknown> = {}) {
+  return {
+    id: 'f-1',
+    name: 'Sequoia Growth Fund III, L.P.',
+    strategy: 'Venture capital',
+    vintageYear: 2022,
+    targetUsd: null,
+    closedUsd: null,
+    grossAssetsUsd: 3_030_000_000n,
+    currency: 'USD',
+    hq: 'CA, United States',
     ...over,
   };
 }
@@ -37,15 +53,18 @@ describe('InvestorsService', () => {
   let count: jest.Mock;
   let findFirst: jest.Mock;
   let transaction: jest.Mock;
+  let citationFindMany: jest.Mock;
 
   beforeEach(() => {
     findMany = jest.fn();
     count = jest.fn();
     findFirst = jest.fn();
+    citationFindMany = jest.fn(async () => []);
     // $transaction resolves the array of queries it is handed.
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     const prisma = {
       investor: { findMany, count, findFirst },
+      citation: { findMany: citationFindMany },
       $transaction: transaction,
     } as unknown as PrismaService;
     service = new InvestorsService(prisma);
@@ -161,7 +180,7 @@ describe('InvestorsService', () => {
       findFirst.mockResolvedValue(
         investorRow({
           holdings: [{ company: company('helia', 'Helia', 'Fintech') }],
-          _count: { holdings: 1 },
+          _count: { holdings: 1, funds: 0 },
           fundCount: 119,
           assetsUsd: 106_486_870_258n,
         }),
@@ -177,6 +196,54 @@ describe('InvestorsService', () => {
       expect(findFirst.mock.calls[0]![0]).toMatchObject({
         where: { slug: 'sequoia-capital', moderationStatus: 'APPROVED' },
       });
+    });
+
+    it('returns the named funds and both counts, which are different facts', async () => {
+      findFirst.mockResolvedValue(
+        investorRow({
+          fundCount: 119,
+          funds: [fundRow()],
+          _count: { holdings: 0, funds: 92 },
+        }),
+      );
+
+      const investor = await service.findOne('sequoia-capital');
+
+      // What the firm told the SEC vs what the public archive lets us name.
+      expect(investor.fundCount).toBe(119);
+      expect(investor.namedFundCount).toBe(92);
+      expect(investor.funds).toHaveLength(1);
+      expect(investor.funds[0]).toMatchObject({
+        id: 'f-1',
+        strategy: 'Venture capital',
+        vintageYear: 2022,
+        grossAssetsUsd: 3_030_000_000,
+        targetUsd: null,
+      });
+      // Preview only — the SPV platforms report tens of thousands.
+      expect(findFirst.mock.calls[0]![0]).toMatchObject({
+        include: { funds: { where: { moderationStatus: 'APPROVED' }, take: 12 } },
+      });
+    });
+
+    it('loads citations only for the fund rows it is returning', async () => {
+      findFirst.mockResolvedValue(
+        investorRow({ funds: [fundRow()], _count: { holdings: 0, funds: 1 } }),
+      );
+      await service.findOne('sequoia-capital');
+
+      expect(citationFindMany.mock.calls[0]![0]).toMatchObject({
+        where: { entityType: 'fund', entityId: { in: ['f-1'] } },
+      });
+    });
+
+    it('does not query citations when the firm has no named funds', async () => {
+      findFirst.mockResolvedValue(investorRow());
+      const investor = await service.findOne('sequoia-capital');
+
+      expect(investor.funds).toEqual([]);
+      expect(investor.citations).toEqual([]);
+      expect(citationFindMany).not.toHaveBeenCalled();
     });
 
     it('404s for an unknown or unapproved slug', async () => {

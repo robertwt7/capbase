@@ -20,6 +20,13 @@ export interface ParsedFormD {
   dateOfFirstSale: string | null;
   /** True for pooled-fund/SPV filers (industryGroupType = "Pooled Investment Fund"). */
   isPooledFund: boolean;
+  /** Fund class from `investmentFundInfo.investmentFundType`, present only on
+   *  pooled filings: Venture Capital Fund | Private Equity Fund | Hedge Fund |
+   *  Other Investment Fund. A structured field, not a guess from the name. */
+  investmentFundType: string;
+  /** Target raise. NULL — not 0 — when the filing says "Indefinite", which
+   *  51–67% of pooled filings do. Zero would read as "they targeted nothing". */
+  totalOfferingUsd: number | null;
   /** True for D/A amendment filings. */
   isAmendment: boolean;
   /** Accession of the filing this D/A amends, or null. */
@@ -51,11 +58,13 @@ export function parseFormD(xml: string): ParsedFormD | null {
 
   const amounts = offering.offeringSalesAmounts ?? {};
   const amountSoldUsd = num(amounts.totalAmountSold) || num(amounts.totalOfferingAmount);
+  const totalOfferingUsd = offeringAmount(amounts.totalOfferingAmount);
 
   const sale = offering.typeOfFiling?.dateOfFirstSale ?? offering.dateOfFirstSale;
   const dateOfFirstSale = isoDate(str(sale?.value));
 
   const isPooledFund = industry === 'Pooled Investment Fund';
+  const investmentFundType = str(offering.industryGroup?.investmentFundInfo?.investmentFundType);
   const newOrAmendment = offering.typeOfFiling?.newOrAmendment ?? {};
   const isAmendment =
     newOrAmendment.isAmendment === true || str(newOrAmendment.isAmendment) === 'true';
@@ -72,6 +81,8 @@ export function parseFormD(xml: string): ParsedFormD | null {
     amountSoldUsd,
     dateOfFirstSale,
     isPooledFund,
+    investmentFundType,
+    totalOfferingUsd,
     isAmendment,
     previousAccession,
     people,
@@ -107,6 +118,21 @@ function toArray<T>(v: unknown): T[] {
 
 function str(v: unknown): string {
   return v === undefined || v === null ? '' : String(v).trim();
+}
+
+/**
+ * `totalOfferingAmount` is either a number or the literal string "Indefinite".
+ *
+ * `num()` strips non-digits, so "Indefinite" would silently become 0 — a target
+ * size of zero dollars, which is a claim the filing never made. Null is the
+ * honest reading, and it is the common one: half to two thirds of pooled
+ * filings declare an indefinite offering.
+ */
+function offeringAmount(v: unknown): number | null {
+  const raw = str(v);
+  if (!raw || /indefinite/i.test(raw)) return null;
+  const n = num(raw);
+  return n > 0 ? n : null;
 }
 
 function num(v: unknown): number {

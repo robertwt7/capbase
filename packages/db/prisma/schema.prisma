@@ -48,6 +48,7 @@ model User {
   savedCompanies SavedCompany[]
   citations      Citation[]
   revisions      Revision[]
+  funds          Fund[]
 }
 
 /// A primary document a fact came from. Deduplicated by URL, so many citations
@@ -303,12 +304,69 @@ model Investor {
 
   holdings       InvestorHolding[]
   roundPositions RoundInvestor[]
+  funds          Fund[]
 
   @@unique([externalSource, externalId])
   @@index([moderationStatus])
   @@index([moderationStatus, type])
   @@index([moderationStatus, name])
   @@index([domain])
+}
+
+/// One private fund managed by an Investor. Unlike Investor.fundCount — a
+/// scalar rollup Form ADV reports at firm level — this names the fund, and
+/// where a Form D filing matched, dates and sizes it.
+model Fund {
+  id   String @id @default(cuid())
+  name String
+  /// Manager. Required: a fund with no resolvable manager is not published —
+  /// the ADV Schedule D join is the only structural route to one, and guessing
+  /// it from the fund's name mis-attributes.
+  managerId String
+  manager   Investor @relation(fields: [managerId], references: [id], onDelete: Cascade)
+
+  /// One of FUND_STRATEGIES. Null when neither source typed it.
+  strategy String?
+  /// Year the fund entity was formed (Form D `yearOfInc`) — the closest thing
+  /// the public record has to a vintage. Form ADV discloses no inception date.
+  vintageYear Int?
+  /// Target raise (Form D `totalOfferingAmount`). Null when the filing says
+  /// "Indefinite", which it does for 51–67% of pooled filings.
+  targetUsd BigInt?
+  /// Capital sold to date (Form D `totalAmountSold`).
+  closedUsd BigInt?
+  /// Gross asset value as last reported on Form ADV Schedule D 7.B.(1). NAV at
+  /// filing time, NOT capital raised — the two are different facts.
+  grossAssetsUsd BigInt?
+  /// ISO 4217. Both sources report USD only; the column exists so a non-US
+  /// source later cannot silently be read as dollars.
+  currency String  @default("USD")
+  hq       String?
+
+  /// SEC private fund identification number (805-XXXXXXXXXX), from Schedule D.
+  secFundId String?
+  /// The fund's own filer CIK, when a Form D filing matched it.
+  cikNumber String?
+
+  // Provenance for the row's creator (SEC_ADV_FUNDS | SEC_EDGAR). The *other*
+  // source's identifier survives in secFundId / cikNumber, so both documents
+  // stay citable however the row was created.
+  externalSource String?
+  externalId     String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([externalSource, externalId])
+  @@index([managerId])
+  @@index([moderationStatus])
+  @@index([moderationStatus, strategy])
+  @@index([moderationStatus, vintageYear])
+  @@index([moderationStatus, grossAssetsUsd])
+  @@index([moderationStatus, name])
 }
 
 model InvestorHolding {

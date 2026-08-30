@@ -1,10 +1,11 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import type { ConfigService } from '@nestjs/config';
 
-import { IngestService, normalizeInvestorName, normalizeName } from './ingest.service';
+import { IngestService, normalizeFundName, normalizeInvestorName, normalizeName } from './ingest.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   IngestionSource,
+  NormalizedFund,
   NormalizedInvestorFirm,
   NormalizedRecord,
 } from '../sources/ingestion-source';
@@ -58,12 +59,47 @@ function investorRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A Fund row as loadFundIndex and the enrich path read it back. */
+function fundRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'f-1',
+    name: 'Big Fund I, L.P.',
+    managerId: 'i-1',
+    strategy: null,
+    vintageYear: null,
+    targetUsd: null,
+    closedUsd: null,
+    grossAssetsUsd: null,
+    currency: 'USD',
+    hq: null,
+    secFundId: null,
+    cikNumber: null,
+    externalSource: null,
+    externalId: null,
+    ...overrides,
+  };
+}
+
 function mockPrisma(
   existing: ReturnType<typeof companyRow>[] = [],
   existingInvestors: ReturnType<typeof investorRow>[] = [],
+  existingFunds: ReturnType<typeof fundRow>[] = [],
 ) {
   let created = 0;
+  let fundsCreated = 0;
   return {
+    fund: {
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingFunds),
+      findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
+        async (args) => existingFunds.find((f) => f.id === args.where.id) ?? null,
+      ),
+      update: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(async (args) => ({
+        id: args.where.id,
+      })),
+      create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<{ id: string }>>(
+        async () => ({ id: `f-new-${++fundsCreated}` }),
+      ),
+    },
     investor: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingInvestors),
       findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
@@ -129,11 +165,13 @@ function revisionsFrom(prisma: ReturnType<typeof mockPrisma>): Record<string, un
 function stubSource(
   records: NormalizedRecord[],
   firms?: NormalizedInvestorFirm[],
+  funds?: NormalizedFund[],
 ): IngestionSource {
   return {
     name: 'STUB',
     fetch: async () => records,
     ...(firms ? { fetchInvestors: async () => firms } : {}),
+    ...(funds ? { fetchFunds: async () => funds } : {}),
   };
 }
 
@@ -368,7 +406,7 @@ describe('IngestService.run', () => {
       config(),
     );
     const result = await service.run({ ...RUN, sources: ['OTHER'] });
-    expect(result).toEqual({ processed: 0, upserted: 0, investors: 0 });
+    expect(result).toEqual({ processed: 0, upserted: 0, investors: 0, funds: 0 });
     expect(prisma.company.create).not.toHaveBeenCalled();
   });
 });
@@ -877,6 +915,193 @@ describe('IngestService investor firms', () => {
     ]).run(RUN);
 
     expect(result.investors).toBe(1);
+  });
+});
+
+describe('IngestService funds', () => {
+  function serviceWithFunds(
+    prisma: ReturnType<typeof mockPrisma>,
+    funds: NormalizedFund[],
+  ) {
+    return new IngestService(
+      prisma as unknown as PrismaService,
+      [stubSource([], undefined, funds)],
+      config(),
+    );
+  }
+
+  function normalizedFund(overrides: Partial<NormalizedFund> = {}): NormalizedFund {
+    return {
+      externalId: '805-1534393064',
+      name: 'Big Fund I, L.P.',
+      managerCrd: '160489',
+      strategy: 'Venture capital',
+      grossAssetsUsd: 3_030_000_000,
+      secFundId: '805-1534393064',
+      ...overrides,
+    };
+  }
+
+  const manager = (overrides: Record<string, unknown> = {}) =>
+    investorRow({ id: 'i-a16z', slug: 'a16z', name: 'Andreessen Horowitz', crdNumber: '160489', ...overrides });
+
+  it('creates a fund against the manager resolved from its CRD', async () => {
+    const prisma = mockPrisma([], [manager()]);
+    const result = await serviceWithFunds(prisma, [normalizedFund()]).run(RUN);
+
+    expect(result.funds).toBe(1);
+    expect(prisma.fund.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fund.create.mock.calls[0]![0].data).toMatchObject({
+      managerId: 'i-a16z',
+      name: 'Big Fund I, L.P.',
+      strategy: 'Venture capital',
+      grossAssetsUsd: 3_030_000_000n,
+      secFundId: '805-1534393064',
+      externalSource: 'STUB',
+      externalId: '805-1534393064',
+      moderationStatus: 'APPROVED',
+    });
+  });
+
+  it('resolves the manager by crdNumber, not by ADV provenance', async () => {
+    // Andreessen Horowitz's row was created by Wikidata and later enriched with
+    // a CRD; it carries no SEC_ADV (externalSource, externalId) at all.
+    const prisma = mockPrisma([], [manager({ externalSource: 'WIKIDATA', externalId: 'Q4756075' })]);
+    await serviceWithFunds(prisma, [normalizedFund()]).run(RUN);
+
+    expect(prisma.fund.create.mock.calls[0]![0].data).toMatchObject({ managerId: 'i-a16z' });
+  });
+
+  it('skips a fund whose manager cannot be resolved rather than writing a null one', async () => {
+    const prisma = mockPrisma([], []);
+    const result = await serviceWithFunds(prisma, [normalizedFund()]).run(RUN);
+
+    expect(result.funds).toBe(0);
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+    expect(prisma.fund.update).not.toHaveBeenCalled();
+  });
+
+  it('skips a Form D fund with no CRD and no name match', async () => {
+    const prisma = mockPrisma([], [manager()]);
+    const result = await serviceWithFunds(prisma, [
+      normalizedFund({
+        externalId: '0001234567',
+        name: 'Unknown Ventures Fund III, L.P.',
+        managerCrd: null,
+        strategy: 'Venture capital',
+        vintageYear: 2023,
+        secFundId: null,
+        grossAssetsUsd: null,
+      }),
+    ]).run(RUN);
+
+    expect(result.funds).toBe(0);
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+  });
+
+  it('updates its own provenance-keyed row and never writes the source blanks', async () => {
+    const prisma = mockPrisma(
+      [],
+      [manager()],
+      [fundRow({ id: 'f-adv', externalSource: 'STUB', externalId: '805-1534393064', vintageYear: 2019 })],
+    );
+    await serviceWithFunds(prisma, [normalizedFund()]).run(RUN);
+
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+    const data = prisma.fund.update.mock.calls[0]![0].data as Record<string, unknown>;
+    expect(data).toMatchObject({ name: 'Big Fund I, L.P.', grossAssetsUsd: 3_030_000_000n });
+    // The Form D vintage already on the row survives an ADV re-run.
+    expect(data).not.toHaveProperty('vintageYear');
+  });
+
+  it('enriches a name-matched fund, filling only blank columns', async () => {
+    const prisma = mockPrisma(
+      [],
+      [manager()],
+      [fundRow({ id: 'f-adv', managerId: 'i-a16z', strategy: 'Private equity' })],
+    );
+    // A Form D filing for the same fund: no CRD, but vintage/target/closed.
+    const result = await serviceWithFunds(prisma, [
+      normalizedFund({
+        externalId: '0001234567',
+        name: 'BIG FUND I, L.P.',
+        managerCrd: null,
+        strategy: 'Venture capital',
+        vintageYear: 2021,
+        targetUsd: null,
+        closedUsd: 250_000_000,
+        grossAssetsUsd: null,
+        secFundId: null,
+        cikNumber: '0001234567',
+      }),
+    ]).run(RUN);
+
+    expect(result.funds).toBe(1);
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+    const data = prisma.fund.update.mock.calls[0]![0].data as Record<string, unknown>;
+    expect(data).toMatchObject({ vintageYear: 2021, closedUsd: 250_000_000n, cikNumber: '0001234567' });
+    // The strategy already recorded is not replaced by a name match.
+    expect(data).not.toHaveProperty('strategy');
+  });
+
+  it('creates rather than merges when an ADV fund matches another manager\'s fund of the same name', async () => {
+    const prisma = mockPrisma(
+      [],
+      [manager(), investorRow({ id: 'i-other', slug: 'other', name: 'Other Capital', crdNumber: '999999' })],
+      [fundRow({ id: 'f-other', managerId: 'i-other', name: 'Big Fund I, L.P.' })],
+    );
+    await serviceWithFunds(prisma, [normalizedFund()]).run(RUN);
+
+    expect(prisma.fund.update).not.toHaveBeenCalled();
+    expect(prisma.fund.create.mock.calls[0]![0].data).toMatchObject({ managerId: 'i-a16z' });
+  });
+
+  it('matches neither fund when two managers claim the same name', async () => {
+    const prisma = mockPrisma(
+      [],
+      [manager()],
+      [
+        fundRow({ id: 'f-a', managerId: 'i-a', name: 'Fund 5' }),
+        fundRow({ id: 'f-b', managerId: 'i-b', name: 'Fund 5' }),
+      ],
+    );
+    // A Form D filing named "Fund 5" has no manager of its own, and the name is
+    // ambiguous — so it resolves to nothing and is skipped, not mis-attributed.
+    const result = await serviceWithFunds(prisma, [
+      normalizedFund({ externalId: '0009', name: 'FUND 5', managerCrd: null, secFundId: null, grossAssetsUsd: null }),
+    ]).run(RUN);
+
+    expect(result.funds).toBe(0);
+    expect(prisma.fund.update).not.toHaveBeenCalled();
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+  });
+
+  it('passes the known manager CRDs to a fund-producing source', async () => {
+    const prisma = mockPrisma([], [manager()]);
+    let seen: ReadonlySet<string> | undefined;
+    const source: IngestionSource = {
+      name: 'STUB',
+      fetch: async () => [],
+      fetchFunds: async (opts) => {
+        seen = opts.knownManagerCrds;
+        return [];
+      },
+    };
+    await new IngestService(prisma as unknown as PrismaService, [source], config()).run(RUN);
+
+    expect([...(seen ?? [])]).toEqual(['160489']);
+  });
+});
+
+describe('normalizeFundName', () => {
+  it('matches an ALL-CAPS ADV fund name to the Form D filing of the same fund', () => {
+    expect(normalizeFundName('ANDREESSEN HOROWITZ FUND X-B, L.P.')).toBe(
+      normalizeFundName('Andreessen Horowitz Fund X-B, L.P.'),
+    );
+  });
+
+  it('keeps the roman numerals that distinguish vintages apart', () => {
+    expect(normalizeFundName('Big Fund II, L.P.')).not.toBe(normalizeFundName('Big Fund III, L.P.'));
   });
 });
 
