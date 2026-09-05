@@ -2,6 +2,8 @@
 // the EDGAR client (which fetches them) and the citation backfill (which cites
 // them), so the two can never drift.
 
+import { linkedIdentifierUrl } from '@repo/api';
+
 export const SEC_ARCHIVES = 'https://www.sec.gov/Archives';
 
 /** A filing's structured Form D document, from the filer's CIK and the
@@ -34,5 +36,5 @@ export function formCOfferingUrl(fileNumber: string): string {
  *  IAPD is a client-rendered app, so fetching this URL returns the app shell —
  *  it resolves in a browser, which is where a citation link is followed. */
 export function advFirmUrl(crd: string): string {
-  return `https://adviserinfo.sec.gov/firm/summary/${crd}`;
+  return linkedIdentifierUrl('CRD', crd);
 }

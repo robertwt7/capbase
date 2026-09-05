@@ -8,6 +8,9 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** The parsed error body, when the API sent one. A 301 carries the
+     *  survivor's slug here rather than in a Location header — see apiFetch. */
+    public readonly body?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -27,7 +30,16 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   if (!res.ok) {
-    throw new ApiError(res.status, `API ${path} responded ${res.status}`);
+    // Guarded: an error body is not guaranteed to be JSON (a proxy's HTML 502
+    // page, an empty response), and failing to parse it must not replace the
+    // real status with a syntax error.
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = undefined;
+    }
+    throw new ApiError(res.status, `API ${path} responded ${res.status}`, body);
   }
   return (await res.json()) as T;
 }

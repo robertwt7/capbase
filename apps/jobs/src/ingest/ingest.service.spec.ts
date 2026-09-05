@@ -31,6 +31,7 @@ function companyRow(overrides: Record<string, unknown> = {}) {
     totalRaisedUsd: 7_500_000n,
     externalSource: 'SEC_EDGAR',
     externalId: '0001',
+    mergedIntoId: null,
     ...overrides,
   };
 }
@@ -55,6 +56,7 @@ function investorRow(overrides: Record<string, unknown> = {}) {
     foundedYear: null,
     externalSource: null,
     externalId: null,
+    mergedIntoId: null,
     ...overrides,
   };
 }
@@ -80,14 +82,45 @@ function fundRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+interface IdentifierRow {
+  scheme: string;
+  value: string;
+  entityType: string;
+  entityId: string;
+  source: string;
+}
+
+interface CandidateRow {
+  id: string;
+  entityType: string;
+  leftId: string;
+  rightId: string;
+  signal: string;
+  evidence: string;
+  status: string;
+}
+
+type IdentifierWhere = {
+  where: { scheme_value_entityType: { scheme: string; value: string; entityType: string } };
+};
+
+type CandidateWhere = {
+  where: { entityType_leftId_rightId: { entityType: string; leftId: string; rightId: string } };
+};
+
 function mockPrisma(
   existing: ReturnType<typeof companyRow>[] = [],
   existingInvestors: ReturnType<typeof investorRow>[] = [],
   existingFunds: ReturnType<typeof fundRow>[] = [],
+  seedIdentifiers: IdentifierRow[] = [],
 ) {
   let created = 0;
   let fundsCreated = 0;
+  const identifiers: IdentifierRow[] = [...seedIdentifiers];
+  const candidates: CandidateRow[] = [];
   return {
+    identifiers,
+    candidates,
     fund: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingFunds),
       findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
@@ -143,6 +176,58 @@ function mockPrisma(
       createMany: jest.fn<(args: { data: Record<string, unknown>[] }) => Promise<unknown>>(
         async () => ({}),
       ),
+    },
+    // In-memory stand-ins that enforce the real unique keys, so the identifier
+    // match and the collision path are exercised rather than mocked away.
+    entityIdentifier: {
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) => {
+        const where = (args as { where: { entityType: string } }).where;
+        return identifiers.filter((r) => r.entityType === where.entityType);
+      }),
+      findUnique: jest.fn<(args: IdentifierWhere) => Promise<{ entityId: string } | null>>(
+        async (args) => {
+          const k = args.where.scheme_value_entityType;
+          const hit = identifiers.find(
+            (r) => r.scheme === k.scheme && r.value === k.value && r.entityType === k.entityType,
+          );
+          return hit ? { entityId: hit.entityId } : null;
+        },
+      ),
+      create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<unknown>>(
+        async (args) => {
+          identifiers.push(args.data as unknown as IdentifierRow);
+          return args.data;
+        },
+      ),
+    },
+    mergeCandidate: {
+      findUnique: jest.fn<(args: CandidateWhere) => Promise<CandidateRow | null>>(async (args) => {
+        const k = args.where.entityType_leftId_rightId;
+        return (
+          candidates.find(
+            (c) =>
+              c.entityType === k.entityType && c.leftId === k.leftId && c.rightId === k.rightId,
+          ) ?? null
+        );
+      }),
+      create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<unknown>>(
+        async (args) => {
+          const row = {
+            id: `cand-${candidates.length + 1}`,
+            status: 'PENDING',
+            ...args.data,
+          } as unknown as CandidateRow;
+          candidates.push(row);
+          return row;
+        },
+      ),
+      update: jest.fn<
+        (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>
+      >(async (args) => {
+        const row = candidates.find((c) => c.id === args.where.id);
+        if (row) Object.assign(row, args.data);
+        return row;
+      }),
     },
     // The array form of $transaction: the mocked members return plain promises,
     // so awaiting them all is a faithful stand-in.
@@ -1146,5 +1231,298 @@ describe('normalizeName', () => {
     ['Company', 'company'],
   ])('normalizes %s → %s', (input, expected) => {
     expect(normalizeName(input)).toBe(expected);
+  });
+});
+
+describe('IngestService identifier matching', () => {
+  /** A company record with a name nothing else shares, so the only signals left
+   *  are whatever the caller adds. `websiteUrl` is always present so a match
+   *  produces a visible enrich update to assert on. */
+  function anonymous(company: Partial<NormalizedRecord['company']> = {}): NormalizedRecord {
+    return record({
+      source: 'SEC_FORM_C',
+      companyExternalId: '123',
+      company: {
+        name: 'Nothing Else Is Called This',
+        hq: '',
+        foundedYear: 0,
+        industry: [],
+        stage: 'Seed',
+        totalRaisedUsd: 0,
+        websiteUrl: 'https://filled-by-the-record.example',
+        ...company,
+      },
+    });
+  }
+
+  it('enriches the row holding the same CIK instead of creating a second', async () => {
+    // Company is unique on (externalSource, externalId), so SEC_EDGAR:123 and
+    // SEC_FORM_C:123 are two legal rows for what is ONE filer. Before the
+    // crosswalk nothing connected them.
+    const prisma = mockPrisma(
+      [companyRow()],
+      [],
+      [],
+      [
+        {
+          scheme: 'CIK',
+          value: '0000000123',
+          entityType: 'company',
+          entityId: 'c-sec',
+          source: 'SEC_EDGAR',
+        },
+      ],
+    );
+    await serviceWith(prisma, [
+      anonymous({ identifiers: [{ scheme: 'CIK', value: '123' }] }),
+    ]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-sec' });
+  });
+
+  it('prefers the identifier over a conflicting domain match', async () => {
+    // A domain is a strong inference; a CIK is the publisher's own statement.
+    const prisma = mockPrisma(
+      [
+        companyRow(),
+        companyRow({ id: 'c-domain', slug: 'other', name: 'Other Co', domain: 'acme.com' }),
+      ],
+      [],
+      [],
+      [
+        {
+          scheme: 'CIK',
+          value: '0000000123',
+          entityType: 'company',
+          entityId: 'c-sec',
+          source: 'SEC_EDGAR',
+        },
+      ],
+    );
+    await serviceWith(prisma, [
+      anonymous({ domain: 'acme.com', identifiers: [{ scheme: 'CIK', value: '123' }] }),
+    ]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-sec' });
+  });
+
+  it('falls back to domain then name when the record carries no identifiers', async () => {
+    const prisma = mockPrisma([companyRow({ domain: 'acme.com' })]);
+    await serviceWith(prisma, [anonymous({ domain: 'acme.com' })]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-sec' });
+  });
+
+  it('records a candidate rather than reassigning an identifier another row holds', async () => {
+    const prisma = mockPrisma(
+      [companyRow()],
+      [],
+      [],
+      [
+        {
+          scheme: 'CIK',
+          value: '0000000123',
+          entityType: 'company',
+          entityId: 'c-other',
+          source: 'SEC_EDGAR',
+        },
+      ],
+    );
+    // Matches its OWN provenance row, but claims a CIK a different row holds.
+    await serviceWith(prisma, [
+      record({
+        source: 'SEC_EDGAR',
+        companyExternalId: '0001',
+        company: {
+          name: 'Acme Robotics, Inc.',
+          hq: 'San Francisco, CALIFORNIA',
+          foundedYear: 2021,
+          industry: [],
+          stage: 'Series A',
+          totalRaisedUsd: 7_500_000,
+          identifiers: [{ scheme: 'CIK', value: '123' }],
+        },
+      }),
+    ]).run(RUN);
+
+    expect(prisma.identifiers).toHaveLength(1);
+    expect(prisma.identifiers[0]!.entityId).toBe('c-other');
+    expect(prisma.candidates).toHaveLength(1);
+    expect(prisma.candidates[0]).toMatchObject({
+      entityType: 'company',
+      leftId: 'c-other',
+      rightId: 'c-sec',
+      signal: 'identifier',
+      evidence: 'CIK:0000000123',
+    });
+  });
+
+  it('records a candidate when one record’s identifiers point at two rows', async () => {
+    const prisma = mockPrisma(
+      [
+        companyRow({ id: 'c-a', slug: 'a', name: 'Alpha Corp' }),
+        companyRow({
+          id: 'c-b',
+          slug: 'b',
+          name: 'Beta Corp',
+          externalSource: 'WIKIDATA',
+          externalId: 'Q42',
+        }),
+      ],
+      [],
+      [],
+      [
+        { scheme: 'CIK', value: '0000000123', entityType: 'company', entityId: 'c-a', source: 'SEC_EDGAR' },
+        { scheme: 'WIKIDATA', value: 'Q42', entityType: 'company', entityId: 'c-b', source: 'WIKIDATA' },
+      ],
+    );
+    await serviceWith(prisma, [
+      anonymous({
+        identifiers: [
+          { scheme: 'CIK', value: '123' },
+          { scheme: 'WIKIDATA', value: 'Q42' },
+        ],
+      }),
+    ]).run(RUN);
+
+    // The first hit still wins — refusing to match would create a THIRD row for
+    // the same entity — but the disagreement is queued for a human.
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-a' });
+    expect(prisma.candidates).toHaveLength(1);
+    expect(prisma.candidates[0]).toMatchObject({ leftId: 'c-a', rightId: 'c-b', signal: 'identifier' });
+  });
+
+  it('matches an investor firm on its CRD ahead of domain and name', async () => {
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-adv', name: 'Nothing Like The Incoming Name' })],
+      [],
+      [
+        {
+          scheme: 'CRD',
+          value: '123456',
+          entityType: 'investor',
+          entityId: 'i-adv',
+          source: 'SEC_ADV',
+        },
+      ],
+    );
+    const source = stubSource(
+      [],
+      [firm({ domain: null, identifiers: [{ scheme: 'CRD', value: '0000123456' }] })],
+    );
+    await new IngestService(prisma as unknown as PrismaService, [source], config()).run(RUN);
+
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.investor.update.mock.calls[0]![0].where).toEqual({ id: 'i-adv' });
+  });
+});
+
+describe('IngestService tombstones', () => {
+  it('enriches the survivor when a record is keyed to a merged-away row', async () => {
+    // This is the whole reason a merge keeps the losing row instead of deleting
+    // it. Delete it and this record's (source, externalId) would miss, a fresh
+    // row would be created, and the next cron run would undo the merge.
+    const prisma = mockPrisma([
+      companyRow({ id: 'c-lose', slug: 'acme-old', mergedIntoId: 'c-keep' }),
+      companyRow({
+        id: 'c-keep',
+        slug: 'acme',
+        name: 'Acme Robotics Holdings',
+        externalId: '0002',
+      }),
+    ]);
+    await serviceWith(prisma, [
+      record({
+        source: 'SEC_EDGAR',
+        companyExternalId: '0001',
+        company: {
+          name: 'Acme Robotics, Inc.',
+          hq: 'San Francisco, CALIFORNIA',
+          foundedYear: 2021,
+          industry: ['Other Technology'],
+          stage: 'Series A',
+          totalRaisedUsd: 9_000_000,
+        },
+      }),
+    ]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-keep' });
+  });
+
+  it('follows a chain of merges to the row at the end of it', async () => {
+    const prisma = mockPrisma([
+      companyRow({ id: 'c-1', slug: 'a', mergedIntoId: 'c-2' }),
+      companyRow({ id: 'c-2', slug: 'b', externalId: '0002', mergedIntoId: 'c-3' }),
+      companyRow({ id: 'c-3', slug: 'c', name: 'Final Survivor', externalId: '0003' }),
+    ]);
+    await serviceWith(prisma, [
+      record({
+        source: 'SEC_EDGAR',
+        companyExternalId: '0001',
+        company: {
+          name: 'Acme Robotics, Inc.',
+          hq: 'San Francisco, CALIFORNIA',
+          foundedYear: 2021,
+          industry: ['Other Technology'],
+          stage: 'Series A',
+          totalRaisedUsd: 9_000_000,
+        },
+      }),
+    ]).run(RUN);
+
+    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-3' });
+  });
+
+  it('does not match onto a tombstone whose chain cycles', async () => {
+    // A cycle cannot resolve to a live row, so the key matches nothing and the
+    // record creates a fresh row rather than writing somewhere invisible.
+    const prisma = mockPrisma([
+      companyRow({ id: 'c-1', slug: 'a', mergedIntoId: 'c-2' }),
+      companyRow({ id: 'c-2', slug: 'b', externalId: '0002', mergedIntoId: 'c-1' }),
+    ]);
+    await serviceWith(prisma, [
+      record({
+        source: 'SEC_EDGAR',
+        companyExternalId: '0001',
+        company: {
+          name: 'Something Else Entirely',
+          hq: '',
+          foundedYear: 0,
+          industry: [],
+          stage: 'Seed',
+          totalRaisedUsd: 0,
+        },
+      }),
+    ]).run(RUN);
+
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves a merged-away investor the same way', async () => {
+    const prisma = mockPrisma(
+      [],
+      [
+        // Keyed to the stub source, so byKey is the signal under test.
+        investorRow({
+          id: 'i-lose',
+          slug: 'old',
+          externalSource: 'STUB',
+          externalId: '123456',
+          mergedIntoId: 'i-keep',
+        }),
+        investorRow({ id: 'i-keep', slug: 'new', name: 'Next Coast Ventures Management' }),
+      ],
+    );
+    const source = stubSource([], [firm()]);
+    await new IngestService(prisma as unknown as PrismaService, [source], config()).run(RUN);
+
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.investor.update.mock.calls[0]![0].where).toEqual({ id: 'i-keep' });
   });
 });

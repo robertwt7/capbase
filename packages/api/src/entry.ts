@@ -10,3 +10,4 @@ export * from './domain/contributions';
 export * from './domain/proposals';
 export * from './domain/watchlist';
 export * from './domain/provenance';
+export * from './domain/identifiers';

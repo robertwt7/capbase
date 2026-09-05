@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CONTRIBUTION_WINDOW_DAYS,
   DEFAULT_PAGE_SIZE,
@@ -11,6 +17,7 @@ import {
   type CompanyHistoryResponse,
   type CompanyListQuery,
   type CompanySlugEntry,
+  type EntityIdentifierRef,
   type Paginated,
   type Revision,
   type RevisionAction,
@@ -20,7 +27,9 @@ import {
 import type { Prisma } from '@repo/db';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { MAX_MERGE_HOPS, PUBLIC_COMPANY } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
+import { toEntityIdentifiers } from '../provenance/identifier.mapper';
 import { toCompany, toCompanyEditFields } from './company.mapper';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
@@ -80,7 +89,7 @@ export class CompaniesService {
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
 
     const where: Prisma.CompanyWhereInput = {
-      moderationStatus: 'APPROVED',
+      ...PUBLIC_COMPANY,
       ...(query.slugs && { slug: { in: query.slugs.split(',').filter(Boolean) } }),
       ...(query.q && {
         OR: [
@@ -116,7 +125,7 @@ export class CompaniesService {
   /** Every approved company's slug + last update, for the web sitemap. */
   async listSlugs(): Promise<CompanySlugEntry[]> {
     const rows = await this.prisma.company.findMany({
-      where: { moderationStatus: 'APPROVED' },
+      where: PUBLIC_COMPANY,
       select: { slug: true, updatedAt: true },
       orderBy: { slug: 'asc' },
     });
@@ -133,10 +142,11 @@ export class CompaniesService {
     viewer?: { id: string; role: Role },
   ): Promise<CompanyDetailResponse> {
     const row = await this.prisma.company.findFirst({
-      where: { slug, moderationStatus: 'APPROVED' },
+      where: { slug, ...PUBLIC_COMPANY },
       include: approvedChildren,
     });
-    if (!row) throw new NotFoundException(`Company "${slug}" not found`);
+    // Returns `never` — either a 301 to the survivor, or a 404.
+    if (!row) return this.redirectOrNotFound(slug);
     const company = toCompany(row);
 
     const totals = {
@@ -165,12 +175,72 @@ export class CompaniesService {
     // Loaded *after* truncation, so a locked viewer never receives a citation
     // for a row they can't see.
     const citations = await this.loadCitations(row.id, company);
+    company.identifiers = await this.loadIdentifiers(row.id);
 
     return {
       company,
       access: { unlocked, previewLimit: PREVIEW_LIMIT, unlockedUntil, totals },
       citations,
     };
+  }
+
+  /**
+   * A slug that no live company answers to: either a tombstone, or nothing.
+   *
+   * Always throws. A merged-away row keeps its slug, so following `mergedIntoId`
+   * turns the old address into a permanent redirect instead of a 404 — which is
+   * the point of tombstoning rather than deleting.
+   *
+   * The response is **301 with the survivor's slug in the body and deliberately
+   * no `Location` header**. With one, the web app's server-side `fetch` would
+   * follow the redirect itself and quietly render the survivor's profile under
+   * the old URL — the opposite of what a permanent redirect is for. The browser
+   * has to see the move, so the web layer re-issues it.
+   */
+  private async redirectOrNotFound(slug: string): Promise<never> {
+    const survivor = await this.resolveMerged(slug);
+    if (survivor) {
+      throw new HttpException(
+        { message: `Company "${slug}" was merged`, redirectTo: survivor, statusCode: 301 },
+        HttpStatus.MOVED_PERMANENTLY,
+      );
+    }
+    throw new NotFoundException(`Company "${slug}" not found`);
+  }
+
+  /** Follow a chain of merges to the live row at the end of it, or null.
+   *  Capped: a survivor can itself be merged later, and a cycle must not hang
+   *  the request. */
+  private async resolveMerged(slug: string): Promise<string | null> {
+    let row = await this.prisma.company.findUnique({
+      where: { slug },
+      select: { slug: true, mergedIntoId: true, moderationStatus: true },
+    });
+    if (!row?.mergedIntoId) return null;
+
+    let next: string | null = row.mergedIntoId;
+    for (let hop = 0; hop < MAX_MERGE_HOPS && next; hop++) {
+      row = await this.prisma.company.findUnique({
+        where: { id: next },
+        select: { slug: true, mergedIntoId: true, moderationStatus: true },
+      });
+      if (!row) return null;
+      if (!row.mergedIntoId) {
+        return row.moderationStatus === 'APPROVED' ? row.slug : null;
+      }
+      next = row.mergedIntoId;
+    }
+    return null;
+  }
+
+  /** The company's external identifiers, for the crosswalk block on the
+   *  profile. One indexed query on (entityType, entityId); detail reads only,
+   *  so no page-sized fan-out on the directory. */
+  private async loadIdentifiers(companyId: string): Promise<EntityIdentifierRef[]> {
+    const rows = await this.prisma.entityIdentifier.findMany({
+      where: { entityType: 'company', entityId: companyId },
+    });
+    return toEntityIdentifiers(rows);
   }
 
   /** Every citation attaching to the company row or any child row in the
@@ -250,10 +320,10 @@ export class CompaniesService {
     pageSize = DEFAULT_PAGE_SIZE,
   ): Promise<CompanyHistoryResponse> {
     const company = await this.prisma.company.findFirst({
-      where: { slug, moderationStatus: 'APPROVED' },
+      where: { slug, ...PUBLIC_COMPANY },
       select: { id: true },
     });
-    if (!company) throw new NotFoundException(`Company "${slug}" not found`);
+    if (!company) return this.redirectOrNotFound(slug);
 
     const where = { companyId: company.id };
     const [total, rows] = await this.prisma.$transaction([

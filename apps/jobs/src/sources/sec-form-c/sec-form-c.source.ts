@@ -155,6 +155,7 @@ export function toRecord(cik: string, group: FormCOffering[]): NormalizedRecord 
       headcount: num(newest.offering.disclosure.CURRENTEMPLOYEES) ?? 0,
       oneLiner: oneLinerFor(portal),
       description: describe(name, hq, portal, rounds.length),
+      identifiers: [{ scheme: 'CIK', value: cik }],
     },
     ...(rounds.length ? { rounds } : {}),
     people: toPeople(cik, offerings),

@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { Citation } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
+import { Identifiers } from '@/components/Identifiers';
 import { Badge, Button, EmptyState, SectionHeader } from '@/components/ui';
 import { getInvestor } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
@@ -75,6 +76,9 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
               )}
             </div>
           )}
+          {/* CRD, CIK, LEI, QID — the firm's identity in the public registries.
+              Renders nothing when we hold none. */}
+          <Identifiers identifiers={investor.identifiers} className="mt-5" />
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
           {investor.hq && <Fact label="Headquarters" value={investor.hq} />}

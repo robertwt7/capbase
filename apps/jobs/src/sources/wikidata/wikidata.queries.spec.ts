@@ -80,6 +80,24 @@ describe('query builders', () => {
   it('investors query selects the P31 classes used for structural typing', () => {
     expect(investorsQuery(qids)).toContain('OPTIONAL { ?investor wdt:P31 ?class . }');
   });
+
+  it('details query asks for the LEI, CIK and ticker identifiers', () => {
+    const q = detailsQuery(qids);
+    expect(q).toContain('wdt:P1278'); // LEI
+    expect(q).toContain('wdt:P5531'); // SEC CIK
+  });
+
+  it('reads the ticker off the listing statement, so the exchange comes with it', () => {
+    // A bare symbol is not an identifier: AAPL on two exchanges is two
+    // instruments. Wikidata puts the EXCHANGE on the statement (P414) and the
+    // ticker on its qualifier — verified against the live endpoint, where
+    // Apple's AAPL/6689 and Tesla's TSLA/TL0/0R0X all sit this way round.
+    const q = detailsQuery(qids);
+    expect(q).toContain('p:P414 ?listingSt');
+    expect(q).toContain('?listingSt ps:P414 ?exchange');
+    expect(q).toContain('?listingSt pq:P249 ?ticker');
+    expect(q).not.toContain('wdt:P249');
+  });
 });
 
 describe('investorFirmsQuery', () => {
@@ -102,5 +120,11 @@ describe('investorFirmsQuery', () => {
 
   it('excludes the EIB from the firm universe too', () => {
     expect(investorFirmsQuery()).toContain('wd:Q192247');
+  });
+
+  it('asks firms for the LEI and CIK identifiers too', () => {
+    const q = investorFirmsQuery();
+    expect(q).toContain('wdt:P1278');
+    expect(q).toContain('wdt:P5531');
   });
 });

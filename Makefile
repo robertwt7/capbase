@@ -164,6 +164,10 @@ ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See d
 	cd apps/jobs && node dist/backfill.js 1 1000000 SBIR
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_S1
 	cd apps/jobs && node dist/backfill-sectors.js
+# Identifiers before merge detection (the detector reads them), and both before
+# citations, which is unchanged.
+	cd apps/jobs && node dist/backfill-identifiers.js
+	cd apps/jobs && node dist/detect-merges.js
 	cd apps/jobs && node dist/backfill-citations.js
 
 .PHONY: backfill-sectors
@@ -183,6 +187,24 @@ backfill-citations: ## Mint Source/Citation rows for every ingested row (no netw
 .PHONY: backfill-citations-prod
 backfill-citations-prod: ## [VPS] Mint citations inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-citations.js
+
+.PHONY: backfill-identifiers
+backfill-identifiers: ## Mint EntityIdentifier rows from stored provenance (no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-identifiers.js
+
+.PHONY: backfill-identifiers-prod
+backfill-identifiers-prod: ## [VPS] Mint identifiers inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-identifiers.js
+
+.PHONY: merge-candidates
+merge-candidates: ## Propose duplicate pairs from shared domain / normalized name (re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/detect-merges.js
+
+.PHONY: merge-candidates-prod
+merge-candidates-prod: ## [VPS] Propose duplicate pairs inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/detect-merges.js
 
 # ---------------------------------------------------------------------------
 # Production-like stack (everything in Docker)

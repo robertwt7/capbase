@@ -3,7 +3,12 @@ import type { Sector } from '@repo/api';
 import { identifyingDomain } from '../../util/domain';
 import { kebab } from '../../util/slug';
 import { sectorFor } from '../wikidata/wikidata.mapper';
-import type { NormalizedPerson, NormalizedRecord, NormalizedRound } from '../ingestion-source';
+import type {
+  NormalizedPerson,
+  NormalizedRecord,
+  NormalizedRound,
+  SourceIdentifier,
+} from '../ingestion-source';
 import type { SbirRow } from './sbir.client';
 import { agencySector, agencyShort } from './agency-sector';
 
@@ -23,6 +28,15 @@ export function firmKey(row: SbirRow): string {
   const duns = (row.Duns ?? '').trim().replace(/\D/g, '');
   if (duns) return `duns:${duns}`;
   return `name:${normalizeFirm(row.Company ?? '')}`;
+}
+
+/** The identifiers hidden in a firm key. A `name:` key yields none — a
+ *  normalized name is not an identifier, and inventing one would join firms
+ *  that merely share a spelling. */
+function firmIdentifiers(key: string): SourceIdentifier[] {
+  if (key.startsWith('uei:')) return [{ scheme: 'UEI', value: key.slice(4) }];
+  if (key.startsWith('duns:')) return [{ scheme: 'DUNS', value: key.slice(5) }];
+  return [];
 }
 
 /** Lowercased, punctuation-collapsed firm name — the fallback identity only. */
@@ -145,6 +159,7 @@ function toRecord(firm: FirmAccumulator): NormalizedRecord {
       headcount: headcount(row),
       oneLiner: oneLiner(firm.rounds.length, row.Agency),
       description: describe(name, firm, row),
+      identifiers: firmIdentifiers(firm.key),
     },
     ...(rounds.length ? { rounds } : {}),
     people: [...firm.people.values()],

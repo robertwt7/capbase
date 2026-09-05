@@ -125,6 +125,7 @@ export class SecS1Source implements IngestionSource {
         description:
           `${ref.filer || `SEC filer ${cik}`} filed a Form S-1 registration statement with the ` +
           `SEC on ${ref.filedAt}. Its principal-stockholder table names the firms below.`,
+        identifiers: [{ scheme: 'CIK', value: cik }],
       },
       investors,
     };

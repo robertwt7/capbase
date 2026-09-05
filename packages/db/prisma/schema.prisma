@@ -49,6 +49,8 @@ model User {
   citations      Citation[]
   revisions      Revision[]
   funds          Fund[]
+  mergeDecisions MergeCandidate[]
+  merges         MergeRecord[]
 }
 
 /// A primary document a fact came from. Deduplicated by URL, so many citations
@@ -108,7 +110,7 @@ model Revision {
   before     Json?
   after      Json?
 
-  action      String // 'CREATE' | 'UPDATE'
+  action      String // 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE'
   actor       String // 'USER' | 'ADMIN' | 'INGEST'
   actorUserId String?
   actorUser   User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
@@ -158,6 +160,14 @@ model Company {
   externalSource String?
   externalId     String?
 
+  /// Set when an admin merged this row into another. The row is KEPT, not
+  /// deleted: its slug still redirects, and its (externalSource, externalId)
+  /// still absorbs the source's next re-ingest. Deleting it would free that key
+  /// and the very next ingest run would recreate the duplicate.
+  mergedIntoId String?
+  mergedInto   Company?  @relation("CompanyMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom   Company[] @relation("CompanyMerge")
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
@@ -175,6 +185,7 @@ model Company {
   revisions    Revision[]
 
   @@unique([externalSource, externalId])
+  @@index([mergedIntoId])
   @@index([moderationStatus])
   // Server-side directory filters/sorts always scope to APPROVED first.
   @@index([moderationStatus, primarySector])
@@ -296,6 +307,12 @@ model Investor {
   externalSource String?
   externalId     String?
 
+  /// Set when an admin merged this row into another. Kept, not deleted, for the
+  /// same reason as Company.mergedIntoId.
+  mergedIntoId String?
+  mergedInto   Investor?  @relation("InvestorMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom   Investor[] @relation("InvestorMerge")
+
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
   submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
@@ -307,6 +324,7 @@ model Investor {
   funds          Fund[]
 
   @@unique([externalSource, externalId])
+  @@index([mergedIntoId])
   @@index([moderationStatus])
   @@index([moderationStatus, type])
   @@index([moderationStatus, name])
@@ -492,4 +510,87 @@ model DiversitySignal {
 
   @@index([companyId])
   @@index([moderationStatus])
+}
+
+/// An external identifier for one Company or Investor — the crosswalk that lets
+/// our rows be joined to anything else, and the strongest signal that two of
+/// our rows are the same entity.
+model EntityIdentifier {
+  id     String @id @default(cuid())
+  /// One of IDENTIFIER_SCHEMES.
+  scheme String
+  /// Canonical form, per normalizeIdentifier(). Values that fail validation are
+  /// never stored — a malformed identifier joins unrelated entities, which is
+  /// worse than having no identifier at all.
+  value  String
+  /// One of IDENTIFIABLE_TYPES. Polymorphic like Citation: Fund already carries
+  /// secFundId/cikNumber, so a third identifiable type is coming, and a typed
+  /// FK per entity would mean a migration to admit it.
+  entityType String
+  entityId   String
+  /// Where it came from: an ingest source name, 'BACKFILL', or 'ADMIN'.
+  source    String
+  createdAt DateTime @default(now())
+
+  /// Unique PER TYPE, not globally. Measured on the live corpus: four domains,
+  /// two CIKs and one QID are held by a company row AND an investor row at once
+  /// (Wefunder, Republic, Shadow, Red Cell) — one organisation that both raises
+  /// and invests. Those are legitimate, so a global unique would reject real
+  /// data on the very first backfill. Within one type a shared identifier IS a
+  /// duplicate, and that is what this constraint catches.
+  @@unique([scheme, value, entityType])
+  @@index([entityType, entityId])
+}
+
+/// A pair of same-type rows that look like the same entity, awaiting an admin
+/// decision. Kept after the decision so a rejected pair is never re-proposed.
+model MergeCandidate {
+  id         String @id @default(cuid())
+  /// One of IDENTIFIABLE_TYPES. A company never pairs with an investor.
+  entityType String
+  /// The two rows, ordered so leftId < rightId — the @@unique then catches the
+  /// pair whichever way round the detector found it.
+  leftId  String
+  rightId String
+  /// One of MERGE_SIGNALS ('identifier' | 'domain' | 'name'), strongest first.
+  signal String
+  /// The value that matched ('CIK:0001234567', 'acme.com'), so the reviewer can
+  /// check the proposal instead of guessing why it was made.
+  evidence String
+  /// One of MERGE_STATUSES: PENDING | MERGED | REJECTED.
+  status      String    @default("PENDING")
+  decidedAt   DateTime?
+  decidedById String?
+  decidedBy   User?     @relation(fields: [decidedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+
+  records MergeRecord[]
+
+  @@unique([entityType, leftId, rightId])
+  @@index([status, entityType])
+}
+
+/// What one merge moved, complete enough to reverse it.
+model MergeRecord {
+  id         String @id @default(cuid())
+  entityType String
+  survivorId String
+  losingId   String
+  /// { rounds: [...ids], people: [...], savedCompanies: [{userId, createdAt}],
+  /// identifiers: [{scheme, value, source}], … } — moved ids plus the full
+  /// content of rows the merge had to DELETE (unique-constraint collisions),
+  /// since an unmerge must recreate those rather than move them back.
+  moved       Json
+  candidateId String?
+  candidate   MergeCandidate? @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  mergedAt    DateTime        @default(now())
+  mergedById  String?
+  mergedBy    User?           @relation(fields: [mergedById], references: [id], onDelete: SetNull)
+  /// Set when an admin reversed the merge. The record is kept either way: it is
+  /// the audit trail for both directions.
+  unmergedAt   DateTime?
+  unmergedById String?
+
+  @@index([entityType, survivorId])
+  @@index([losingId])
 }

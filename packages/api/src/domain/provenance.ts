@@ -57,7 +57,9 @@ export interface Citation {
   source: SourceRef;
 }
 
-export type RevisionAction = 'CREATE' | 'UPDATE';
+/** MERGE/UNMERGE carry no field diff — they record that a whole row was folded
+ *  into another, or split back out. The timeline renders them separately. */
+export type RevisionAction = 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE';
 
 export type RevisionActor = 'USER' | 'ADMIN' | 'INGEST';
 

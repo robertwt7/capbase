@@ -138,6 +138,10 @@ export default async function CompanyHistory({
 
 /** One hairline-ruled ledger row: when, what, and from what to what. */
 function Entry({ item }: { item: Revision }) {
+  // A merge moves a whole row, so it carries no field and no diff — without its
+  // own branch it would render as "— changed" with two JSON blobs.
+  const merge = item.action === 'MERGE' || item.action === 'UNMERGE';
+
   return (
     <li className="grid grid-cols-[170px_1fr] items-baseline gap-x-6 border-t border-line py-4 max-md:grid-cols-1 max-md:gap-y-2">
       <span className="font-mono text-[11px] tracking-[0.04em] text-graphite-500 uppercase">
@@ -150,6 +154,14 @@ function Entry({ item }: { item: Revision }) {
           <span className="font-display font-semibold">{item.entityLabel}</span>
           {item.action === 'CREATE' ? (
             <span className="text-graphite-700"> added</span>
+          ) : merge ? (
+            <span className="text-graphite-700">
+              {' '}
+              {item.action === 'MERGE' ? 'merged in' : 'split back out'}{' '}
+              <span className="font-mono text-[13px] text-ink">
+                {entityName(item.action === 'MERGE' ? item.before : item.after)}
+              </span>
+            </span>
           ) : (
             <span className="text-graphite-700">
               {' '}
@@ -169,9 +181,26 @@ function Entry({ item }: { item: Revision }) {
             <span className="text-ink">{display(item.field, item.after)}</span>
           </p>
         ) : null}
+
+        {merge ? (
+          <p className="mt-1.5 text-[13px] text-graphite-500">
+            {item.action === 'MERGE'
+              ? 'Two records described the same company. Its rounds, people and sources now sit on this profile, and the old address redirects here.'
+              : 'The merge was reversed; the records are separate again.'}
+          </p>
+        ) : null}
       </div>
     </li>
   );
+}
+
+/** The other side of a merge, as recorded on the revision: `{ slug, name }`. */
+function entityName(value: unknown): string {
+  if (value && typeof value === 'object' && 'name' in value) {
+    const name = (value as { name?: unknown }).name;
+    if (typeof name === 'string' && name) return name;
+  }
+  return 'another record';
 }
 
 function actorLabel(item: Revision): string {

@@ -127,6 +127,7 @@ export class SecEdgarSource implements IngestionSource {
         primarySector: parsed.industry ? secSector(parsed.industry) : null,
         stage: stageFromAmount(parsed.amountSoldUsd),
         totalRaisedUsd: parsed.amountSoldUsd,
+        identifiers: [{ scheme: 'CIK', value: ref.cik }],
       },
       rounds: [
         {

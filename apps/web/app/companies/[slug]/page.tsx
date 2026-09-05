@@ -6,6 +6,7 @@ import type { CompanyAccess } from '@repo/api';
 import { Citation, companyEntityId } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { FundingLadder } from '@/components/FundingLadder';
+import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
 import { SaveCompanyButton } from '@/components/SaveCompanyButton';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
@@ -132,6 +133,10 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               {company.twitterUrl && <OutboundLink href={company.twitterUrl}>Twitter</OutboundLink>}
             </div>
           )}
+          {/* The crosswalk: which SEC filer, which GLEIF entity, which Wikidata
+              item this row IS — so the dataset can be joined to others. Renders
+              nothing when we hold none. */}
+          <Identifiers identifiers={company.identifiers} className="mt-5" />
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
           <Fact label="Founded" value={company.founded.toString()} cite={cite('founded')} />

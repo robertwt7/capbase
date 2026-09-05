@@ -105,6 +105,7 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
     const prisma = {
       company: { findFirst },
       citation: { findMany: citationFindMany },
+      entityIdentifier: { findMany: jest.fn(async () => []) },
     } as unknown as PrismaService;
     const users = { lastContributionAt } as unknown as UsersService;
     service = new CompaniesService(prisma, users);
@@ -222,7 +223,7 @@ describe('CompaniesService.listSlugs (sitemap feed)', () => {
     const entries = await service.listSlugs();
 
     expect(findMany).toHaveBeenCalledWith({
-      where: { moderationStatus: 'APPROVED' },
+      where: { moderationStatus: 'APPROVED', mergedIntoId: null },
       select: { slug: true, updatedAt: true },
       orderBy: { slug: 'asc' },
     });
@@ -307,6 +308,9 @@ describe('CompaniesService.getCompanyHistory', () => {
       company: {
         findFirst,
         findMany: jest.fn(async () => [{ id: 'c1', name: 'Helia' }]),
+        // The miss path asks whether the slug belongs to a tombstone before
+        // it 404s.
+        findUnique: jest.fn(async () => null),
       },
       fundingRound: {
         findMany: jest.fn(async () => [{ id: 'r1', name: 'Series B' }]),
@@ -333,7 +337,7 @@ describe('CompaniesService.getCompanyHistory', () => {
     await expect(service.getCompanyHistory('helia')).rejects.toThrow(NotFoundException);
     // The APPROVED filter is part of the query, not a post-check.
     expect(findFirst.mock.calls[0]![0]).toMatchObject({
-      where: { slug: 'helia', moderationStatus: 'APPROVED' },
+      where: { slug: 'helia', moderationStatus: 'APPROVED', mergedIntoId: null },
     });
   });
 

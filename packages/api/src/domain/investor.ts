@@ -1,5 +1,6 @@
 import type { InvestorType } from './company';
 import type { Fund } from './fund';
+import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
 
 /** A first-class investor firm. Exists independently of any portfolio edge, so
@@ -21,6 +22,8 @@ export interface Investor {
   /** Gross assets across those funds, USD (SEC Form ADV). */
   assetsUsd?: number | null;
   foundedYear?: number | null;
+  /** Same contract as Company.identifiers: detail reads only, no DOMAIN. */
+  identifiers?: EntityIdentifierRef[];
 }
 
 /** A unique investor with the portfolio facts the directory row needs. */

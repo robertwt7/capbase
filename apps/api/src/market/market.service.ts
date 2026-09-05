@@ -55,7 +55,8 @@ export class MarketService {
             0
           )::float8                                            AS "medianValuationUsd"
         FROM "Company" c
-        WHERE c."moderationStatus" = 'APPROVED' AND c."primarySector" IS NOT NULL
+        WHERE c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL
+          AND c."primarySector" IS NOT NULL
         GROUP BY c."primarySector"
       `,
       this.prisma.$queryRaw<SectorRoundRow[]>`
@@ -72,6 +73,7 @@ export class MarketService {
         JOIN "Company" c ON c.id = r."companyId"
         WHERE r."moderationStatus" = 'APPROVED'
           AND c."moderationStatus" = 'APPROVED'
+          AND c."mergedIntoId" IS NULL
           AND c."primarySector" IS NOT NULL
           -- Non-dilutive government awards are capital events, not deals.
           AND r."kind" <> 'Grant'
@@ -100,18 +102,19 @@ export class MarketService {
       SELECT
         COALESCE((
           SELECT SUM("totalRaisedUsd") FROM "Company"
-          WHERE "moderationStatus" = 'APPROVED'
+          WHERE "moderationStatus" = 'APPROVED' AND "mergedIntoId" IS NULL
         ), 0)::float8 AS "totalRaisedUsd",
         (
           SELECT COUNT(*) FROM "FundingRound" r
           JOIN "Company" c ON c.id = r."companyId"
           WHERE r."moderationStatus" = 'APPROVED' AND c."moderationStatus" = 'APPROVED'
+            AND c."mergedIntoId" IS NULL
             -- Non-dilutive government awards are capital events, not deals.
             AND r."kind" <> 'Grant'
         )::int AS "dealCount",
         (
           SELECT COUNT(*) FROM "Company"
-          WHERE "moderationStatus" = 'APPROVED'
+          WHERE "moderationStatus" = 'APPROVED' AND "mergedIntoId" IS NULL
             AND "lastValuationUsd" >= ${UNICORN_USD}
         )::int AS unicorns
     `;

@@ -122,9 +122,65 @@ Leave it at its default (`true`) for the daily cron and for incremental
 backfills against a live dataset, where the changes are real edits to published
 figures.
 
+## Identifiers
+
+`make backfill-identifiers` (a step of `make ingest-all`, just before citations)
+populates the `EntityIdentifier` crosswalk — the table that lets a Capbase row be
+joined to anything else, and that gives ingest a match key stronger than a
+normalized name. Like the citation backfill it touches **no network**: every
+value is derived from a column already on the row (the `externalId` that *is* a
+CIK for the SEC sources and a QID for Wikidata, the `uei:`/`duns:` prefix SBIR
+keys firms on, `crdNumber`/`cikNumber` on investors, and `domain` on both).
+
+Two rules make it safe to re-run and safe to trust:
+
+- A value that fails validation is **counted and skipped, never stored**. A
+  malformed identifier in the crosswalk would join two unrelated entities, which
+  is worse than having no identifier. An SBIR firm keyed on a normalized name
+  (`name:…`) therefore contributes nothing, which is correct — a name is not an
+  identifier.
+- A value already held by a **different row of the same type** is not overwritten.
+  That collision is exactly the duplicate the merge queue exists for, so it
+  records a `MergeCandidate` with `signal='identifier'` and moves on. Because
+  the table is unique per `(scheme, value, entityType)`, a collision can never
+  land in it — the failed write is the only moment it is visible, which is why
+  detection happens here rather than in a later scan.
+
+Uniqueness is **per entity type, not global**. Four domains, two CIKs and one QID
+are held by a company row and an investor row at the same time (Wefunder,
+Republic, Shadow, Red Cell) — one organisation that both raises and invests, not
+a duplicate. A global unique would reject that legitimate data on the first run.
+
+Run it before `backfill-citations` and before `make merge-candidates`, which
+reads what it wrote.
+
+## Merge candidates
+
+`make merge-candidates` proposes duplicate pairs into the `/admin/merges` queue.
+It covers only the two **weak** signals, a shared domain and a shared normalized
+name. The identifier signal is deliberately absent: `EntityIdentifier` is unique
+per `(scheme, value, entityType)`, so a duplicate identifier can never land in
+the table and there is nothing for a scan to find — `writeIdentifier` records
+those candidates at the instant the write fails, which is the only moment they
+are visible.
+
+The name key is **looser than the one ingest matches on**, and has to be. A
+sweep keyed on `normalizeName` can only find pairs `upsertCompany` would already
+have merged, and measured on the live corpus it finds zero. The detector's key
+replaces punctuation with a space where the matcher deletes it, so
+`HeavyTech,Inc.` and `HeavyTech, Inc.` meet here and nowhere else: 5 groups over
+10 rows today.
+
+Groups larger than 8 rows are skipped and logged rather than queued — a name
+shared by nine rows is a generic string, and one such group would put 36 pairs
+in front of a moderator. Re-runnable: `recordCandidate` orders each pair
+canonically, upgrades a weak signal to a stronger one but never the reverse, and
+leaves a pair an admin already decided alone, so a rejection is never
+re-proposed.
+
 ## Citations
 
-`make backfill-citations` (already the last step of `make ingest-all`) mints the
+`make backfill-citations` (the last step of `make ingest-all`) mints the
 `Source` and `Citation` rows that put a source link next to every ingested fact.
 It touches no network: every URL is *constructed* from identifiers the rows
 already carry — CIK + accession for a Form D filing, the QID for Wikidata, the
@@ -156,6 +212,8 @@ make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_FORM_C
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SBIR
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_S1
 make backfill-sectors-prod
+make backfill-identifiers-prod  # the CIK/QID/CRD/UEI crosswalk
+make merge-candidates-prod      # propose duplicate pairs for the admin queue
 make backfill-citations-prod    # source links for every ingested row
 ```
 
@@ -336,6 +394,8 @@ result:
 ```bash
 INGEST_RECORD_REVISIONS=false make ingest SOURCE=SEC_FORM_C DAYS=1 LIMIT=1000000
 make backfill-sectors
+make backfill-identifiers
+make merge-candidates
 make backfill-citations
 make db-dump
 make deploy-restore FILE=backups/capbase-<stamp>.dump VPS=user@host CONFIRM=yes

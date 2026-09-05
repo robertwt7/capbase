@@ -54,17 +54,21 @@ describe('InvestorsService', () => {
   let findFirst: jest.Mock;
   let transaction: jest.Mock;
   let citationFindMany: jest.Mock;
+  let identifierFindMany: jest.Mock;
 
   beforeEach(() => {
     findMany = jest.fn();
     count = jest.fn();
     findFirst = jest.fn();
     citationFindMany = jest.fn(async () => []);
+    identifierFindMany = jest.fn(async () => []);
     // $transaction resolves the array of queries it is handed.
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     const prisma = {
-      investor: { findMany, count, findFirst },
+      // findUnique backs the miss path: is this slug a tombstone, or nothing?
+      investor: { findMany, count, findFirst, findUnique: jest.fn(async () => null) },
       citation: { findMany: citationFindMany },
+      entityIdentifier: { findMany: identifierFindMany },
       $transaction: transaction,
     } as unknown as PrismaService;
     service = new InvestorsService(prisma);
@@ -125,7 +129,7 @@ describe('InvestorsService', () => {
       expect(items[0]!.sectors).toEqual([]);
       // No `holdings: { some: … }` filter may creep into the where clause.
       expect(findMany.mock.calls[0]![0]).toMatchObject({
-        where: { moderationStatus: 'APPROVED' },
+        where: { moderationStatus: 'APPROVED', mergedIntoId: null },
       });
     });
 
@@ -170,7 +174,7 @@ describe('InvestorsService', () => {
       };
       expect(args.include._count.select.holdings.where).toEqual({
         moderationStatus: 'APPROVED',
-        company: { moderationStatus: 'APPROVED' },
+        company: { moderationStatus: 'APPROVED', mergedIntoId: null },
       });
     });
   });
@@ -194,7 +198,7 @@ describe('InvestorsService', () => {
       // BigInt money columns cross the wire as numbers.
       expect(investor.assetsUsd).toBe(106_486_870_258);
       expect(findFirst.mock.calls[0]![0]).toMatchObject({
-        where: { slug: 'sequoia-capital', moderationStatus: 'APPROVED' },
+        where: { slug: 'sequoia-capital', moderationStatus: 'APPROVED', mergedIntoId: null },
       });
     });
 
@@ -262,7 +266,7 @@ describe('InvestorsService', () => {
         { slug: 'sequoia-capital', updatedAt: '2026-08-02T13:11:06.356Z' },
       ]);
       expect(findMany.mock.calls[0]![0]).toMatchObject({
-        where: { moderationStatus: 'APPROVED' },
+        where: { moderationStatus: 'APPROVED', mergedIntoId: null },
       });
     });
   });

@@ -21,6 +21,9 @@ export const config = [
     },
   },
   {
-    ignores: ["dist/**", ".next/**"],
+    // Build and test artefacts. `coverage/**` matters because the type-aware
+    // project service errors on any file no tsconfig includes, and jest writes
+    // its lcov report as plain JS.
+    ignores: ["dist/**", ".next/**", "coverage/**"],
   },
 ];

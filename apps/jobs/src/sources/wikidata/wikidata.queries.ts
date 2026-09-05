@@ -7,7 +7,8 @@
  * P17 country, P452 industry, P1128 employees, P4264 LinkedIn id,
  * P112 founder, P169 CEO, P127 owned-by, P793 significant event
  * (Q184680 = IPO), P414 stock exchange, P31 instance-of, P4103 assets under
- * management; qualifiers P580 start, P585 point.
+ * management, P1278 LEI, P5531 CIK; qualifiers P580 start, P585 point,
+ * P249 ticker symbol (on a P414 stock-exchange statement).
  *
  * Note P4103 (assets under management) is the AUM property — NOT P2403, which
  * is balance-sheet total assets and is unpopulated on private firms.
@@ -41,7 +42,7 @@ export function seedQuery(): string {
 
 /** Company metadata (all OPTIONAL; multi-valued rows deduped first-wins downstream). */
 export function detailsQuery(qids: string[]): string {
-  return `SELECT ?company ?companyLabel ?companyDescription ?website ?inception ?hqLabel ?countryLabel ?industryLabel ?employees ?linkedinId WHERE {
+  return `SELECT ?company ?companyLabel ?companyDescription ?website ?inception ?hqLabel ?countryLabel ?industryLabel ?employees ?linkedinId ?lei ?cik ?ticker ?exchangeLabel WHERE {
   ${values(qids)}
   OPTIONAL { ?company wdt:P856 ?website . }
   OPTIONAL { ?company wdt:P571 ?inception . }
@@ -50,6 +51,18 @@ export function detailsQuery(qids: string[]): string {
   OPTIONAL { ?company wdt:P452 ?industry . }
   OPTIONAL { ?company wdt:P1128 ?employees . }
   OPTIONAL { ?company wdt:P4264 ?linkedinId . }
+  OPTIONAL { ?company wdt:P1278 ?lei . }
+  OPTIONAL { ?company wdt:P5531 ?cik . }
+  # A listing, not a bare symbol: AAPL on two exchanges is two instruments, so
+  # normalizeIdentifier('TICKER', …) rejects an unqualified symbol. Wikidata
+  # models this with the EXCHANGE as the statement (P414) and the ticker as its
+  # qualifier (pq:P249) — the same direction exitsQuery reads listings from —
+  # so a company listed twice yields two rows, which the mapper accumulates.
+  OPTIONAL {
+    ?company p:P414 ?listingSt .
+    ?listingSt ps:P414 ?exchange .
+    ?listingSt pq:P249 ?ticker .
+  }
   ${LABEL_SERVICE}
 }`;
 }
@@ -75,7 +88,7 @@ export function investorsQuery(qids: string[]): string {
  *  whether Wikidata records any P1951 edge for it. This is the investor-universe
  *  pass: it yields firms we can list even with an empty portfolio. */
 export function investorFirmsQuery(): string {
-  return `SELECT ?investor ?investorLabel ?investorDescription ?class ?website ?inception ?hqLabel ?countryLabel ?aum ?linkedinId WHERE {
+  return `SELECT ?investor ?investorLabel ?investorDescription ?class ?website ?inception ?hqLabel ?countryLabel ?aum ?linkedinId ?lei ?cik WHERE {
   VALUES ?class { ${INVESTOR_FIRM_CLASSES.map((q) => `wd:${q}`).join(' ')} }
   ?investor wdt:P31 ?class .
   OPTIONAL { ?investor wdt:P856 ?website . }
@@ -84,6 +97,8 @@ export function investorFirmsQuery(): string {
   OPTIONAL { ?investor wdt:P17 ?country . }
   OPTIONAL { ?investor wdt:P4103 ?aum . }
   OPTIONAL { ?investor wdt:P4264 ?linkedinId . }
+  OPTIONAL { ?investor wdt:P1278 ?lei . }
+  OPTIONAL { ?investor wdt:P5531 ?cik . }
   FILTER (?investor NOT IN (${EXCLUDED_INVESTOR_QIDS.map((q) => `wd:${q}`).join(', ')}))
   ${LABEL_SERVICE}
 }`;

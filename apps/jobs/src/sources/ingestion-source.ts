@@ -2,11 +2,23 @@ import type {
   CompanyStatus,
   ExitType,
   FundStrategy,
+  IdentifierScheme,
   InvestorType,
   RoundKind,
   Sector,
   Stage,
 } from '@repo/api';
+
+/**
+ * An external identifier a source knows *structurally* — a CIK it read off a
+ * filing header, a QID it queried by. Never one inferred from a name: a wrong
+ * identifier in the crosswalk joins two unrelated entities.
+ */
+export interface SourceIdentifier {
+  scheme: IdentifierScheme;
+  /** Raw as published; the writer normalizes and validates before storing. */
+  value: string;
+}
 
 /** One capital event contributed by a source. */
 export interface NormalizedRound {
@@ -105,6 +117,13 @@ export interface NormalizedRecord {
     headcount?: number;
     /** Defaults to 'Private'. */
     status?: CompanyStatus;
+    /** External identifiers the source read off the document. Matched against
+     *  the crosswalk *before* domain and name, because an identifier is a
+     *  statement by the publisher about which entity this is, where a domain is
+     *  a strong inference and a name a weak one. DOMAIN is not emitted here —
+     *  IngestService derives it from the stored column so the platform-host
+     *  rules in util/domain.ts stay in one place. */
+    identifiers?: SourceIdentifier[];
   };
 
   /** Every round this record contributes. Plural because a Reg CF issuer runs
@@ -147,6 +166,8 @@ export interface NormalizedInvestorFirm {
   /** Gross assets across those funds, USD. */
   assetsUsd?: number | null;
   foundedYear?: number | null;
+  /** Same contract as NormalizedRecord['company'].identifiers. */
+  identifiers?: SourceIdentifier[];
 }
 
 /** One private fund contributed by a source. */

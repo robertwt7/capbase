@@ -279,3 +279,66 @@ describe('hostnameOf', () => {
     expect(hostnameOf(url)).toBe(expected);
   });
 });
+
+describe('mapWikidata identifiers', () => {
+  const listing = (ticker: string, exchange: string) => ({
+    ...STRIPE_DETAILS,
+    ticker: lit(ticker),
+    exchangeLabel: lit(exchange),
+  });
+
+  it('always emits the QID it queried by', () => {
+    const r = mapWikidata(bundle({ details: [STRIPE_DETAILS] }))[0]!;
+    expect(r.company.identifiers).toEqual([{ scheme: 'WIKIDATA', value: 'Q1' }]);
+  });
+
+  it('collects the LEI and CIK when the entity carries them', () => {
+    const r = mapWikidata(
+      bundle({
+        details: [
+          { ...STRIPE_DETAILS, lei: lit('HWUPKR0MPOU8FGXBT394'), cik: lit('0000320193') },
+        ],
+      }),
+    )[0]!;
+    expect(r.company.identifiers).toEqual([
+      { scheme: 'WIKIDATA', value: 'Q1' },
+      { scheme: 'LEI', value: 'HWUPKR0MPOU8FGXBT394' },
+      { scheme: 'CIK', value: '0000320193' },
+    ]);
+  });
+
+  it('accumulates identifiers across the repeated rows one QID produces', () => {
+    // Each multi-valued property produces its own row. The record builder takes
+    // the FIRST row for its scalar fields, so reading identifiers off that row
+    // alone would silently lose every listing but one.
+    const r = mapWikidata(
+      bundle({
+        details: [listing('ABNB', 'Nasdaq'), listing('ABNB', 'New York Stock Exchange')],
+      }),
+    )[0]!;
+    expect(r.company.identifiers).toEqual([
+      { scheme: 'WIKIDATA', value: 'Q1' },
+      { scheme: 'TICKER', value: 'NASDAQ:ABNB' },
+      { scheme: 'TICKER', value: 'NYSE:ABNB' },
+    ]);
+  });
+
+  it('drops a ticker whose statement names no exchange', () => {
+    const r = mapWikidata(
+      bundle({ details: [{ ...STRIPE_DETAILS, ticker: lit('ABNB') }] }),
+    )[0]!;
+    expect(r.company.identifiers).toEqual([{ scheme: 'WIKIDATA', value: 'Q1' }]);
+  });
+
+  it('does not repeat an identifier that appears on several rows', () => {
+    const r = mapWikidata(
+      bundle({
+        details: [
+          { ...STRIPE_DETAILS, lei: lit('HWUPKR0MPOU8FGXBT394') },
+          { ...STRIPE_DETAILS, lei: lit('HWUPKR0MPOU8FGXBT394') },
+        ],
+      }),
+    )[0]!;
+    expect(r.company.identifiers).toHaveLength(2);
+  });
+});

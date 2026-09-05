@@ -10,6 +10,7 @@ import {
 } from '@repo/api';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_COMPANY, PUBLIC_COMPANY_RELATION } from '../prisma/public-filters';
 
 const WINDOW_MS = CONTRIBUTION_WINDOW_DAYS * 86_400_000;
 
@@ -44,7 +45,7 @@ export class UsersService {
   /** The user's saved companies (approved only), newest first. */
   async listSavedCompanies(userId: string): Promise<SavedCompanyItem[]> {
     const rows = await this.prisma.savedCompany.findMany({
-      where: { userId, company: { moderationStatus: 'APPROVED' } },
+      where: { userId, company: PUBLIC_COMPANY_RELATION },
       include: {
         company: {
           select: {
@@ -73,7 +74,7 @@ export class UsersService {
   /** Idempotently save an approved company by slug. */
   async saveCompany(userId: string, slug: string): Promise<SavedStatus> {
     const company = await this.prisma.company.findFirst({
-      where: { slug, moderationStatus: 'APPROVED' },
+      where: { slug, ...PUBLIC_COMPANY },
       select: { id: true },
     });
     if (!company) throw new NotFoundException('Company not found');

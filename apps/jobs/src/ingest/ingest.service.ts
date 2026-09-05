@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { InvestorType } from '@repo/api';
+import { normalizeIdentifier, type IdentifiableType, type InvestorType } from '@repo/api';
 import { toJsonValue } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,8 +12,16 @@ import {
   type NormalizedInvestor,
   type NormalizedInvestorFirm,
   type NormalizedRecord,
+  type SourceIdentifier,
 } from '../sources/ingestion-source';
 import { kebab } from '../util/slug';
+import {
+  emptyCounts,
+  recordCandidate,
+  writeIdentifier,
+  type IdentifierCounts,
+  type IdentifierWriterClient,
+} from './identifier.writer';
 
 export interface IngestResult {
   processed: number;
@@ -33,12 +41,17 @@ export interface RunOptions extends FetchOptions {
 interface MatchIndex {
   /** `${externalSource}:${externalId}` → company id. */
   byKey: Map<string, string>;
+  /** `${scheme}:${normalized value}` → company id. The strongest signal: an
+   *  identifier is a statement by the publisher about which entity this is. */
+  byIdentifier: Map<string, string>;
   /** domain → company id (first wins). */
   byDomain: Map<string, string>;
   /** normalizeName(name) → company id (first wins). */
   byName: Map<string, string>;
   /** Every slug in use, to mint unique ones without extra queries. */
   slugs: Set<string>;
+  /** What this run's identifier writes did, reported once at the end. */
+  identifiers: IdentifierCounts;
 }
 
 /** Lookup tables for funds (one query per run). */
@@ -69,6 +82,8 @@ type FundOutcome = 'written' | 'skipped';
 interface InvestorIndex {
   /** `${externalSource}:${externalId}` → investor id. */
   byKey: Map<string, string>;
+  /** `${scheme}:${normalized value}` → investor id, same contract as MatchIndex. */
+  byIdentifier: Map<string, string>;
   /** domain → investor id (first wins). */
   byDomain: Map<string, string>;
   /** normalizeInvestorName(name) → investor id (first wins). */
@@ -77,11 +92,55 @@ interface InvestorIndex {
    *  therefore beats whatever a holding guessed. */
   types: Map<string, InvestorType>;
   slugs: Set<string>;
+  identifiers: IdentifierCounts;
 }
 
 // The generic copy written on SEC-created rows; a richer source may replace it.
 const SEC_ONE_LINER_PREFIX = 'Private securities offering disclosed';
 const SEC_DESCRIPTION_MARKER = 'filed a Form D';
+
+/** How far a chain of merges is followed. A survivor can itself be merged
+ *  later; the cap stops a cycle from spinning. */
+const MAX_MERGE_HOPS = 5;
+
+/**
+ * id → the live row it resolves to, or null when the chain does not end at one.
+ *
+ * A merged-away row is KEPT, so every match key it owns — its provenance pair,
+ * its domain, its name — must now point at the survivor. Without this, the next
+ * ingest run's `byKey` lookup would miss the tombstone, create a fresh row, and
+ * silently undo the merge.
+ */
+function resolveTombstones<T extends { id: string; mergedIntoId: string | null }>(
+  rows: T[],
+): Map<string, string | null> {
+  // `?? null` so a row present in the set always resolves; `undefined` from a
+  // lookup then means only one thing — a chain pointing outside the set.
+  const mergedInto = new Map<string, string | null>();
+  for (const r of rows) mergedInto.set(r.id, r.mergedIntoId ?? null);
+
+  const out = new Map<string, string | null>();
+  for (const r of rows) {
+    let id: string = r.id;
+    let hops = 0;
+    for (;;) {
+      const next = mergedInto.get(id);
+      if (next === undefined) {
+        // Points at a row this query did not return: unresolvable.
+        id = '';
+        break;
+      }
+      if (next === null) break;
+      if (++hops > MAX_MERGE_HOPS) {
+        id = '';
+        break;
+      }
+      id = next;
+    }
+    out.set(r.id, id || null);
+  }
+  return out;
+}
 
 /** Field-level equality for revision diffs. Arrays compare element-wise (i.e.
  *  `industry`); BigInt money columns compare fine with `===`. */
@@ -208,32 +267,81 @@ export class IngestService {
       }
     }
 
+    const ids = index.identifiers;
+    const inv = investorIndex.identifiers;
     this.logger.log(
       `Ingest complete: ${upserted}/${processed} upserted, ${investors} investor firms, ${funds} funds`,
+    );
+    this.logger.log(
+      `Identifiers: ${ids.written + inv.written} written, ` +
+        `${ids.unchanged + inv.unchanged} unchanged, ` +
+        `${ids.skipped + inv.skipped} skipped (failed validation), ` +
+        `${ids.conflict + inv.conflict} conflicts (merge candidates recorded)`,
     );
     return { processed, upserted, investors, funds };
   }
 
   private async loadMatchIndex(): Promise<MatchIndex> {
     const existing = await this.prisma.company.findMany({
-      select: { id: true, slug: true, name: true, domain: true, externalSource: true, externalId: true },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        domain: true,
+        externalSource: true,
+        externalId: true,
+        mergedIntoId: true,
+      },
     });
+    // A merged-away row keeps its (externalSource, externalId), so a re-ingest
+    // of the loser has to land on the SURVIVOR. This is the half of the
+    // tombstone design that stops the next cron run from undoing a merge — and
+    // the reason the row is kept rather than deleted.
+    const survivorOf = resolveTombstones(existing);
     const index: MatchIndex = {
       byKey: new Map(),
+      byIdentifier: await this.loadIdentifiers('company', survivorOf),
       byDomain: new Map(),
       byName: new Map(),
       slugs: new Set(),
+      identifiers: emptyCounts(),
     };
     for (const c of existing) {
-      if (c.externalSource && c.externalId) {
-        index.byKey.set(`${c.externalSource}:${c.externalId}`, c.id);
-      }
-      if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, c.id);
-      const norm = normalizeName(c.name);
-      if (norm && !index.byName.has(norm)) index.byName.set(norm, c.id);
       index.slugs.add(c.slug);
+      const target = survivorOf.get(c.id);
+      // A tombstone whose chain does not end at a live row is skipped entirely:
+      // matching onto it would write to a row nobody can see.
+      if (!target) continue;
+      if (c.externalSource && c.externalId) {
+        index.byKey.set(`${c.externalSource}:${c.externalId}`, target);
+      }
+      if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, target);
+      const norm = normalizeName(c.name);
+      if (norm && !index.byName.has(norm)) index.byName.set(norm, target);
     }
     return index;
+  }
+
+  /** One query per run over EntityIdentifier for one entity type — the same
+   *  order of magnitude as the Company load beside it, and it replaces what
+   *  would otherwise be a lookup per incoming record. */
+  private async loadIdentifiers(
+    entityType: IdentifiableType,
+    survivorOf: Map<string, string | null>,
+  ): Promise<Map<string, string>> {
+    const rows = await this.prisma.entityIdentifier.findMany({
+      where: { entityType },
+      select: { scheme: true, value: true, entityId: true },
+    });
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      // A merge moves identifiers onto the survivor, so these usually point at
+      // a live row already; resolving anyway covers a row merged by some other
+      // path and keeps the index consistent with byKey/byDomain/byName.
+      const target = survivorOf.get(r.entityId) ?? r.entityId;
+      if (target) map.set(`${r.scheme}:${r.value}`, target);
+    }
+    return map;
   }
 
   private async loadInvestorIndex(): Promise<InvestorIndex> {
@@ -246,24 +354,30 @@ export class IngestService {
         domain: true,
         externalSource: true,
         externalId: true,
+        mergedIntoId: true,
       },
     });
+    const survivorOf = resolveTombstones(existing);
     const index: InvestorIndex = {
       byKey: new Map(),
+      byIdentifier: await this.loadIdentifiers('investor', survivorOf),
       byDomain: new Map(),
       byName: new Map(),
       types: new Map(),
       slugs: new Set(),
+      identifiers: emptyCounts(),
     };
     for (const i of existing) {
-      if (i.externalSource && i.externalId) {
-        index.byKey.set(`${i.externalSource}:${i.externalId}`, i.id);
-      }
-      if (i.domain && !index.byDomain.has(i.domain)) index.byDomain.set(i.domain, i.id);
-      const norm = normalizeInvestorName(i.name);
-      if (norm && !index.byName.has(norm)) index.byName.set(norm, i.id);
-      index.types.set(i.id, i.type as InvestorType);
       index.slugs.add(i.slug);
+      index.types.set(i.id, i.type as InvestorType);
+      const target = survivorOf.get(i.id);
+      if (!target) continue;
+      if (i.externalSource && i.externalId) {
+        index.byKey.set(`${i.externalSource}:${i.externalId}`, target);
+      }
+      if (i.domain && !index.byDomain.has(i.domain)) index.byDomain.set(i.domain, target);
+      const norm = normalizeInvestorName(i.name);
+      if (norm && !index.byName.has(norm)) index.byName.set(norm, target);
     }
     return index;
   }
@@ -602,19 +716,23 @@ export class IngestService {
         where: { id: ownId },
         data: { name: firm.name, type: firm.type, ...facts },
       });
+      await this.writeIdentifiers('investor', ownId, source, firm.identifiers, domain, index);
       return;
     }
 
-    // Domain first — it is the only high-confidence signal. ADV contains real
-    // false friends ("Sequoia Planning & Investments LLC", a "Benchmark Capital
-    // Group Ltd." that is a wealth manager), so a name-only match must never
-    // overwrite anything.
+    // Identifier, then domain, then name. A CRD is the filing's own statement
+    // of which firm this is; a domain is the strongest inference. ADV contains
+    // real false friends ("Sequoia Planning & Investments LLC", a "Benchmark
+    // Capital Group Ltd." that is a wealth manager), so a name-only match must
+    // never overwrite anything.
     const matchId =
+      (await this.matchByIdentifier('investor', firm.identifiers, index)) ??
       (domain ? index.byDomain.get(domain) : undefined) ??
       index.byName.get(normalizeInvestorName(firm.name));
     if (matchId) {
       await this.enrichInvestor(matchId, facts);
       index.byKey.set(key, matchId);
+      await this.writeIdentifiers('investor', matchId, source, firm.identifiers, domain, index);
       return;
     }
 
@@ -637,6 +755,7 @@ export class IngestService {
     const norm = normalizeInvestorName(firm.name);
     if (norm && !index.byName.has(norm)) index.byName.set(norm, created.id);
     index.types.set(created.id, firm.type);
+    await this.writeIdentifiers('investor', created.id, source, firm.identifiers, domain, index);
   }
 
   /** Fill blank fields on a matched investor. Never touches name, type, or any
@@ -670,6 +789,81 @@ export class IngestService {
     return candidate;
   }
 
+  /**
+   * Resolve a record's identifiers against the crosswalk.
+   *
+   * Two identifiers on one record pointing at *different* existing entities is
+   * itself a duplicate signal — the publisher says one entity, we hold two — so
+   * it records a candidate rather than picking one arbitrarily and silently.
+   * The first hit still wins, because refusing to match would create a third
+   * row for the same entity.
+   */
+  private async matchByIdentifier(
+    entityType: IdentifiableType,
+    identifiers: SourceIdentifier[] | undefined,
+    index: { byIdentifier: Map<string, string> },
+  ): Promise<string | undefined> {
+    if (!identifiers?.length) return undefined;
+
+    let first: string | undefined;
+    for (const { scheme, value } of identifiers) {
+      const normalized = normalizeIdentifier(scheme, value);
+      if (!normalized) continue;
+      const hit = index.byIdentifier.get(`${scheme}:${normalized}`);
+      if (!hit) continue;
+      if (first === undefined) {
+        first = hit;
+      } else if (hit !== first) {
+        await recordCandidate(this.prisma as unknown as IdentifierWriterClient, {
+          entityType,
+          aId: first,
+          bId: hit,
+          signal: 'identifier',
+          evidence: `${scheme}:${normalized}`,
+        });
+      }
+    }
+    return first;
+  }
+
+  /**
+   * Persist the identifiers a source published for a row, plus the row's
+   * domain.
+   *
+   * DOMAIN is derived here rather than emitted by each source so the
+   * platform/social host rules stay in `util/domain.ts` alone. The in-memory
+   * index is updated too, so a later record in the same run matches without a
+   * re-query — the same thing the `byDomain`/`byName` writes already do.
+   */
+  private async writeIdentifiers(
+    entityType: IdentifiableType,
+    entityId: string,
+    source: string,
+    identifiers: SourceIdentifier[] | undefined,
+    domain: string | null | undefined,
+    index: { byIdentifier: Map<string, string>; identifiers: IdentifierCounts },
+  ): Promise<void> {
+    const all: SourceIdentifier[] = [
+      ...(identifiers ?? []),
+      ...(domain ? [{ scheme: 'DOMAIN' as const, value: domain }] : []),
+    ];
+
+    for (const { scheme, value } of all) {
+      const outcome = await writeIdentifier(this.prisma as unknown as IdentifierWriterClient, {
+        scheme,
+        value,
+        entityType,
+        entityId,
+        source,
+      });
+      index.identifiers[outcome]++;
+      if (outcome === 'written') {
+        const normalized = normalizeIdentifier(scheme, value);
+        if (normalized) index.byIdentifier.set(`${scheme}:${normalized}`, entityId);
+      }
+    }
+  }
+
   /** Resolve the record to a company row: update its own provenance-keyed row,
    *  enrich a domain/name match, or create a new row. Returns the company id. */
   private async upsertCompany(r: NormalizedRecord, index: MatchIndex): Promise<string> {
@@ -687,14 +881,20 @@ export class IngestService {
         stage: c.stage,
         totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
       });
+      await this.writeIdentifiers('company', ownId, r.source, c.identifiers, c.domain, index);
       return ownId;
     }
 
+    // Identifier first: a CIK or a QID is a statement by the publisher about
+    // which entity this is. A shared domain is a strong inference and a shared
+    // name a weak one, so both stay behind it.
     const matchId =
+      (await this.matchByIdentifier('company', c.identifiers, index)) ??
       (c.domain ? index.byDomain.get(c.domain) : undefined) ??
       index.byName.get(normalizeName(c.name));
     if (matchId) {
       await this.enrich(matchId, r);
+      await this.writeIdentifiers('company', matchId, r.source, c.identifiers, c.domain, index);
       return matchId;
     }
 
@@ -726,6 +926,7 @@ export class IngestService {
     if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, created.id);
     const norm = normalizeName(c.name);
     if (norm && !index.byName.has(norm)) index.byName.set(norm, created.id);
+    await this.writeIdentifiers('company', created.id, r.source, c.identifiers, c.domain, index);
     return created.id;
   }
 

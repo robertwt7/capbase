@@ -8,6 +8,7 @@
 // the NestJS backend. They are re-exported here so existing component imports
 // (e.g. `import type { FundingRound } from '../lib/data'`) keep working.
 
+import { permanentRedirect } from 'next/navigation';
 import { cache } from 'react';
 
 import {
@@ -35,7 +36,7 @@ import {
   type Person,
 } from '@repo/api';
 
-import { apiFetch } from './api';
+import { ApiError, apiFetch } from './api';
 import { getToken } from './auth';
 
 export type {
@@ -511,6 +512,29 @@ export async function getCompanies(query: CompanyListQuery = {}): Promise<Pagina
   }
 }
 
+
+/**
+ * Turn the API's "this row was merged away" response into a real browser
+ * redirect.
+ *
+ * The API answers 301 with the survivor's slug in the *body* and deliberately
+ * no `Location` header: with one, the `fetch` below would follow it
+ * server-side and render the survivor's profile under the old URL, which is the
+ * opposite of a permanent redirect. Re-issuing it here moves the browser.
+ *
+ * Called from inside the data getters rather than at their call sites, so all
+ * ten callers are unchanged. `permanentRedirect` works by throwing a Next
+ * control-flow signal, so a caller that wraps the getter in `.catch()` will
+ * swallow it — the two that do are documented at their call sites.
+ */
+function redirectIfMerged(err: unknown, base: '/companies' | '/investors', suffix = ''): void {
+  if (!(err instanceof ApiError) || err.status !== 301) return;
+  const to = (err.body as { redirectTo?: unknown } | undefined)?.redirectTo;
+  if (typeof to === 'string' && to) {
+    permanentRedirect(`${base}/${encodeURIComponent(to)}${suffix}`);
+  }
+}
+
 // Wrapped in React cache() so generateMetadata, the page, and the OG image
 // route share one fetch per request.
 export const getCompanyDetail = cache(async function getCompanyDetail(
@@ -525,6 +549,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
       cache: 'no-store',
     });
   } catch (err) {
+    redirectIfMerged(err, '/companies');
     console.warn(`[data] getCompanyDetail(${slug}) fell back to mock data:`, err);
     const company = fallbackCompanies.find((c) => c.slug === slug);
     if (!company) return undefined;
@@ -564,6 +589,7 @@ export async function getCompanyHistory(
       `/companies/${encodeURIComponent(slug)}/history?page=${page}`,
     );
   } catch (err) {
+    redirectIfMerged(err, '/companies', '/history');
     console.warn(`[data] getCompanyHistory(${slug}) failed:`, err);
     return null;
   }
@@ -653,6 +679,7 @@ export async function getInvestor(slug: string): Promise<InvestorDetailResponse 
   try {
     return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`);
   } catch (err) {
+    redirectIfMerged(err, '/investors');
     console.warn(`[data] getInvestor(${slug}) fell back to mock data:`, err);
     const match = fallbackInvestors.find((i) => i.slug === slug);
     if (!match) return null;

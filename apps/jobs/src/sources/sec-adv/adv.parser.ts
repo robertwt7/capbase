@@ -157,6 +157,11 @@ export function mapAdvRows(rows: AdvRow[], types: readonly InvestorType[]): Norm
       fundCount: fundCount > 0 ? fundCount : null,
       assetsUsd: assets > 0 ? assets : null,
       foundedYear: null, // Form ADV does not disclose a founding year.
+      // Both are printed on the filing itself, so both are structural.
+      identifiers: [
+        { scheme: 'CRD' as const, value: crd },
+        ...(cik ? [{ scheme: 'CIK' as const, value: cik }] : []),
+      ],
     });
   }
 

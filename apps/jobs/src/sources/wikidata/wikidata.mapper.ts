@@ -7,6 +7,7 @@ import type {
   NormalizedInvestorFirm,
   NormalizedPerson,
   NormalizedRecord,
+  SourceIdentifier,
 } from '../ingestion-source';
 import { identifyingDomain } from '../../util/domain';
 import { investorTypeForClasses } from './investor-class-map';
@@ -51,6 +52,72 @@ export function sectorFor(text: string): Sector | null {
   return null;
 }
 
+/**
+ * Short, stable tokens for the exchanges whose full Wikidata label is a phrase.
+ *
+ * This canonicalises a value that already came from the source *structurally*
+ * (the pq:P414 qualifier on the ticker statement) — it never infers an exchange
+ * that the statement did not name. Anything unlisted falls back to the label
+ * with its non-alphanumerics stripped, which is uglier but still unambiguous.
+ */
+const EXCHANGE_TOKENS: Record<string, string> = {
+  'new york stock exchange': 'NYSE',
+  'nasdaq stock market': 'NASDAQ',
+  'london stock exchange': 'LSE',
+  'toronto stock exchange': 'TSX',
+  'australian securities exchange': 'ASX',
+  'hong kong stock exchange': 'HKEX',
+  'tokyo stock exchange': 'TSE',
+  'shanghai stock exchange': 'SSE',
+  'shenzhen stock exchange': 'SZSE',
+  'frankfurt stock exchange': 'FWB',
+  'six swiss exchange': 'SIX',
+  'bombay stock exchange': 'BSE',
+  'national stock exchange of india': 'NSE',
+};
+
+function exchangeToken(label: string): string {
+  return EXCHANGE_TOKENS[label.toLowerCase()] ?? label.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Collect the identifiers a detail query returned, per QID.
+ *
+ * Each multi-valued property produces its own row, so a company with two LEIs
+ * or two listings arrives as several rows for one QID. The record builder takes
+ * the *first* row for its scalar fields, so identifiers have to be accumulated
+ * across all of them here or everything past the first row is silently lost.
+ */
+function collectIdentifiers(
+  rows: SparqlBinding[],
+  subject: 'company' | 'investor',
+): Map<string, SourceIdentifier[]> {
+  const byQid = new Map<string, SourceIdentifier[]>();
+
+  for (const b of rows) {
+    const qid = qidOf(b[subject]);
+    if (!qid) continue;
+    const list = byQid.get(qid) ?? [];
+
+    const push = (scheme: SourceIdentifier['scheme'], value: string) => {
+      if (!list.some((i) => i.scheme === scheme && i.value === value)) list.push({ scheme, value });
+    };
+
+    if (b.lei?.value) push('LEI', b.lei.value);
+    if (b.cik?.value) push('CIK', b.cik.value);
+
+    const ticker = b.ticker?.value?.trim();
+    const exchange = labelOf(b.exchangeLabel);
+    // A ticker with no exchange is dropped rather than stored unqualified: the
+    // same symbol on two exchanges is two instruments.
+    if (ticker && exchange) push('TICKER', `${exchangeToken(exchange)}:${ticker}`);
+
+    byQid.set(qid, list);
+  }
+
+  return byQid;
+}
+
 /** Map the batched SPARQL bindings into normalized records, one per company
  *  QID that carries an English label. */
 export function mapWikidata(bundle: WikidataBundle): NormalizedRecord[] {
@@ -61,6 +128,7 @@ export function mapWikidata(bundle: WikidataBundle): NormalizedRecord[] {
     if (qid && !details.has(qid)) details.set(qid, b);
   }
 
+  const identifiersByQid = collectIdentifiers(bundle.details, 'company');
   const investorsByQid = groupBy(bundle.investors, 'company');
   const peopleByQid = groupBy(bundle.people, 'company');
   const acquisitionsByQid = groupBy(bundle.acquisitions, 'company');
@@ -111,6 +179,10 @@ export function mapWikidata(bundle: WikidataBundle): NormalizedRecord[] {
         description,
         headcount: numberOf(d.employees?.value) ?? 0,
         status: ipo ? 'Public' : acquired ? 'Acquired' : 'Private',
+        identifiers: [
+          { scheme: 'WIKIDATA', value: qid },
+          ...(identifiersByQid.get(qid) ?? []),
+        ],
       },
       investors,
       people,
@@ -153,6 +225,7 @@ function mapInvestors(qid: string, rows: SparqlBinding[]): NormalizedInvestor[] 
 /** Map the class-enumerated investor firms into standalone investor rows. One
  *  row per P31 class, so classes are collected per QID before typing. */
 export function mapInvestorFirms(rows: SparqlBinding[]): NormalizedInvestorFirm[] {
+  const identifiersByQid = collectIdentifiers(rows, 'investor');
   const byQid = new Map<string, { row: SparqlBinding; classes: string[] }>();
   for (const b of rows) {
     const qid = qidOf(b.investor);
@@ -184,6 +257,7 @@ export function mapInvestorFirms(rows: SparqlBinding[]): NormalizedInvestorFirm[
       description: rawDescription ? capitalize(rawDescription) : null,
       assetsUsd: numberOf(row.aum?.value),
       foundedYear: yearOf(row.inception?.value),
+      identifiers: [{ scheme: 'WIKIDATA', value: qid }, ...(identifiersByQid.get(qid) ?? [])],
     });
   }
   return out;

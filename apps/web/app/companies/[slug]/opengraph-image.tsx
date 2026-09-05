@@ -14,6 +14,12 @@ const MAX_BARS = 6;
 export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   // Unknown slug → default branding, never throw (the page itself 404s).
+  //
+  // This `.catch` also swallows the redirect signal `getCompanyDetail` raises
+  // for a merged-away slug, so a scraper asking for the old profile's OG image
+  // gets the default card rather than the survivor's. That is the right trade
+  // here: the page that embeds the image has already redirected, and a social
+  // card is not worth a second round trip on the 404 path.
   const result = await getCompanyDetail(slug).catch(() => undefined);
   const company = result?.company;
   const fonts = await loadOgFonts();

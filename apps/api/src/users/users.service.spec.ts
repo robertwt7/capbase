@@ -139,7 +139,12 @@ describe('UsersService saved companies', () => {
     ]);
     expect(prisma.savedCompany.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: 'u1', company: { moderationStatus: 'APPROVED' } },
+        // Approved AND not merged away — a tombstoned company is invisible
+        // on a watchlist too.
+        where: {
+          userId: 'u1',
+          company: { moderationStatus: 'APPROVED', mergedIntoId: null },
+        },
       }),
     );
   });
