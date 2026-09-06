@@ -111,7 +111,7 @@ export class UsersService {
     const rows = await Promise.all([
       this.prisma.company.findFirst(opts),
       this.prisma.fundingRound.findFirst(opts),
-      this.prisma.person.findFirst(opts),
+      this.prisma.personRole.findFirst(opts),
       this.prisma.investorHolding.findFirst(opts),
       this.prisma.acquisitionDeal.findFirst(opts),
       this.prisma.exitEvent.findFirst(opts),
@@ -147,7 +147,7 @@ export class UsersService {
       await Promise.all([
         this.prisma.company.findMany({ where, ...order }),
         this.prisma.fundingRound.findMany({ where, ...withCompany }),
-        this.prisma.person.findMany({ where, ...withCompany }),
+        this.prisma.personRole.findMany({ where, ...withCompany }),
         this.prisma.investorHolding.findMany({ where, ...withCompany }),
         this.prisma.acquisitionDeal.findMany({ where, ...withCompany }),
         this.prisma.exitEvent.findMany({ where, ...withCompany }),

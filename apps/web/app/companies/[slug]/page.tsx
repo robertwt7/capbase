@@ -279,9 +279,22 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <div className={`${panel} grid-cols-3 max-[860px]:grid-cols-1`}>
             {company.people.map((person) => (
               <div key={person.id} className={`${cell} flex flex-col gap-1 p-[18px]`}>
-                <span className="font-display text-[15px] font-semibold text-ink">
-                  {person.name}
-                </span>
+                {/* Linked only when the role resolved to a public person. A
+                    suppressed or unresolved one keeps the name the filing
+                    published — that is what the citation attests — as plain
+                    text rather than a broken link. */}
+                {person.personSlug ? (
+                  <Link
+                    href={`/people/${person.personSlug}`}
+                    className="font-display text-[15px] font-semibold text-ink transition-colors hover:text-graphite-700"
+                  >
+                    {person.name}
+                  </Link>
+                ) : (
+                  <span className="font-display text-[15px] font-semibold text-ink">
+                    {person.name}
+                  </span>
+                )}
                 <span className="text-[13px] text-graphite-700">
                   {person.role}
                   {person.title && person.title !== person.role ? ` · ${person.title}` : ''}

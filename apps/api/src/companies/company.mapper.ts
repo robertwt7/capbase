@@ -25,7 +25,7 @@ import type {
   ExitEvent as DbExitEvent,
   FundingRound as DbFundingRound,
   InvestorHolding as DbInvestorHolding,
-  Person as DbPerson,
+  PersonRole as DbPersonRole,
   RoundInvestor as DbRoundInvestor,
 } from '@repo/db';
 
@@ -36,7 +36,7 @@ type DbRoundWithInvestors = DbFundingRound & { investors: DbRoundInvestor[] };
 
 export type DbCompanyWithRelations = DbCompany & {
   rounds?: DbRoundWithInvestors[];
-  people?: DbPerson[];
+  people?: DbPersonRoleWithPerson[];
   investors?: DbInvestorHolding[];
   acquisitions?: DbAcquisitionDeal[];
   exits?: DbExitEvent[];
@@ -60,9 +60,20 @@ export function toFundingRound(row: DbRoundWithInvestors): FundingRound {
   };
 }
 
-export function toPerson(row: DbPerson): Person {
+/** The deduplicated human, when the caller included them. Only a live,
+ *  unsuppressed person gets a slug: a merged-away row has no page of its own,
+ *  and a suppressed one keeps the name the filing published — that is what the
+ *  citation attests — but stops linking to a profile. */
+type DbPersonRoleWithPerson = DbPersonRole & {
+  person?: { slug: string; mergedIntoId: string | null; suppressedAt: Date | null } | null;
+};
+
+export function toPerson(row: DbPersonRoleWithPerson): Person {
+  const person = row.person;
+  const linkable = person && !person.mergedIntoId && !person.suppressedAt;
   return {
     id: row.id,
+    personSlug: linkable ? person.slug : null,
     name: row.name,
     role: row.role,
     since: row.since,

@@ -24,6 +24,21 @@ export const PUBLIC_INVESTOR = {
   mergedIntoId: null,
 } satisfies Prisma.InvestorWhereInput;
 
+/**
+ * Three conditions, not two.
+ *
+ * Beyond approved-and-not-merged, a person can be SUPPRESSED: the privacy
+ * policy (§6) promises removal on request, and ingest auto-approves on every
+ * run, so a suppression has to be its own column that both the read path and
+ * the ingest match index honour — flipping `moderationStatus` would be undone
+ * by the next cron.
+ */
+export const PUBLIC_PERSON = {
+  moderationStatus: 'APPROVED',
+  mergedIntoId: null,
+  suppressedAt: null,
+} satisfies Prisma.PersonWhereInput;
+
 /** The same rule as a relation filter, for `where: { company: … }`. */
 export const PUBLIC_COMPANY_RELATION = {
   moderationStatus: 'APPROVED' as const,

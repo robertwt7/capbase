@@ -104,18 +104,42 @@ export function investorFirmsQuery(): string {
 }`;
 }
 
-/** Founders (P112) and CEOs (P169, with optional start qualifier). */
+/**
+ * Founders (P112) and CEOs (P169), with the statement's optional start (P580)
+ * and end (P582) qualifiers.
+ *
+ * `?company` is a variable name, not a claim: the same two properties describe
+ * an investor FIRM's officers, so the investor-universe pass reuses this query
+ * unchanged over firm QIDs. The role comes from the property identity, which is
+ * why a Wikidata role can carry a controlled `kind` where free-text sources
+ * cannot.
+ *
+ * `?person wdt:P31 wd:Q5` (instance of human) sits INSIDE each branch, and the
+ * placement is load-bearing twice over. P112's range genuinely includes
+ * organisations — Bloomberg Beta is "founded by" Bloomberg L.P., QIA by the
+ * State of Qatar — and without the constraint a firm's corporate parent becomes
+ * a Person row with a slug and a profile page. Measured over 200 firms it drops
+ * 75 rows to 71, all four of them organisations; over 200 companies it drops
+ * none. Placed *after* the UNION instead, the planner scans every human on
+ * Wikidata and WDQS answers "upstream request timeout"; bound inside the branch
+ * against an already-restricted ?person it is free.
+ */
 export function peopleQuery(qids: string[]): string {
-  return `SELECT ?company ?person ?personLabel ?role ?start WHERE {
+  return `SELECT ?company ?person ?personLabel ?role ?start ?end WHERE {
   ${values(qids)}
   {
     ?company p:P112 ?st .
     ?st ps:P112 ?person .
+    ?person wdt:P31 wd:Q5 .
+    OPTIONAL { ?st pq:P580 ?start . }
+    OPTIONAL { ?st pq:P582 ?end . }
     BIND("Founder" AS ?role)
   } UNION {
     ?company p:P169 ?st .
     ?st ps:P169 ?person .
+    ?person wdt:P31 wd:Q5 .
     OPTIONAL { ?st pq:P580 ?start . }
+    OPTIONAL { ?st pq:P582 ?end . }
     BIND("CEO" AS ?role)
   }
   ${LABEL_SERVICE}

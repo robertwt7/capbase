@@ -34,6 +34,10 @@ import {
   type MarketTotals,
   type Paginated,
   type Person,
+  type PersonDetailResponse,
+  type PersonListQuery,
+  type PersonSlugEntry,
+  type PersonSummary,
 } from '@repo/api';
 
 import { ApiError, apiFetch } from './api';
@@ -527,7 +531,11 @@ export async function getCompanies(query: CompanyListQuery = {}): Promise<Pagina
  * control-flow signal, so a caller that wraps the getter in `.catch()` will
  * swallow it — the two that do are documented at their call sites.
  */
-function redirectIfMerged(err: unknown, base: '/companies' | '/investors', suffix = ''): void {
+function redirectIfMerged(
+  err: unknown,
+  base: '/companies' | '/investors' | '/people',
+  suffix = '',
+): void {
   if (!(err instanceof ApiError) || err.status !== 301) return;
   const to = (err.body as { redirectTo?: unknown } | undefined)?.redirectTo;
   if (typeof to === 'string' && to) {
@@ -684,7 +692,47 @@ export async function getInvestor(slug: string): Promise<InvestorDetailResponse 
     const match = fallbackInvestors.find((i) => i.slug === slug);
     if (!match) return null;
     const funds = fallbackFunds.filter((f) => f.manager.slug === slug);
-    return { ...match, funds, namedFundCount: funds.length, citations: [] };
+    return { ...match, people: [], funds, namedFundCount: funds.length, citations: [] };
+  }
+}
+
+// --- People ----------------------------------------------------------------
+//
+// No offline fallback: the mock arrays never held people as an entity, and
+// inventing some would put fabricated humans on a public page. An unreachable
+// API yields an empty directory, which reads as "nothing here yet".
+
+export async function getPeople(query: PersonListQuery = {}): Promise<Paginated<PersonSummary>> {
+  try {
+    return await apiFetch<Paginated<PersonSummary>>(`/people${toSearchParams(query)}`);
+  } catch (err) {
+    console.warn('[data] getPeople failed; the directory renders empty:', err);
+    return { items: [], total: 0, page: query.page ?? 1, pageSize: query.pageSize ?? DEFAULT_PAGE_SIZE };
+  }
+}
+
+// Wrapped in React cache() so generateMetadata, the page and the OG image route
+// share one fetch per request.
+export const getPerson = cache(async function getPerson(
+  slug: string,
+): Promise<PersonDetailResponse | undefined> {
+  try {
+    return await apiFetch<PersonDetailResponse>(`/people/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    // A merged person's slug 301s with the survivor in the BODY; the redirect
+    // is issued here so no call site has to know about it.
+    redirectIfMerged(err, '/people');
+    console.warn(`[data] getPerson(${slug}) failed:`, err);
+    return undefined;
+  }
+});
+
+export async function getPersonSlugs(): Promise<PersonSlugEntry[]> {
+  try {
+    return await apiFetch<PersonSlugEntry[]>('/people/sitemap');
+  } catch (err) {
+    console.warn('[data] getPersonSlugs failed; sitemap gets no person URLs:', err);
+    return [];
   }
 }
 

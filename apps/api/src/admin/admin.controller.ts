@@ -24,6 +24,7 @@ import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.d
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { PeopleService } from '../people/people.service';
 import { AdminService } from './admin.service';
 import { ManualMergeCandidateDto, MergeDecisionDto } from './dto/merge.dto';
 import { ModerationDecisionDto } from './dto/moderation-decision.dto';
@@ -48,6 +49,7 @@ export class AdminController {
   constructor(
     private readonly admin: AdminService,
     private readonly merges: MergeService,
+    private readonly people: PeopleService,
   ) {}
 
   @Get('submissions')
@@ -117,5 +119,26 @@ export class AdminController {
   @Post('merges/records/:id/unmerge')
   unmerge(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.merges.unmerge(id, user.id);
+  }
+
+  // --- Privacy -------------------------------------------------------------
+
+  /**
+   * Remove a person from the public surface on request — the operational half
+   * of the privacy policy's §6 promise.
+   *
+   * A dedicated column, not `moderationStatus: 'REJECTED'`: ingest auto-approves
+   * every row it touches, so a rejection would be undone by the next cron run.
+   * The suppressed person 404s rather than 301s — a redirect would confirm they
+   * exist, which is the opposite of what the request asks for.
+   */
+  @Post('people/:id/suppress')
+  suppressPerson(@Param('id') id: string) {
+    return this.people.setSuppressed(id, true);
+  }
+
+  @Post('people/:id/unsuppress')
+  unsuppressPerson(@Param('id') id: string) {
+    return this.people.setSuppressed(id, false);
   }
 }

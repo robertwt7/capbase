@@ -54,6 +54,19 @@ describe('query builders', () => {
     expect(q).toContain('"CEO"');
   });
 
+  it('people query admits only humans', () => {
+    // P112's range includes organisations: Bloomberg Beta is "founded by"
+    // Bloomberg L.P. Without this a firm's corporate parent becomes a Person
+    // row with a slug and a profile page.
+    expect(peopleQuery(qids)).toContain('?person wdt:P31 wd:Q5 .');
+  });
+
+  it('people query reads both statement dates', () => {
+    const q = peopleQuery(qids);
+    expect(q).toContain('pq:P580 ?start');
+    expect(q).toContain('pq:P582 ?end');
+  });
+
   it('acquisitions query requires a dated owned-by statement', () => {
     const q = acquisitionsQuery(qids);
     expect(q).toContain('ps:P127 ?company');

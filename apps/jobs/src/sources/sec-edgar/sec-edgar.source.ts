@@ -10,7 +10,7 @@ import type {
 } from '../ingestion-source';
 import { kebab } from '../../util/slug';
 import { EdgarClient, type FormDRef } from './edgar.client';
-import { parseFormD } from './form-d.parser';
+import { parseFormD, roleKind } from './form-d.parser';
 import { fundStrategyForFormD } from './fund-strategy';
 import { secSector } from './sector-map';
 
@@ -112,6 +112,9 @@ export class SecEdgarSource implements IngestionSource {
       externalId: `${ref.cik}:person:${kebab(p.name)}`,
       name: p.name,
       role: p.role,
+      // Form D's relationship is a closed SEC enum, so this is read off the
+      // filing's structure rather than inferred from the words in it.
+      kind: roleKind(p.role),
       title: p.title,
       since: filingYear,
     }));

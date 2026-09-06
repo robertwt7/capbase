@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 
-import { parseFormD } from './form-d.parser';
+import { parseFormD, roleKind } from './form-d.parser';
 
 /** Minimal primary_doc.xml in the shape SEC EDGAR serves for Form D filings. */
 function relatedPerson(opts: {
@@ -245,5 +245,24 @@ describe('parseFormD', () => {
     it('returns an empty list when relatedPersonsList is absent', () => {
       expect(parseFormD(formDXml({}))?.people).toEqual([]);
     });
+  });
+});
+
+describe('roleKind', () => {
+  it('maps each value of the closed SEC relationship enum', () => {
+    expect(roleKind('Executive Officer')).toBe('Executive officer');
+    expect(roleKind('Director')).toBe('Director');
+    expect(roleKind('Promoter')).toBe('Promoter');
+  });
+
+  it('is case- and whitespace-insensitive, as filers are not', () => {
+    expect(roleKind('  executive officer ')).toBe('Executive officer');
+    expect(roleKind('DIRECTOR')).toBe('Director');
+  });
+
+  it('yields null for anything outside the enum rather than guessing', () => {
+    // A schema change should show up as missing data, never as wrong data.
+    expect(roleKind('Chief Executive Officer')).toBeNull();
+    expect(roleKind('')).toBeNull();
   });
 });

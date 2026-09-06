@@ -9,11 +9,13 @@ import {
   FUND_STRATEGIES,
   INVESTOR_SORTS,
   INVESTOR_TYPES,
+  PERSON_SORTS,
   SECTORS,
   STAGES,
   type CompanyListQuery,
   type FundListQuery,
   type InvestorListQuery,
+  type PersonListQuery,
 } from '@repo/api';
 
 type SearchParams = Record<string, string | undefined>;
@@ -42,6 +44,16 @@ export function investorListQuery(sp: SearchParams): InvestorListQuery {
     q: sp.q?.trim() || undefined,
     type: pick(sp.type, INVESTOR_TYPES),
     sort: pick(sp.sort, INVESTOR_SORTS),
+    page: pageOf(sp.page),
+  };
+}
+
+export function personListQuery(sp: SearchParams): PersonListQuery {
+  return {
+    q: sp.q?.trim() || undefined,
+    // Only 'true' enables it, so a stray value cannot widen the result set.
+    multiCompany: sp.multiCompany === 'true' || undefined,
+    sort: pick(sp.sort, PERSON_SORTS),
     page: pageOf(sp.page),
   };
 }

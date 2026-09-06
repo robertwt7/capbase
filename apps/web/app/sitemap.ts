@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 
 import { SECTORS } from '@repo/api';
 
-import { getCompanySlugs, getInvestorSlugs } from '@/lib/data';
+import { getCompanySlugs, getInvestorSlugs, getPersonSlugs } from '@/lib/data';
 import { sectorSlug } from '@/lib/markets';
 import { SITE_URL } from '@/lib/site';
 
@@ -10,6 +10,7 @@ const STATIC_PATHS = [
   '',
   '/companies',
   '/investors',
+  '/people',
   '/funds',
   '/markets',
   '/about',
@@ -21,7 +22,11 @@ const STATIC_PATHS = [
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [companies, investors] = await Promise.all([getCompanySlugs(), getInvestorSlugs()]);
+  const [companies, investors, people] = await Promise.all([
+    getCompanySlugs(),
+    getInvestorSlugs(),
+    getPersonSlugs(),
+  ]);
   return [
     ...STATIC_PATHS.map((p) => ({ url: `${SITE_URL}${p}` })),
     ...SECTORS.map((s) => ({ url: `${SITE_URL}/markets/${sectorSlug(s)}` })),
@@ -32,6 +37,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...investors.map((i) => ({
       url: `${SITE_URL}/investors/${i.slug}`,
       lastModified: i.updatedAt,
+    })),
+    ...people.map((p) => ({
+      url: `${SITE_URL}/people/${p.slug}`,
+      lastModified: p.updatedAt,
     })),
   ];
 }

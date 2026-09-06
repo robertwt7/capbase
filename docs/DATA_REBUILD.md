@@ -54,6 +54,21 @@ raised total sums `Company.totalRaisedUsd`, which SBIR never writes. Without tha
 adding SBIR would have moved the deal count from 9,880 to 134,359 and silently
 absorbed $56bn of federal money into "capital raised".
 
+**SBIR people are principal investigators, not the award's contact.** The bulk
+file's `Contact Name`/`Contact Title` pair was read here until 2026-09-06 and was
+wrong: it is populated almost only for DoD and NASA awards and names the federal
+desk that processed the grant. It put 10,963 rows in the corpus led by NSF program
+directors appearing at 299, 249 and 222 distinct companies each. `PI Name` is on
+every award and is firm-specific (of 3,392 distinct PIs, 3,373 appear at exactly
+one firm and none at three), so that is the column the parser reads, with the role
+as the constant `Principal investigator` — `PI Title` is present on only 70 of
+3,940 rows, so requiring it would drop 98% of them.
+
+A **from-scratch rebuild needs nothing extra**: the fixed parser never writes the
+agency rows. A database that predates the fix is corrected once with
+`make purge-sbir-people` (`-prod` on the VPS), which deletes those rows and their
+citations and is idempotent. It is deliberately **not** a step of `ingest-all`.
+
 **Funds come from two SEC sources and neither is sufficient alone.** Form ADV
 Schedule D 7.B.(1) names each private fund a filer reports and gives its type and
 gross asset value — but Form ADV never asks when a fund was raised or how much it
@@ -151,8 +166,38 @@ are held by a company row and an investor row at the same time (Wefunder,
 Republic, Shadow, Red Cell) — one organisation that both raises and invests, not
 a duplicate. A global unique would reject that legitimate data on the first run.
 
-Run it before `backfill-citations` and before `make merge-candidates`, which
-reads what it wrote.
+Run it before `backfill-citations`, before `make backfill-people` (whose QID
+pass writes through the same crosswalk), and before `make merge-candidates`,
+which reads what it wrote.
+
+## People
+
+`make backfill-people` collapses the `PersonRole` rows — one row per role a
+source published — into one `Person` per human. Like the two backfills above it
+touches **no network**: the only identifier any source publishes for a human is
+the Wikidata QID, and that is already embedded in the row's `externalId`
+(`${companyQid}:person:${personQid}:${role}`).
+
+Dedup is **identifier, then exact normalized full name**, in that order. A QID is
+the publisher's statement about *which* human this is, so it must claim the
+identity first — otherwise a name-keyed person is created and the QID lands on a
+second row for the same person. An exactly-equal normalized name then collapses
+the rest, which is what turns 75 Gaingels SPV filings signed by one person into
+one profile.
+
+Nothing looser runs automatically. A middle initial or a different spelling
+(`Adam Larson` vs `Adam J. Larson`) stays two people and becomes a
+`MergeCandidate` for a human, scoped to *one organisation* — the same first and
+last name at two different companies is a common name, not a duplicate. Groups
+over 8 people share a generic name and are skipped and logged rather than queued.
+
+This is what made the name rule defensible in the first place: with the SBIR
+agency contacts still in the corpus, 6,530 rows shared a name across nine or more
+companies. Without them the 9+ bucket is 23 name keys and every one is a real
+single human. **Run the purge first.**
+
+Idempotent: a role that already carries a `personId` is skipped, so a second run
+creates nothing.
 
 ## Merge candidates
 
@@ -213,6 +258,7 @@ make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SBIR
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_S1
 make backfill-sectors-prod
 make backfill-identifiers-prod  # the CIK/QID/CRD/UEI crosswalk
+make backfill-people-prod       # one Person per human, from the role rows
 make merge-candidates-prod      # propose duplicate pairs for the admin queue
 make backfill-citations-prod    # source links for every ingested row
 ```
@@ -395,6 +441,7 @@ result:
 INGEST_RECORD_REVISIONS=false make ingest SOURCE=SEC_FORM_C DAYS=1 LIMIT=1000000
 make backfill-sectors
 make backfill-identifiers
+make backfill-people
 make merge-candidates
 make backfill-citations
 make db-dump

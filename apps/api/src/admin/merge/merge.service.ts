@@ -4,6 +4,7 @@ import type {
   IdentifiableType,
   MergeCandidateItem,
   MergeQueueResponse,
+  MergeSide,
   MergeSignal,
   MergeStatus,
 } from '@repo/api';
@@ -67,7 +68,7 @@ function emptyMoved(): MovedRecord {
  *  already one row. */
 const COMPANY_CHILDREN = [
   'fundingRound',
-  'person',
+  'personRole',
   'investorHolding',
   'acquisitionDeal',
   'exitEvent',
@@ -83,7 +84,13 @@ const INVESTOR_CHILDREN = [
   { model: 'investorHolding', column: 'investorId' },
   { model: 'roundInvestor', column: 'investorId' },
   { model: 'fund', column: 'managerId' },
+  { model: 'personRole', column: 'investorId' },
 ] as const;
+
+/** A person owns exactly one thing: their roles. Note what is NOT here —
+ *  citations. A person citation anchors to the ROLE row, whose id never moves
+ *  in a person merge, so there is nothing to remap. */
+const PERSON_CHILDREN = [{ model: 'personRole', column: 'personId' }] as const;
 
 @Injectable()
 export class MergeService {
@@ -157,7 +164,7 @@ export class MergeService {
 
   /** One side of a candidate: identity, the fields a reviewer diffs, its
    *  identifiers, and the child counts that usually decide which row wins. */
-  private async side(entityType: IdentifiableType, id: string) {
+  private async side(entityType: IdentifiableType, id: string): Promise<MergeSide | null> {
     const identifiers = await this.identifiersFor(entityType, id);
 
     if (entityType === 'company') {
@@ -188,6 +195,31 @@ export class MergeService {
         createdAt: row.createdAt.toISOString(),
         identifiers,
         counts: { ...row._count },
+      };
+    }
+
+    if (entityType === 'person') {
+      const row = await this.prisma.person.findUnique({
+        where: { id },
+        include: { roles: { select: { companyId: true } } },
+      });
+      if (!row) return null;
+      const companies = new Set(row.roles.map((r) => r.companyId).filter(Boolean));
+      return {
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+        // A person has neither. Null rather than absent, so the diff renders
+        // the same two columns for every type.
+        domain: null,
+        hq: null,
+        // A person has no provenance of their own — the ROLE row carries the
+        // source that named them.
+        externalSource: null,
+        externalId: null,
+        createdAt: row.createdAt.toISOString(),
+        identifiers,
+        counts: { roles: row.roles.length, companies: companies.size },
       };
     }
 
@@ -316,7 +348,9 @@ export class MergeService {
       const moved =
         entityType === 'company'
           ? await this.mergeCompany(tx, survivorId, losingId, adminUserId)
-          : await this.mergeInvestor(tx, survivorId, losingId);
+          : entityType === 'person'
+            ? await this.mergePerson(tx, survivorId, losingId)
+            : await this.mergeInvestor(tx, survivorId, losingId);
 
       const record = await tx.mergeRecord.create({
         data: {
@@ -467,6 +501,71 @@ export class MergeService {
   }
 
   /**
+   * Fold one human into another.
+   *
+   * Two things this deliberately does NOT do:
+   *
+   *  - **No citation remap.** A person citation has `entityType: 'person'` but
+   *    its `entityId` is the ROLE row, which keeps its id through this merge —
+   *    exactly the overloading `'investor'` already carries. Nothing to move.
+   *  - **No Revision.** `Revision.companyId` is required and a person spans many
+   *    companies, so there is no single timeline this belongs on. Same reason
+   *    `mergeInvestor` writes none; the MergeRecord is the audit trail.
+   */
+  private async mergePerson(
+    tx: Prisma.TransactionClient,
+    survivorId: string,
+    losingId: string,
+  ): Promise<MovedRecord> {
+    const [survivor, loser] = await Promise.all([
+      tx.person.findUnique({ where: { id: survivorId } }),
+      tx.person.findUnique({ where: { id: losingId } }),
+    ]);
+    if (!survivor || !loser) throw new NotFoundException('One of the people does not exist');
+    if (survivor.mergedIntoId || loser.mergedIntoId) {
+      throw new BadRequestException('One of the rows has already been merged away');
+    }
+
+    const moved = emptyMoved();
+
+    for (const { model, column } of PERSON_CHILDREN) {
+      moved.remapped[model] = await remapByColumn(tx, model, column, losingId, survivorId);
+    }
+
+    await this.moveIdentifiers(tx, 'person', survivorId, losingId, moved);
+
+    await tx.person.update({ where: { id: losingId }, data: { mergedIntoId: survivorId } });
+    return moved;
+  }
+
+  private async unmergePerson(
+    tx: Prisma.TransactionClient,
+    survivorId: string,
+    losingId: string,
+    moved: MovedRecord,
+  ): Promise<void> {
+    const [survivor, loser] = await Promise.all([
+      tx.person.findUnique({ where: { id: survivorId } }),
+      tx.person.findUnique({ where: { id: losingId } }),
+    ]);
+    if (!survivor || !loser) throw new NotFoundException('One of the people no longer exists');
+    if (survivor.mergedIntoId) {
+      throw new BadRequestException('The survivor has since been merged away; unmerge that first');
+    }
+    if (loser.mergedIntoId !== survivorId) {
+      throw new BadRequestException('This row is no longer merged into that survivor');
+    }
+
+    for (const { model, column } of PERSON_CHILDREN) {
+      await restoreByColumn(tx, model, column, moved.remapped[model] ?? [], losingId);
+    }
+
+    await this.restoreIdentifiers(tx, 'person', losingId, moved);
+
+    await tx.person.update({ where: { id: losingId }, data: { mergedIntoId: null } });
+  }
+
+  /**
    * Repoint the loser's own citations at the survivor.
    *
    * Filtering on `entityId` is what makes this correct despite `entityType:
@@ -581,6 +680,8 @@ export class MergeService {
 
       if (entityType === 'company') {
         await this.unmergeCompany(tx, survivorId, losingId, moved, adminUserId);
+      } else if (entityType === 'person') {
+        await this.unmergePerson(tx, survivorId, losingId, moved);
       } else {
         await this.unmergeInvestor(tx, survivorId, losingId, moved);
       }
@@ -786,9 +887,15 @@ async function restoreByCompany(
   await delegate.updateMany({ where: { id: { in: ids } }, data: { companyId: losingId } });
 }
 
+/** Every model reachable by a plain owning-column remap — investor children and
+ *  person children alike. */
+type ColumnChild =
+  | (typeof INVESTOR_CHILDREN)[number]['model']
+  | (typeof PERSON_CHILDREN)[number]['model'];
+
 async function remapByColumn(
   tx: Prisma.TransactionClient,
-  model: (typeof INVESTOR_CHILDREN)[number]['model'],
+  model: ColumnChild,
   column: string,
   losingId: string,
   survivorId: string,
@@ -808,7 +915,7 @@ async function remapByColumn(
 
 async function restoreByColumn(
   tx: Prisma.TransactionClient,
-  model: (typeof INVESTOR_CHILDREN)[number]['model'],
+  model: ColumnChild,
   column: string,
   ids: string[],
   losingId: string,

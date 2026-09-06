@@ -1,0 +1,245 @@
+import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  DEFAULT_PAGE_SIZE,
+  type Citation,
+  type EntityIdentifierRef,
+  type Paginated,
+  type PersonDetailResponse,
+  type PersonListQuery,
+  type PersonSlugEntry,
+  type PersonSummary,
+} from '@repo/api';
+import type { Prisma } from '@repo/db';
+
+import { PrismaService } from '../prisma/prisma.service';
+import { MAX_MERGE_HOPS, PUBLIC_COMPANY_RELATION, PUBLIC_PERSON } from '../prisma/public-filters';
+import { toCitation } from '../provenance/citation.mapper';
+import { toEntityIdentifiers } from '../provenance/identifier.mapper';
+import { toPersonSummary, type PersonWithRoles } from './person.mapper';
+
+/** How many roles to include on each person's directory card. */
+const ROLE_SAMPLE = 6;
+
+/**
+ * Roles that count towards a public profile: approved, and — when the role
+ * hangs off a company — on a company the public can see. A firm-officer role
+ * has no company, so the OR is what keeps it visible.
+ */
+const PUBLIC_ROLES = {
+  moderationStatus: 'APPROVED',
+  OR: [{ company: PUBLIC_COMPANY_RELATION }, { companyId: null }],
+} satisfies Prisma.PersonRoleWhereInput;
+
+const ROLE_INCLUDE = {
+  company: { select: { slug: true, name: true, domain: true } },
+  investor: { select: { slug: true, name: true } },
+};
+
+@Injectable()
+export class PeopleService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * One page of people, read straight from the Person table.
+   *
+   * There is no role filter. The corpus holds thousands of distinct free-text
+   * role strings — Form C signature blocks are prose — and offering them as a
+   * vocabulary would be a lie about the data. Search, the multi-company flag
+   * and the sort are what the data actually supports.
+   */
+  async findAll(query: PersonListQuery = {}): Promise<Paginated<PersonSummary>> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+
+    const where: Prisma.PersonWhereInput = {
+      ...PUBLIC_PERSON,
+      ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
+      // "At more than one company" is asked of the ROLES, because that is where
+      // the company lives; a person with two roles at one company is not it.
+      ...(query.multiCompany && { roles: { some: { ...PUBLIC_ROLES, companyId: { not: null } } } }),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.person.count({ where }),
+      this.prisma.person.findMany({
+        where,
+        orderBy:
+          query.sort === 'name'
+            ? [{ name: 'asc' }]
+            : [{ roles: { _count: 'desc' } }, { name: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          roles: {
+            where: PUBLIC_ROLES,
+            take: ROLE_SAMPLE,
+            orderBy: { since: 'desc' },
+            include: ROLE_INCLUDE,
+          },
+          _count: { select: { roles: { where: PUBLIC_ROLES } } },
+        },
+      }),
+    ]);
+
+    const companyCounts = await this.countCompanies(rows.map((r) => r.id));
+    const items = rows.map((r) => ({
+      ...toPersonSummary(r as unknown as PersonWithRoles),
+      companyCount: companyCounts.get(r.id) ?? 0,
+    }));
+
+    // `multiCompany` in SQL can only ask "has a company role", which a person
+    // with two roles at ONE company also satisfies. The exact question is
+    // answered here, against the count above.
+    const filtered = query.multiCompany ? items.filter((p) => p.companyCount > 1) : items;
+
+    return { items: filtered, total, page, pageSize };
+  }
+
+  /**
+   * Distinct public companies per person, for the page being returned.
+   *
+   * One extra query rather than counting the role SAMPLE: a person at 75
+   * companies would otherwise show 6, because that is how many roles the card
+   * loads. A lower bound rendered as a count is a wrong number, not a small one.
+   * Bounded by the page, so it stays one query however large the corpus grows.
+   */
+  private async countCompanies(personIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (personIds.length === 0) return counts;
+
+    const pairs = await this.prisma.personRole.findMany({
+      where: { personId: { in: personIds }, companyId: { not: null }, ...PUBLIC_ROLES },
+      select: { personId: true, companyId: true },
+      distinct: ['personId', 'companyId'],
+    });
+    for (const p of pairs) {
+      if (p.personId) counts.set(p.personId, (counts.get(p.personId) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** Full profile: every public role, not a sample, plus the crosswalk and the
+   *  citations attesting those roles. */
+  async findOne(slug: string): Promise<PersonDetailResponse> {
+    const row = await this.prisma.person.findFirst({
+      where: { slug, ...PUBLIC_PERSON },
+      include: {
+        roles: { where: PUBLIC_ROLES, orderBy: { since: 'desc' }, include: ROLE_INCLUDE },
+        _count: { select: { roles: { where: PUBLIC_ROLES } } },
+      },
+    });
+    // Returns `never` — either a 301 to the survivor, or a 404.
+    if (!row) return this.redirectOrNotFound(slug);
+
+    const summary = toPersonSummary(row as unknown as PersonWithRoles);
+    return {
+      ...summary,
+      identifiers: await this.loadIdentifiers(row.id),
+      citations: await this.loadRoleCitations(summary.roles.map((r) => r.id)),
+    };
+  }
+
+  /**
+   * A slug no live person answers to: either a tombstone, or nothing. Always
+   * throws.
+   *
+   * A SUPPRESSED person is a 404, never a 301. A redirect would confirm they
+   * exist, which is the opposite of what a removal request asks for — so the
+   * chain resolver below never looks at a suppressed row.
+   *
+   * 301 carries the survivor's slug in the body and deliberately **no**
+   * `Location` header — see the identical note on CompaniesService. With one,
+   * the web app's server-side fetch would follow it and render the survivor
+   * under the old URL instead of moving the browser.
+   */
+  private async redirectOrNotFound(slug: string): Promise<never> {
+    const survivor = await this.resolveMerged(slug);
+    if (survivor) {
+      throw new HttpException(
+        { message: `Person "${slug}" was merged`, redirectTo: survivor, statusCode: 301 },
+        HttpStatus.MOVED_PERMANENTLY,
+      );
+    }
+    throw new NotFoundException(`Person "${slug}" not found`);
+  }
+
+  /** Follow a chain of merges to the live row at the end of it, or null. Capped
+   *  so a cycle cannot hang the request. */
+  private async resolveMerged(slug: string): Promise<string | null> {
+    let row = await this.prisma.person.findUnique({
+      where: { slug },
+      select: { slug: true, mergedIntoId: true, moderationStatus: true, suppressedAt: true },
+    });
+    if (!row?.mergedIntoId) return null;
+
+    let next: string | null = row.mergedIntoId;
+    for (let hop = 0; hop < MAX_MERGE_HOPS && next; hop++) {
+      row = await this.prisma.person.findUnique({
+        where: { id: next },
+        select: { slug: true, mergedIntoId: true, moderationStatus: true, suppressedAt: true },
+      });
+      if (!row) return null;
+      if (!row.mergedIntoId) {
+        // A chain ending at a suppressed person resolves to nothing: the 404
+        // is the answer, not a redirect that confirms they exist.
+        return row.moderationStatus === 'APPROVED' && !row.suppressedAt ? row.slug : null;
+      }
+      next = row.mergedIntoId;
+    }
+    return null;
+  }
+
+  /** The person's external identifiers (a Wikidata QID today) for the crosswalk
+   *  block. Detail read only — the directory list stays one query. */
+  private async loadIdentifiers(personId: string): Promise<EntityIdentifierRef[]> {
+    const rows = await this.prisma.entityIdentifier.findMany({
+      where: { entityType: 'person', entityId: personId },
+    });
+    return toEntityIdentifiers(rows);
+  }
+
+  /**
+   * Citations attaching to the ROLE rows in the response.
+   *
+   * `entityType: 'person'` means the role, not the human — the same overloading
+   * `'investor'` carries, where a citation means `InvestorHolding` while an
+   * identifier means `Investor`.
+   */
+  private async loadRoleCitations(roleIds: string[]): Promise<Citation[]> {
+    if (roleIds.length === 0) return [];
+    const rows = await this.prisma.citation.findMany({
+      where: { entityType: 'person', entityId: { in: roleIds } },
+      include: { source: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(toCitation);
+  }
+
+  /** Every public person slug, for the web sitemap. */
+  async listSlugs(): Promise<PersonSlugEntry[]> {
+    const rows = await this.prisma.person.findMany({
+      where: PUBLIC_PERSON,
+      select: { slug: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
+  }
+
+  /**
+   * Remove a person from the public surface on request (privacy policy §6), or
+   * put them back.
+   *
+   * A column of its own rather than `moderationStatus: 'REJECTED'`, because
+   * ingest auto-APPROVES every row it touches and would flip a rejected person
+   * straight back on the next cron run. The ingest match index reads this
+   * column and refuses to match or recreate a suppressed human.
+   */
+  async setSuppressed(id: string, suppressed: boolean): Promise<{ id: string; suppressedAt: string | null }> {
+    const row = await this.prisma.person.update({
+      where: { id },
+      data: { suppressedAt: suppressed ? new Date() : null },
+      select: { id: true, suppressedAt: true },
+    });
+    return { id: row.id, suppressedAt: row.suppressedAt?.toISOString() ?? null };
+  }
+}

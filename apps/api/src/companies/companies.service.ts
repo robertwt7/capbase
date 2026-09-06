@@ -48,7 +48,16 @@ const approvedChildren = {
     include: { investors: true },
     orderBy: { date: 'asc' as const },
   },
-  people: { where: { moderationStatus: 'APPROVED' as const } },
+  people: {
+    where: { moderationStatus: 'APPROVED' as const },
+    // The deduplicated human, so each card can link to their profile. The
+    // tombstone and suppression columns come too: `toPerson` links only a live,
+    // unsuppressed person, and a suppressed one keeps the name the filing
+    // published — that is what the citation attests — without a link.
+    include: {
+      person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } },
+    },
+  },
   investors: {
     where: { moderationStatus: 'APPROVED' as const },
     // The linked firm's slug turns each card into a link to its profile.
@@ -392,7 +401,7 @@ export class CompaniesService {
         return rows.map((r) => [r.id, `${r.name} round`]);
       }
       case 'person': {
-        const rows = await this.prisma.person.findMany({ where, select: { id: true, name: true } });
+        const rows = await this.prisma.personRole.findMany({ where, select: { id: true, name: true } });
         return rows.map((r) => [r.id, r.name]);
       }
       case 'investor': {
@@ -485,7 +494,7 @@ export class CompaniesService {
 
   async addPerson(slug: string, dto: CreatePersonDto, userId: string) {
     const company = await this.requireCompany(slug);
-    const created = await this.prisma.person.create({
+    const created = await this.prisma.personRole.create({
       data: {
         companyId: company.id,
         name: dto.name,

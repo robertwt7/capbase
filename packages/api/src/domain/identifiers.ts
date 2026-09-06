@@ -36,11 +36,26 @@ export const IDENTIFIER_SCHEMES: readonly IdentifierScheme[] = [
   'DOMAIN',
 ];
 
-/** What an identifier can point at. Funds are excluded on purpose: they are
- *  ingest-only, have no page, and their names collide degenerately. */
-export type IdentifiableType = 'company' | 'investor';
+/**
+ * What an identifier can point at.
+ *
+ * Funds are excluded on purpose: they are ingest-only, have no page, and their
+ * names collide degenerately. People are admitted because Wikidata publishes a
+ * QID for a human exactly as it does for a company — and that QID is the only
+ * scheme any source publishes for one, so no other scheme is ever minted here.
+ *
+ * `'person'` points at the deduplicated `Person` row, NOT at the `PersonRole`
+ * edge. That is the opposite of `CitableType`'s `'person'`, which means the
+ * role — the same overloading `'investor'` already carries, where a citation
+ * means `InvestorHolding` and an identifier means `Investor`.
+ */
+export type IdentifiableType = 'company' | 'investor' | 'person';
 
-export const IDENTIFIABLE_TYPES: readonly IdentifiableType[] = ['company', 'investor'];
+export const IDENTIFIABLE_TYPES: readonly IdentifiableType[] = [
+  'company',
+  'investor',
+  'person',
+];
 
 /** An identifier as it reaches a reader: canonical value plus the issuer's
  *  public page for it, when the issuer publishes one. */

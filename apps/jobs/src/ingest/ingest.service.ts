@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { normalizeIdentifier, type IdentifiableType, type InvestorType } from '@repo/api';
+import {
+  normalizeIdentifier,
+  normalizePersonName,
+  type IdentifiableType,
+  type InvestorType,
+} from '@repo/api';
 import { toJsonValue } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,6 +16,7 @@ import {
   type NormalizedFund,
   type NormalizedInvestor,
   type NormalizedInvestorFirm,
+  type NormalizedPerson,
   type NormalizedRecord,
   type SourceIdentifier,
 } from '../sources/ingestion-source';
@@ -22,6 +28,7 @@ import {
   type IdentifierCounts,
   type IdentifierWriterClient,
 } from './identifier.writer';
+import { uniquePersonSlug } from './person-matcher';
 
 export interface IngestResult {
   processed: number;
@@ -93,6 +100,30 @@ interface InvestorIndex {
   types: Map<string, InvestorType>;
   slugs: Set<string>;
   identifiers: IdentifierCounts;
+}
+
+/**
+ * The same lookup tables for people.
+ *
+ * There is deliberately no `byKey`: a person has no provenance pair of their
+ * own. The role row carries `(externalSource, externalId)`; the human behind it
+ * is identified by a QID or, failing that, by an exactly-equal normalized name.
+ */
+interface PersonIndex {
+  /** `${scheme}:${normalized value}` → person id, same contract as MatchIndex. */
+  byIdentifier: Map<string, string>;
+  /** normalizeName(name) → person id (first wins). */
+  byName: Map<string, string>;
+  slugs: Set<string>;
+  identifiers: IdentifierCounts;
+  /** Normalized names of people removed on request. Held so a suppressed human
+   *  is neither matched nor recreated — ingest auto-APPROVES, so without this
+   *  the next cron run would undo the removal. */
+  suppressed: Set<string>;
+  /** Created this run, against attached: the ratio is what says whether the
+   *  matching is working at all. */
+  created: number;
+  attached: number;
 }
 
 // The generic copy written on SEC-created rows; a richer source may replace it.
@@ -183,6 +214,7 @@ export class IngestService {
 
     const index = await this.loadMatchIndex();
     const investorIndex = await this.loadInvestorIndex();
+    const personIndex = await this.loadPersonIndex();
     const fundIndex = await this.loadFundIndex();
     let processed = 0;
     let upserted = 0;
@@ -196,7 +228,7 @@ export class IngestService {
       let done = 0;
       for (const record of records) {
         try {
-          await this.upsert(record, index, investorIndex);
+          await this.upsert(record, index, investorIndex, personIndex);
           upserted += 1;
         } catch (err) {
           const e = err as { code?: string; meta?: unknown; message?: string };
@@ -217,7 +249,7 @@ export class IngestService {
         let firmsDone = 0;
         for (const firm of firms) {
           try {
-            await this.upsertInvestorFirm(firm, source.name, investorIndex);
+            await this.upsertInvestorFirm(firm, source.name, investorIndex, personIndex);
             investors += 1;
           } catch (err) {
             const e = err as { code?: string; meta?: unknown; message?: string };
@@ -269,14 +301,20 @@ export class IngestService {
 
     const ids = index.identifiers;
     const inv = investorIndex.identifiers;
+    const per = personIndex.identifiers;
     this.logger.log(
       `Ingest complete: ${upserted}/${processed} upserted, ${investors} investor firms, ${funds} funds`,
     );
+    // Created vs attached is the number that says whether matching is working:
+    // a run that creates a person for every role is not deduplicating.
     this.logger.log(
-      `Identifiers: ${ids.written + inv.written} written, ` +
-        `${ids.unchanged + inv.unchanged} unchanged, ` +
-        `${ids.skipped + inv.skipped} skipped (failed validation), ` +
-        `${ids.conflict + inv.conflict} conflicts (merge candidates recorded)`,
+      `People: ${personIndex.created} created, ${personIndex.attached} roles attached to a person we already held`,
+    );
+    this.logger.log(
+      `Identifiers: ${ids.written + inv.written + per.written} written, ` +
+        `${ids.unchanged + inv.unchanged + per.unchanged} unchanged, ` +
+        `${ids.skipped + inv.skipped + per.skipped} skipped (failed validation), ` +
+        `${ids.conflict + inv.conflict + per.conflict} conflicts (merge candidates recorded)`,
     );
     return { processed, upserted, investors, funds };
   }
@@ -379,6 +417,64 @@ export class IngestService {
       const norm = normalizeInvestorName(i.name);
       if (norm && !index.byName.has(norm)) index.byName.set(norm, target);
     }
+    return index;
+  }
+
+  /**
+   * One query per run over Person, plus the person slice of EntityIdentifier.
+   *
+   * Like `loadInvestorIndex` it resolves merge tombstones, which is what makes a
+   * person merge stick across the next cron run — a merged-away row is KEPT, so
+   * every key it owns must now point at the survivor. Unlike the others it also
+   * honours `suppressedAt`: a removal request has to survive ingest, and ingest
+   * auto-APPROVES, so a suppressed person is neither matched (their roles stay
+   * unresolved rather than reviving them) nor recreated under a new row.
+   */
+  private async loadPersonIndex(): Promise<PersonIndex> {
+    const existing = await this.prisma.person.findMany({
+      select: {
+        id: true,
+        slug: true,
+        normalizedName: true,
+        mergedIntoId: true,
+        suppressedAt: true,
+      },
+    });
+    const survivorOf = resolveTombstones(existing);
+    const index: PersonIndex = {
+      byIdentifier: await this.loadIdentifiers('person', survivorOf),
+      byName: new Map(),
+      slugs: new Set(),
+      identifiers: emptyCounts(),
+      suppressed: new Set(),
+      created: 0,
+      attached: 0,
+    };
+
+    const suppressedIds = new Set<string>();
+    for (const p of existing) {
+      // Reserved even for a tombstone or a suppressed row: a new person must
+      // never take a slug whose URL already means someone else.
+      index.slugs.add(p.slug);
+      if (p.suppressedAt) {
+        suppressedIds.add(p.id);
+        if (p.normalizedName) index.suppressed.add(p.normalizedName);
+        continue;
+      }
+      const target = survivorOf.get(p.id);
+      if (!target) continue;
+      if (p.normalizedName && !index.byName.has(p.normalizedName)) {
+        index.byName.set(p.normalizedName, target);
+      }
+    }
+
+    // A suppressed person's identifiers must not match either — the QID is the
+    // strongest key there is, and honouring only the name would leak them back
+    // in through Wikidata.
+    for (const [key, id] of index.byIdentifier) {
+      if (suppressedIds.has(id)) index.byIdentifier.delete(key);
+    }
+
     return index;
   }
 
@@ -517,6 +613,7 @@ export class IngestService {
     r: NormalizedRecord,
     index: MatchIndex,
     investorIndex: InvestorIndex,
+    personIndex: PersonIndex,
   ): Promise<void> {
     const companyId = await this.upsertCompany(r, index);
 
@@ -544,23 +641,7 @@ export class IngestService {
     }
 
     for (const p of r.people ?? []) {
-      await this.prisma.person.upsert({
-        where: {
-          externalSource_externalId: { externalSource: r.source, externalId: p.externalId },
-        },
-        create: {
-          companyId,
-          name: p.name,
-          role: p.role,
-          since: p.since,
-          title: p.title ?? null,
-          linkedinUrl: p.linkedinUrl ?? null,
-          externalSource: r.source,
-          externalId: p.externalId,
-          moderationStatus: 'APPROVED',
-        },
-        update: { role: p.role, title: p.title ?? null },
-      });
+      await this.writePersonRole(p, r.source, personIndex, { companyId });
     }
 
     for (const i of r.investors ?? []) {
@@ -640,6 +721,113 @@ export class IngestService {
   }
 
   /**
+   * Write one role row, resolved to the human behind it.
+   *
+   * `owner` carries exactly one of companyId / investorId — a role hangs off a
+   * company or off an investor firm, never both.
+   */
+  private async writePersonRole(
+    p: NormalizedPerson,
+    source: string,
+    index: PersonIndex,
+    owner: { companyId: string } | { investorId: string },
+  ): Promise<void> {
+    const personId = await this.resolvePerson(p, source, index);
+    await this.prisma.personRole.upsert({
+      where: {
+        externalSource_externalId: { externalSource: source, externalId: p.externalId },
+      },
+      create: {
+        ...owner,
+        personId,
+        name: p.name,
+        role: p.role,
+        kind: p.kind ?? null,
+        since: p.since,
+        endYear: p.endYear ?? null,
+        title: p.title ?? null,
+        linkedinUrl: p.linkedinUrl ?? null,
+        externalSource: source,
+        externalId: p.externalId,
+        moderationStatus: 'APPROVED',
+      },
+      // personId is refreshed on every run so a merge, a suppression lift or a
+      // late-arriving QID reaches rows written before it.
+      update: { personId, role: p.role, kind: p.kind ?? null, title: p.title ?? null, endYear: p.endYear ?? null },
+    });
+  }
+
+  /**
+   * Resolve a role to a `Person`, creating one when the human is new.
+   *
+   * Identifier first, for the same reason `upsertCompany` matches that way: a
+   * QID is a statement by the publisher about WHICH human this is, where an
+   * exactly-equal normalized name is a much weaker claim. Nothing looser runs
+   * here — spelling variants go to the merge queue, never to an automatic
+   * merge.
+   *
+   * Null means the role stays unattached: either the name normalizes to nothing
+   * (no identity can be minted from a blank), or the person asked to be
+   * removed, in which case recreating them is exactly what must not happen.
+   */
+  private async resolvePerson(
+    p: NormalizedPerson,
+    source: string,
+    index: PersonIndex,
+  ): Promise<string | null> {
+    // The person key, not the company one: it lives in @repo/api so ingest and
+    // the moderation path can never disagree about a name they both see.
+    const norm = normalizePersonName(p.name);
+    if (!norm) return null;
+    if (index.suppressed.has(norm)) return null;
+
+    const known =
+      (await this.matchByIdentifier('person', p.identifiers, index)) ?? index.byName.get(norm);
+    if (known) {
+      index.attached++;
+      return known;
+    }
+
+    const slug = uniquePersonSlug(p.name, index.slugs);
+    const created = await this.prisma.person.create({
+      data: { slug, name: p.name, normalizedName: norm, moderationStatus: 'APPROVED' },
+      select: { id: true },
+    });
+
+    // Update the in-memory index so a later record in the same run matches
+    // without a re-query — what the byDomain/byName writes already do.
+    index.byName.set(norm, created.id);
+    index.created++;
+    await this.writePersonIdentifiers(created.id, source, p.identifiers, index);
+    return created.id;
+  }
+
+  /** A person's identifiers (only WIKIDATA today). A conflict — the QID is
+   *  already held by a different person — records a candidate and does not
+   *  overwrite, exactly as it does for companies. */
+  private async writePersonIdentifiers(
+    personId: string,
+    source: string,
+    identifiers: SourceIdentifier[] | undefined,
+    index: PersonIndex,
+  ): Promise<void> {
+    for (const { scheme, value } of identifiers ?? []) {
+      const outcome = await writeIdentifier(this.prisma as unknown as IdentifierWriterClient, {
+        scheme,
+        value,
+        entityType: 'person',
+        entityId: personId,
+        source,
+      });
+      index.identifiers[outcome]++;
+      if (outcome === 'written') {
+        const normalized = normalizeIdentifier(scheme, value);
+        if (normalized) index.byIdentifier.set(`${scheme}:${normalized}`, personId);
+      }
+    }
+  }
+
+  /**
    * Resolve a holding's investor to an Investor row, creating a minimal one when
    * the firm is new. Matching order mirrors upsertCompany: provenance key →
    * normalized name. Holdings carry no website, so there is no domain to match on.
@@ -690,6 +878,7 @@ export class IngestService {
     firm: NormalizedInvestorFirm,
     source: string,
     index: InvestorIndex,
+    personIndex: PersonIndex,
   ): Promise<void> {
     // The source decides the domain: it alone knows whether the website's host
     // identifies the firm or belongs to a platform (see util/domain.ts).
@@ -717,6 +906,7 @@ export class IngestService {
         data: { name: firm.name, type: firm.type, ...facts },
       });
       await this.writeIdentifiers('investor', ownId, source, firm.identifiers, domain, index);
+      await this.writeFirmPeople(firm, source, ownId, personIndex);
       return;
     }
 
@@ -733,6 +923,7 @@ export class IngestService {
       await this.enrichInvestor(matchId, facts);
       index.byKey.set(key, matchId);
       await this.writeIdentifiers('investor', matchId, source, firm.identifiers, domain, index);
+      await this.writeFirmPeople(firm, source, matchId, personIndex);
       return;
     }
 
@@ -756,6 +947,20 @@ export class IngestService {
     if (norm && !index.byName.has(norm)) index.byName.set(norm, created.id);
     index.types.set(created.id, firm.type);
     await this.writeIdentifiers('investor', created.id, source, firm.identifiers, domain, index);
+    await this.writeFirmPeople(firm, source, created.id, personIndex);
+  }
+
+  /** The firm's own officers, as role rows carrying `investorId` and no
+   *  company — the investor half of the person join. */
+  private async writeFirmPeople(
+    firm: NormalizedInvestorFirm,
+    source: string,
+    investorId: string,
+    personIndex: PersonIndex,
+  ): Promise<void> {
+    for (const p of firm.people ?? []) {
+      await this.writePersonRole(p, source, personIndex, { investorId });
+    }
   }
 
   /** Fill blank fields on a matched investor. Never touches name, type, or any

@@ -14,7 +14,7 @@ import { formatDate } from '../../../lib/format';
 import { mergeAction, rejectAction, unmergeAction } from './actions';
 
 const STATUSES: MergeStatus[] = ['PENDING', 'MERGED', 'REJECTED'];
-const TYPES: IdentifiableType[] = ['company', 'investor'];
+const TYPES: IdentifiableType[] = ['company', 'investor', 'person'];
 
 /** What each signal means, so a reviewer knows how much to trust the proposal
  *  before opening both rows. */
@@ -191,6 +191,13 @@ function CandidateCard({ item }: { item: MergeCandidateItem }) {
   );
 }
 
+/** Where each entity type's public profile lives. */
+const PROFILE_PATH: Record<IdentifiableType, string> = {
+  company: 'companies',
+  investor: 'investors',
+  person: 'people',
+};
+
 function SidePanel({
   side,
   entityType,
@@ -206,20 +213,27 @@ function SidePanel({
     <div className="rounded-md border border-line bg-surface p-4">
       <p className="font-display text-[17px] font-semibold text-ink">{side.name}</p>
       <Link
-        href={`/${entityType === 'company' ? 'companies' : 'investors'}/${side.slug}`}
+        href={`/${PROFILE_PATH[entityType]}/${side.slug}`}
         className="font-mono text-[12px] text-graphite-500 underline underline-offset-[3px] transition-colors hover:text-ink"
       >
         /{side.slug}
       </Link>
 
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-        <Fact label="Domain" value={side.domain} marked={differs('domain')} />
-        <Fact label="HQ" value={side.hq} marked={differs('hq')} />
-        <Fact
-          label="Source"
-          value={side.externalSource ? `${side.externalSource}:${side.externalId ?? ''}` : null}
-          marked={differs('externalSource')}
-        />
+        {/* A person has no domain, no HQ and no provenance of their own — the
+            role row carries the source that named them — so those rows are
+            dropped rather than rendered as three em dashes. */}
+        {entityType !== 'person' && (
+          <>
+            <Fact label="Domain" value={side.domain} marked={differs('domain')} />
+            <Fact label="HQ" value={side.hq} marked={differs('hq')} />
+            <Fact
+              label="Source"
+              value={side.externalSource ? `${side.externalSource}:${side.externalId ?? ''}` : null}
+              marked={differs('externalSource')}
+            />
+          </>
+        )}
         <Fact label="Created" value={formatDate(side.createdAt)} marked={false} />
       </dl>
 

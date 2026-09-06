@@ -4,6 +4,7 @@ import type {
   FundStrategy,
   IdentifierScheme,
   InvestorType,
+  RoleKind,
   RoundKind,
   Sector,
   Stage,
@@ -33,15 +34,29 @@ export interface NormalizedRound {
   kind?: RoundKind;
 }
 
-/** An executive/director/founder attached to a company. */
+/** An executive/director/founder attached to a company or an investor firm. */
 export interface NormalizedPerson {
   /** Stable within the source, e.g. `${cik}:person:${slug}`. */
   externalId: string;
   name: string;
   role: string;
+  /**
+   * The role as a controlled value, set ONLY when the source's own vocabulary
+   * is closed and structural — Form D's `relationship` enum, Wikidata's
+   * P112/P169 property identity. Never derived by reading a free-text title:
+   * Form C's signature-block roles are prose and stay null, the same stance
+   * `primarySector` takes on Form C's missing industry field.
+   */
+  kind?: RoleKind | null;
   since: number;
+  /** When the role ended, when the source dates it. Null means "no end
+   *  recorded", which is not the same as "still there". */
+  endYear?: number | null;
   title?: string | null;
   linkedinUrl?: string | null;
+  /** Identifiers for the PERSON, not for the role. Only WIKIDATA today — it is
+   *  the one scheme any source publishes for a human. */
+  identifiers?: SourceIdentifier[];
 }
 
 /** An investor holding a position in the company (not tied to a round). */
@@ -168,6 +183,10 @@ export interface NormalizedInvestorFirm {
   foundedYear?: number | null;
   /** Same contract as NormalizedRecord['company'].identifiers. */
   identifiers?: SourceIdentifier[];
+  /** Officers of the firm itself — the investor half of the person join. Same
+   *  shape as a company's people; the resulting role row carries `investorId`
+   *  instead of `companyId`. */
+  people?: NormalizedPerson[];
 }
 
 /** One private fund contributed by a source. */

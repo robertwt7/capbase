@@ -7,6 +7,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { FundsModule } from './funds/funds.module';
 import { InvestorsModule } from './investors/investors.module';
 import { MarketModule } from './market/market.module';
+import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
@@ -21,6 +22,7 @@ import { AppController } from './app.controller';
     AuthModule,
     CompaniesModule,
     InvestorsModule,
+    PeopleModule,
     FundsModule,
     MarketModule,
     AdminModule,

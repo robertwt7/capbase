@@ -78,10 +78,49 @@ describe('mapWikidata', () => {
         rounds: 1,
       },
     ]);
+    // `kind` comes from the PROPERTY (P112/P169), not from reading the role
+    // string, and the identifier is the person's own QID — the key that lets a
+    // serial founder be one human across every company they appear at.
     expect(r.people).toEqual([
-      { externalId: 'Q1:person:Q30:Founder', name: 'Patrick Collison', role: 'Founder', since: 2010 },
-      { externalId: 'Q1:person:Q30:CEO', name: 'Patrick Collison', role: 'CEO', since: 2011 },
+      {
+        externalId: 'Q1:person:Q30:Founder',
+        name: 'Patrick Collison',
+        role: 'Founder',
+        kind: 'Founder',
+        since: 2010,
+        endYear: null,
+        identifiers: [{ scheme: 'WIKIDATA', value: 'Q30' }],
+      },
+      {
+        externalId: 'Q1:person:Q30:CEO',
+        name: 'Patrick Collison',
+        role: 'CEO',
+        kind: 'CEO',
+        since: 2011,
+        endYear: null,
+        identifiers: [{ scheme: 'WIKIDATA', value: 'Q30' }],
+      },
     ]);
+  });
+
+  it('dates the end of a role only when the statement does', () => {
+    const records = mapWikidata(
+      bundle({
+        details: [{ company: uri('Q1'), companyLabel: lit('Stripe') }],
+        people: [
+          {
+            company: uri('Q1'),
+            person: uri('Q30'),
+            personLabel: lit('Patrick Collison'),
+            role: lit('CEO'),
+            start: lit('2011-06-01T00:00:00Z'),
+            end: lit('2020-03-01T00:00:00Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(records[0]!.people![0]).toMatchObject({ since: 2011, endYear: 2020 });
   });
 
   it('skips companies whose English label is missing (bare QID label)', () => {

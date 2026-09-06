@@ -1,6 +1,25 @@
+import type { RoleKind } from '@repo/api';
 import { XMLParser } from 'fast-xml-parser';
 
 import { looksLikeEntityName } from '../../util/text';
+
+/**
+ * Form D's `relationship` element is a CLOSED SEC enum — the filer picks from
+ * three values, it is not free text — which is the whole reason a role from
+ * this source can carry a controlled `kind` at all. An unrecognised value maps
+ * to null rather than being guessed at, so a schema change shows up as missing
+ * data instead of wrong data.
+ */
+const SEC_ROLE_KINDS: Record<string, RoleKind> = {
+  'executive officer': 'Executive officer',
+  director: 'Director',
+  promoter: 'Promoter',
+};
+
+/** The controlled `kind` for a Form D relationship, or null. */
+export function roleKind(relationship: string): RoleKind | null {
+  return SEC_ROLE_KINDS[relationship.trim().toLowerCase()] ?? null;
+}
 
 export interface ParsedPerson {
   name: string;

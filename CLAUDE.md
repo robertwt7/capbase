@@ -142,8 +142,12 @@ types are re-exported from `@repo/api` (single source of truth). Company logos r
   size by default** — AngelList-style SPV platforms report tens of thousands of
   near-empty funds and would otherwise own every page. No per-fund page.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies);
-  `/investors/[slug]` — investor profile: facts, fund assets, portfolio grid, or an
-  empty state inviting a contribution.
+  `/investors/[slug]` — investor profile: facts, fund assets, portfolio grid, the firm's
+  own officers, or an empty state inviting a contribution.
+- `/people` — people directory (URL-driven filters, same pattern as companies): search,
+  an "at several companies" toggle, sort by roles held or name. **No role filter** —
+  3,744 distinct free-text role strings is not a vocabulary. `/people/[slug]` — person
+  profile: roles grouped by organisation, each with its kind, year range and citation.
 - `/companies/[slug]/history` — public, paginated change timeline for one company
   (what changed, from what to what, who, when). Deliberately ungated: it shows data
   past the `PREVIEW_LIMIT` contribution gate, which is the right trade for an
@@ -233,6 +237,29 @@ holds (`onlyIfKnown`): an ownership table carries no type signal, and `InvestorT
 source structure, never from a name. Empty profiles still invite a contribution rather than being
 hidden.
 
+**People are a first-class entity.** The old `Person` child table was **renamed in place**
+to `PersonRole` (migration `person_entity`, hand-written: `prisma migrate dev` emits DROP +
+CREATE for a renamed model, which would have destroyed every row and orphaned every
+citation). Its row ids are unchanged, which is why `Citation`/`ReviewableType`
+`entityType: 'person'` still means **the role row** — the same overloading `'investor'`
+already carries, where a citation means `InvestorHolding` while an identifier means
+`Investor`. A new `Person` table holds one row per human (slug, `normalizedName`,
+`mergedIntoId`, `suppressedAt`); `PersonRole` carries `personId`, `companyId` **or**
+`investorId`, `role`, `kind`, `title`, `since`, `endYear`. `PersonRole.personId` is nullable
+on the same grounds as `InvestorHolding.investorId` — seed phase `002` is immutable — so
+treat non-null as an invariant.
+
+Dedup is **identifier, then exact normalized full name**, in that order, through the one
+`normalizePersonName` in `@repo/api` (shared so ingest and moderation can never drift). The
+only identifier any source publishes for a human is the Wikidata QID, already embedded in
+`PersonRole.externalId`. Name *variants* — `Adam Larson` vs `Adam J. Larson` — never
+auto-merge: they become `MergeCandidate` rows scoped to one organisation, and `IdentifiableType`
+now admits `'person'` so the whole merge queue works unchanged. A person merge writes **no**
+`Revision` (`Revision.companyId` is required and a person spans many companies) and remaps
+**no** citations (they anchor to the role row, whose id never moves). `suppressedAt` is a
+column of its own, not `moderationStatus: 'REJECTED'`, because ingest auto-APPROVES and would
+undo a rejection on the next cron run; a suppressed person 404s rather than 301s.
+
 **Funds are a first-class entity too, and ingest-only.** `Fund` is one row per private fund
 with a **required** `managerId` FK to `Investor` — a fund whose manager cannot be resolved
 structurally is dropped, never written against a guess (measured: name-prefix guessing added
@@ -257,7 +284,12 @@ Controlled vocabularies are TS string-literal unions + a `readonly` const array 
 `FundStrategy`/`FUND_STRATEGIES` (`Venture capital`/`Private equity`/`Hedge fund`/`Real estate`/
 `Securitized asset`/`Liquidity`/`Other`) is read the same way — both SEC sources publish a fund
 type as a *structured field*, so the two publisher vocabularies are renamed into one canonical
-set, never inferred from a fund's name. Besides
+set, never inferred from a fund's name. **`PersonRole.kind`** (`RoleKind`/`ROLE_KINDS`: `Founder`/`CEO`/`Executive officer`/
+`Director`/`Promoter`) is read the same way — only from a *closed publisher vocabulary*:
+Form D's `relationship` enum and Wikidata's property identity (P112 founder, P169 CEO).
+Null for Form C, whose signature-block roles are free prose, and for SBIR, where
+`Principal investigator` is a role on a grant rather than at the company. Never inferred by
+reading a title string. Besides
 `Stage`/`CompanyStatus`/`InvestorType`/`ExitType`/`FundStrategy`, there is a
 **`Sector`/`SECTORS`** vocabulary (14 canonical sectors: the original `Artificial intelligence`/
 `Fintech`/`Healthcare`/`Climate`/`Enterprise SaaS` plus `Technology`, `Financial services`,
@@ -306,7 +338,11 @@ last one clobber `totalRaisedUsd`:
   founders/CEOs, acquisitions, exits. Throttled ~1 req/s SPARQL
   (`WDQS_USER_AGENT`, defaults to `SEC_USER_AGENT`). No funding rounds. Also
   enumerates ~640 **investor firms** by P31 class (`investor-class-map.ts`),
-  independent of any P1951 edge.
+  independent of any P1951 edge, and runs the *same* `peopleQuery` over their QIDs
+  for the firms' own officers. That query requires `?person wdt:P31 wd:Q5`
+  **inside each UNION branch**: P112's range includes organisations (Bloomberg Beta
+  is "founded by" Bloomberg L.P.), and placed after the UNION the planner scans
+  every human on Wikidata and WDQS times out.
 - **SEC_ADV** — the investor universe: ~7k VC/PE firms from the monthly Form ADV
   bulk files (name, CRD/CIK, HQ, website, fund counts, gross fund assets). A
   *monthly snapshot*, so `days` is ignored and it stays off the daily cron; pin a
@@ -336,6 +372,10 @@ last one clobber `totalRaisedUsd`:
   SBIR.gov's monthly bulk CSV (the documented JSON API 403s). Identity is UEI → DUNS
   → name; `SBIR_MIN_YEAR` (default 2015) keeps a firm on any recent award and then
   ingests its whole history. Every award is `kind: 'Grant'` with `totalRaisedUsd: 0`.
+  People come from **`PI Name`**, not `Contact Name`: the contact column is populated
+  almost only for DoD/NASA awards and names the federal desk that processed the grant,
+  which put 10,963 NSF program directors in the corpus (`make purge-sbir-people` is the
+  one-shot correction for a database that predates the fix).
   The 91 MB file is **streamed**, never buffered (`util/csv.ts`'s `createCsvParser`),
   and aggregated per firm as rows arrive.
 - **SEC_S1** — investor→company edges from S-1 principal-stockholder tables, found
@@ -367,6 +407,13 @@ classifies a URL host as identifying, social, or platform; sources publish a
 `domain` only for the first kind. This is not theoretical: 3,295 ADV filers list a
 linkedin.com URL as their website and 21 list the same medium.com blog — matching
 on those merges unrelated firms into one investor.
+
+`make backfill-people` (`src/backfill-people.ts`, between `backfill-identifiers` and
+`merge-candidates` in `ingest-all`) collapses the `PersonRole` rows into one `Person` per
+human with **no network access** — the QID pass reads `PersonRole.externalId`, the name pass
+uses `normalizePersonName`. The pure matcher lives in `ingest/person-matcher.ts` so it can be
+tested without booting a Nest context. Idempotent: a role already carrying a `personId` is
+skipped.
 
 `make backfill-citations` (`src/backfill-citations.ts`, the last step of `ingest-all`)
 mints `Source`/`Citation` rows for the whole corpus with **no network access** — the URLs

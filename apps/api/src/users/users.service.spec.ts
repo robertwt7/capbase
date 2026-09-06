@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const MODELS = [
   'company',
   'fundingRound',
-  'person',
+  'personRole',
   'investorHolding',
   'acquisitionDeal',
   'exitEvent',
@@ -37,7 +37,7 @@ describe('UsersService.hasRecentContribution', () => {
 
   it('is false when the only contribution predates the cutoff', async () => {
     const old = new Date(Date.now() - 60 * 86_400_000);
-    const service = new UsersService(prismaWith({ person: { createdAt: old } }));
+    const service = new UsersService(prismaWith({ personRole: { createdAt: old } }));
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(false);
   });
 

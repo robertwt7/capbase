@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  ChangeProposalReview,
-  CompanyEditFields,
-  PendingSubmission,
-  PendingSubmissionsResponse,
-  ReviewableType,
-  ReviewStatus,
+import {
+  normalizePersonName,
+  type ChangeProposalReview,
+  type CompanyEditFields,
+  type PendingSubmission,
+  type PendingSubmissionsResponse,
+  type ReviewableType,
+  type ReviewStatus,
 } from '@repo/api';
 import type { Company as DbCompany, Prisma } from '@repo/db';
 
@@ -88,8 +89,25 @@ async function applyDecision(
       return approved ? { companyId: row.companyId, after: toFundingRound(row) } : null;
     }
     case 'person': {
-      const row = await tx.person.update({ where: { id }, data });
-      return approved ? { companyId: row.companyId, after: toPerson(row) } : null;
+      // The role row, not the deduplicated Person — 'person' means the same
+      // thing to ReviewableType as it always has.
+      const row = await tx.personRole.update({ where: { id }, data });
+      if (!approved) return null;
+
+      // Approving a contributed role also resolves it to a Person, so the
+      // human is reachable from /people — exactly as approving a holding
+      // publishes the firm it names. Rejecting resolves nothing.
+      const personId = await resolvePerson(tx, row.name);
+      if (personId && personId !== row.personId) {
+        await tx.personRole.update({ where: { id }, data: { personId } });
+      }
+
+      // A role with no company has no timeline to land on (Revision.companyId
+      // is required), so it publishes without one. Only firm-officer roles are
+      // company-less, and those are ingest-only — they never reach this queue.
+      return row.companyId
+        ? { companyId: row.companyId, after: toPerson({ ...row, personId }) }
+        : null;
     }
     case 'investor': {
       const row = await tx.investorHolding.update({ where: { id }, data });
@@ -126,6 +144,61 @@ async function applyDecision(
   }
 }
 
+/**
+ * The human behind a contributed role: an exact normalized-name match, or a new
+ * `Person`.
+ *
+ * The same rule ingest applies, through the same `normalizePersonName` — two
+ * definitions would mean a contributed "Jane Smith" quietly getting a second
+ * row beside the ingested one. Identifier matching is deliberately absent: a
+ * contributor supplies a name, never a QID.
+ *
+ * A tombstoned person resolves to their survivor; a SUPPRESSED one resolves to
+ * nothing, and the role publishes unattached — a removal request must survive a
+ * contribution as much as it survives an ingest run.
+ */
+async function resolvePerson(
+  tx: Prisma.TransactionClient,
+  name: string,
+): Promise<string | null> {
+  const normalizedName = normalizePersonName(name);
+  if (!normalizedName) return null;
+
+  const existing = await tx.person.findFirst({
+    where: { normalizedName },
+    select: { id: true, suppressedAt: true, mergedIntoId: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (existing) {
+    if (existing.suppressedAt) return null;
+    return existing.mergedIntoId ?? existing.id;
+  }
+
+  // A contributed person is PENDING until the role that names them is public —
+  // which it now is, so APPROVED. Slug collisions get a numeric suffix, the
+  // same shape the backfill mints.
+  const base = kebab(name);
+  let slug = base;
+  for (let n = 2; await tx.person.findUnique({ where: { slug }, select: { id: true } }); n++) {
+    slug = `${base}-${n}`;
+  }
+
+  const created = await tx.person.create({
+    data: { slug, name, normalizedName, moderationStatus: 'APPROVED' },
+    select: { id: true },
+  });
+  return created.id;
+}
+
+/** Lowercase kebab-case slug ('person' when nothing survives). */
+function kebab(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'person';
+}
+
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
@@ -142,7 +215,7 @@ export class AdminService {
           include: { submittedBy, company: true, investors: true },
           ...order,
         }),
-        this.prisma.person.findMany({ where, include: { submittedBy, company: true }, ...order }),
+        this.prisma.personRole.findMany({ where, include: { submittedBy, company: true }, ...order }),
         this.prisma.investorHolding.findMany({
           where,
           include: { submittedBy, company: true },

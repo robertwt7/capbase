@@ -1,4 +1,4 @@
-import type { InvestorType } from './company';
+import type { InvestorType, Person } from './company';
 import type { Fund } from './fund';
 import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
@@ -38,6 +38,9 @@ export interface InvestorSummary extends Investor {
 
 /** Full investor profile: every approved portfolio company, not a sample. */
 export interface InvestorDetailResponse extends InvestorSummary {
+  /** Officers of the firm itself (Wikidata P112/P169). The same role rows a
+   *  company profile calls `people`. */
+  people: Person[];
   /** The largest funds we can name, by gross assets. */
   funds: Fund[];
   /** How many we can name — distinct from `fundCount`, which is what the firm

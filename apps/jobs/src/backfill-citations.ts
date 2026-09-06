@@ -97,6 +97,10 @@ class CitationBackfill {
   private latestFiling = new Map<string, string>();
   /** investorId → its CRD, to cite a fund's manager on Form ADV. */
   private managerCrds = new Map<string, string>();
+  /** investorId → its QID, to cite a firm officer's role on the firm's own
+   *  Wikidata page. A role with no company is a firm officer, and the firm is
+   *  then the only thing the row can be traced to. */
+  private readonly investorQids = new Map<string, string>();
 
   private sources = 0;
   private citations = 0;
@@ -111,6 +115,7 @@ class CitationBackfill {
     await this.loadCompanyProvenance();
     await this.loadLatestFilings();
     await this.loadManagerCrds();
+    await this.loadInvestorQids();
 
     await this.walkCompanies();
     await this.walkRounds();
@@ -155,6 +160,15 @@ class CitationBackfill {
       select: { id: true, crdNumber: true },
     });
     for (const row of rows) this.managerCrds.set(row.id, row.crdNumber!);
+  }
+
+  /** Investor id → QID, for the officers Wikidata names on a firm. */
+  private async loadInvestorQids(): Promise<void> {
+    const rows = await this.prisma.investor.findMany({
+      where: { externalSource: WIKIDATA, externalId: { not: null } },
+      select: { id: true, externalId: true },
+    });
+    for (const row of rows) this.investorQids.set(row.id, row.externalId!);
   }
 
   /**
@@ -323,7 +337,7 @@ class CitationBackfill {
     await this.eachBatch(
       'person',
       (cursor) =>
-        this.prisma.person.findMany({
+        this.prisma.personRole.findMany({
           where: {
             externalSource: { in: CITED_COMPANY_SOURCES },
             externalId: { not: null },
@@ -331,6 +345,7 @@ class CitationBackfill {
           select: {
             id: true,
             companyId: true,
+            investorId: true,
             externalSource: true,
             updatedAt: true,
           },
@@ -339,12 +354,18 @@ class CitationBackfill {
           ...cursor,
         }),
       (row) => {
+        // A role with no company is an officer of an investor FIRM, and the
+        // firm's own page is then the only document it traces to.
+        if (!row.companyId) {
+          const firmQid = row.investorId ? this.investorQids.get(row.investorId) : undefined;
+          return firmQid ? wikidataTarget('person', row.id, firmQid, row.updatedAt) : null;
+        }
         if (row.externalSource === WIKIDATA) {
           const qid = this.qidFor(row.companyId);
           return qid ? wikidataTarget('person', row.id, qid, row.updatedAt) : null;
         }
         if (row.externalSource === SBIR) {
-          // The contact came from the award file, not from any one award page.
+          // The PI is named on the award file, not on any one award page.
           return sbirTarget('person', row.id, null, row.updatedAt);
         }
         if (row.externalSource === SEC_FORM_C) {

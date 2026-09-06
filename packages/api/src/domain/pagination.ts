@@ -41,6 +41,23 @@ export interface InvestorListQuery {
   pageSize?: number;
 }
 
+/** Roles-first by default: a person at six companies is the interesting one,
+ *  and it is the only ordering the data supports. Role STRINGS are 3,744
+ *  distinct free-text values, so there is no role filter — only search, the
+ *  multi-company flag, and this sort. */
+export type PersonSort = 'roles' | 'name';
+
+export const PERSON_SORTS: readonly PersonSort[] = ['roles', 'name'];
+
+export interface PersonListQuery {
+  q?: string;
+  /** Only people with a role at more than one company. */
+  multiCompany?: boolean;
+  sort?: PersonSort;
+  page?: number;
+  pageSize?: number;
+}
+
 export type FundSort = 'size' | 'vintage' | 'name';
 
 export const FUND_SORTS: readonly FundSort[] = ['size', 'vintage', 'name'];

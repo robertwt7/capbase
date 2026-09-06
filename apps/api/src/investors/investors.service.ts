@@ -11,6 +11,7 @@ import {
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 
+import { toPerson } from '../companies/company.mapper';
 import { toFund } from '../funds/fund.mapper';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -103,6 +104,11 @@ export class InvestorsService {
           orderBy: [{ grossAssetsUsd: { sort: 'desc', nulls: 'last' } }, { name: 'asc' }],
           take: FUND_PREVIEW,
         },
+        people: {
+          where: { moderationStatus: 'APPROVED' },
+          orderBy: { since: 'desc' },
+          include: { person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } } },
+        },
         _count: {
           select: { holdings: { where: PUBLIC_HOLDINGS }, funds: { where: PUBLIC_FUNDS } },
         },
@@ -115,6 +121,9 @@ export class InvestorsService {
     return {
       ...toInvestorSummary(row as unknown as InvestorWithHoldings),
       identifiers: await this.loadIdentifiers(row.id),
+      // Officers Wikidata names on the firm itself. Same role rows as a
+      // company's people, carrying investorId instead of companyId.
+      people: row.people.map(toPerson),
       funds,
       // What we can name, as against `fundCount` — what the firm told the SEC.
       namedFundCount: row._count.funds,

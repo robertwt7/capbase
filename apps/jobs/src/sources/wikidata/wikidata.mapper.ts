@@ -1,4 +1,4 @@
-import type { ExitType, Sector } from '@repo/api';
+import type { ExitType, RoleKind, Sector } from '@repo/api';
 
 import type {
   NormalizedAcquisition,
@@ -263,7 +263,31 @@ export function mapInvestorFirms(rows: SparqlBinding[]): NormalizedInvestorFirm[
   return out;
 }
 
-function mapPeople(qid: string, rows: SparqlBinding[], foundedYear: number): NormalizedPerson[] {
+/**
+ * The role's controlled `kind`, from the PROPERTY that produced it.
+ *
+ * `peopleQuery` BINDs the role string from P112 / P169, so this reads the
+ * statement's identity rather than parsing a title — the same rule the Form D
+ * map follows, and the reason a Wikidata role can carry a kind at all.
+ */
+const WIKIDATA_ROLE_KINDS: Record<string, RoleKind> = {
+  Founder: 'Founder',
+  CEO: 'CEO',
+};
+
+/**
+ * Officers of one entity — a company or an investor firm; P112/P169 mean the
+ * same thing on both.
+ *
+ * The externalId embeds the PERSON's own QID, which is what makes the human
+ * recoverable later with no network access, and the identifier emitted here is
+ * for that person, not for the role.
+ */
+export function mapPeople(
+  qid: string,
+  rows: SparqlBinding[],
+  foundedYear: number,
+): NormalizedPerson[] {
   const seen = new Set<string>();
   const out: NormalizedPerson[] = [];
   for (const b of rows) {
@@ -278,7 +302,12 @@ function mapPeople(qid: string, rows: SparqlBinding[], foundedYear: number): Nor
       externalId,
       name,
       role,
+      kind: WIKIDATA_ROLE_KINDS[role] ?? null,
       since: yearOf(b.start?.value) ?? (foundedYear || new Date().getUTCFullYear()),
+      // Null means "no end recorded" — Wikidata states an end date only when
+      // the person actually left, so absence is not "still there".
+      endYear: yearOf(b.end?.value) ?? null,
+      identifiers: [{ scheme: 'WIKIDATA', value: personQid }],
     });
   }
   return out;

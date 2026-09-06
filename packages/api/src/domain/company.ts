@@ -159,9 +159,17 @@ export interface FundingRound {
   investors: RoundInvestor[];
 }
 
+/**
+ * One person as a company profile sees them — the `PersonRole` row, under the
+ * name a `Citation` anchors to. The deduplicated human behind it is
+ * `PersonSummary` in `person.ts`, reachable through `personSlug`.
+ */
 export interface Person {
   /** Row identity — what a Citation or Revision anchors to. */
   id: string;
+  /** Slug of the linked person profile; null when the role has not been
+   *  resolved to a person, or the person is suppressed. */
+  personSlug?: string | null;
   name: string;
   role: string;
   since: number; // year joined

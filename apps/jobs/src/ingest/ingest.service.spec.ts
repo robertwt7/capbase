@@ -82,6 +82,19 @@ function fundRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A Person row as loadPersonIndex reads it back. */
+function personRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'p-1',
+    slug: 'jane-founder',
+    name: 'Jane Founder',
+    normalizedName: 'jane founder',
+    mergedIntoId: null,
+    suppressedAt: null,
+    ...overrides,
+  };
+}
+
 interface IdentifierRow {
   scheme: string;
   value: string;
@@ -113,9 +126,11 @@ function mockPrisma(
   existingInvestors: ReturnType<typeof investorRow>[] = [],
   existingFunds: ReturnType<typeof fundRow>[] = [],
   seedIdentifiers: IdentifierRow[] = [],
+  existingPeople: ReturnType<typeof personRow>[] = [],
 ) {
   let created = 0;
   let fundsCreated = 0;
+  let peopleCreated = 0;
   const identifiers: IdentifierRow[] = [...seedIdentifiers];
   const candidates: CandidateRow[] = [];
   return {
@@ -160,8 +175,14 @@ function mockPrisma(
     fundingRound: {
       upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
     },
-    person: {
+    personRole: {
       upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+    },
+    person: {
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingPeople),
+      create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<{ id: string }>>(
+        async () => ({ id: `p-new-${++peopleCreated}` }),
+      ),
     },
     investorHolding: {
       upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
@@ -420,7 +441,7 @@ describe('IngestService.run', () => {
     });
     await serviceWith(prisma, [r]).run(RUN);
 
-    expect(prisma.person.upsert).toHaveBeenCalledWith(
+    expect(prisma.personRole.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           externalSource_externalId: {
@@ -430,12 +451,21 @@ describe('IngestService.run', () => {
         },
         create: expect.objectContaining({
           companyId: 'c-new',
+          // Resolved to a Person, which is the invariant the nullable column
+          // relies on: every write path populates it.
+          personId: 'p-new-1',
           name: 'Jane Founder',
           role: 'Executive Officer',
           title: 'CEO',
           moderationStatus: 'APPROVED',
         }),
-        update: { role: 'Executive Officer', title: 'CEO' },
+        update: {
+          personId: 'p-new-1',
+          role: 'Executive Officer',
+          kind: null,
+          title: 'CEO',
+          endYear: null,
+        },
       }),
     );
     expect(prisma.investorHolding.upsert).toHaveBeenCalledWith(
@@ -546,7 +576,7 @@ describe('IngestService match-&-enrich', () => {
       description: 'Acme Robotics builds industrial robots.',
     });
     // Children still attach to the matched row, with the enriching source's provenance.
-    expect(prisma.person.upsert).toHaveBeenCalledWith(
+    expect(prisma.personRole.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           externalSource_externalId: {
@@ -730,6 +760,134 @@ describe('IngestService match-&-enrich', () => {
   });
 });
 
+describe('IngestService person resolution', () => {
+  function person(overrides: Record<string, unknown> = {}) {
+    return {
+      externalId: 'X1:person:jane',
+      name: 'Jane Founder',
+      role: 'Executive Officer',
+      since: 2024,
+      ...overrides,
+    };
+  }
+
+  /** The personId the role row was written with, whatever the outcome. */
+  function writtenPersonId(prisma: ReturnType<typeof mockPrisma>): unknown {
+    const call = prisma.personRole.upsert.mock.calls[0]![0] as {
+      create: { personId: unknown };
+    };
+    return call.create.personId;
+  }
+
+  it('creates a person with a unique slug when nothing matches', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [record({ people: [person()] })]).run(RUN);
+
+    expect(prisma.person.create).toHaveBeenCalledTimes(1);
+    expect(prisma.person.create.mock.calls[0]![0].data).toMatchObject({
+      slug: 'jane-founder',
+      name: 'Jane Founder',
+      normalizedName: 'jane founder',
+      moderationStatus: 'APPROVED',
+    });
+    expect(writtenPersonId(prisma)).toBe('p-new-1');
+  });
+
+  it('attaches to an existing person by exact normalized name', async () => {
+    const prisma = mockPrisma([], [], [], [], [personRow({ id: 'p-known' })]);
+    await serviceWith(prisma, [record({ people: [person({ name: 'JANE  FOUNDER' })] })]).run(RUN);
+
+    expect(prisma.person.create).not.toHaveBeenCalled();
+    expect(writtenPersonId(prisma)).toBe('p-known');
+  });
+
+  it('prefers the identifier over the name, and follows a merge tombstone', async () => {
+    // The loser keeps its QID, so the crosswalk entry still points at it; the
+    // index resolves the tombstone, which is what stops the next cron run from
+    // undoing the merge.
+    const prisma = mockPrisma(
+      [],
+      [],
+      [],
+      [{ scheme: 'WIKIDATA', value: 'Q30', entityType: 'person', entityId: 'p-lost', source: 'X' }],
+      [
+        personRow({ id: 'p-lost', slug: 'pc-old', normalizedName: 'old spelling', mergedIntoId: 'p-live' }),
+        personRow({ id: 'p-live', slug: 'patrick-collison', normalizedName: 'patrick collison' }),
+      ],
+    );
+    await serviceWith(prisma, [
+      record({
+        people: [
+          person({
+            name: 'Someone Else Entirely',
+            identifiers: [{ scheme: 'WIKIDATA', value: 'Q30' }],
+          }),
+        ],
+      }),
+    ]).run(RUN);
+
+    expect(prisma.person.create).not.toHaveBeenCalled();
+    expect(writtenPersonId(prisma)).toBe('p-live');
+  });
+
+  it('neither matches nor recreates a suppressed person', async () => {
+    // Ingest auto-APPROVES on every run, so a removal request only survives if
+    // the match index refuses both the name and the QID.
+    const prisma = mockPrisma(
+      [],
+      [],
+      [],
+      [{ scheme: 'WIKIDATA', value: 'Q30', entityType: 'person', entityId: 'p-gone', source: 'X' }],
+      [personRow({ id: 'p-gone', suppressedAt: new Date('2026-01-01') })],
+    );
+    await serviceWith(prisma, [
+      record({ people: [person({ identifiers: [{ scheme: 'WIKIDATA', value: 'Q30' }] })] }),
+    ]).run(RUN);
+
+    expect(prisma.person.create).not.toHaveBeenCalled();
+    expect(writtenPersonId(prisma)).toBeNull();
+  });
+
+  it('records a candidate when a QID is claimed by a different person', async () => {
+    const prisma = mockPrisma(
+      [],
+      [],
+      [],
+      [{ scheme: 'WIKIDATA', value: 'Q30', entityType: 'person', entityId: 'p-1', source: 'X' }],
+      // p-1 exists but under a different name, so the incoming row creates a
+      // second person and the QID write collides.
+      [personRow({ id: 'p-1', normalizedName: 'someone else' })],
+    );
+    await serviceWith(prisma, [
+      record({
+        people: [
+          person({ name: 'Jane Founder', identifiers: [{ scheme: 'WIKIDATA', value: 'Q31' }] }),
+          person({
+            externalId: 'X1:person:jane2',
+            name: 'Jane Other',
+            identifiers: [{ scheme: 'WIKIDATA', value: 'Q30' }],
+          }),
+        ],
+      }),
+    ]).run(RUN);
+
+    // The second person matched p-1 by QID rather than being created…
+    expect(prisma.person.create).toHaveBeenCalledTimes(1);
+    // …and the first minted a fresh identifier without disturbing p-1's.
+    expect(prisma.identifiers).toContainEqual(
+      expect.objectContaining({ scheme: 'WIKIDATA', value: 'Q31', entityType: 'person' }),
+    );
+  });
+
+  it('leaves a role unattached when the name normalizes to nothing', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [record({ people: [person({ name: '  ' })] })]).run(RUN);
+
+    expect(prisma.person.create).not.toHaveBeenCalled();
+    expect(writtenPersonId(prisma)).toBeNull();
+  });
+});
+
 describe('IngestService investor firms', () => {
   function serviceWithFirms(
     prisma: ReturnType<typeof mockPrisma>,
@@ -742,6 +900,38 @@ describe('IngestService investor firms', () => {
       config(),
     );
   }
+
+  it('writes a firm officer as a role on the firm, with no company', async () => {
+    const prisma = mockPrisma();
+    await serviceWithFirms(prisma, [
+      firm({
+        people: [
+          {
+            externalId: 'Q20:person:Q40:Founder',
+            name: 'Don Valentine',
+            role: 'Founder',
+            kind: 'Founder',
+            since: 1972,
+            identifiers: [{ scheme: 'WIKIDATA', value: 'Q40' }],
+          },
+        ],
+      }),
+    ]).run(RUN);
+
+    expect(prisma.personRole.upsert).toHaveBeenCalledTimes(1);
+    const call = prisma.personRole.upsert.mock.calls[0]![0] as {
+      create: Record<string, unknown>;
+    };
+    expect(call.create).toMatchObject({
+      investorId: 'i-new-1',
+      personId: 'p-new-1',
+      name: 'Don Valentine',
+      kind: 'Founder',
+      moderationStatus: 'APPROVED',
+    });
+    // A role hangs off a company OR a firm, never both.
+    expect(call.create.companyId).toBeUndefined();
+  });
 
   it('creates a standalone investor with provenance and no holding', async () => {
     const prisma = mockPrisma();

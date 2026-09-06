@@ -27,6 +27,8 @@ function investorRow(over: Record<string, unknown> = {}) {
     foundedYear: 1972,
     holdings: [],
     funds: [],
+    // Officers Wikidata names on the firm itself; empty for most firms.
+    people: [],
     _count: { holdings: 0, funds: 0 },
     ...over,
   };

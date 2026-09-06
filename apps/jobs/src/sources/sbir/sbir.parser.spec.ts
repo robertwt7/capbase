@@ -137,24 +137,48 @@ describe('SbirAggregator', () => {
     expect(record!.rounds).toHaveLength(1);
   });
 
-  it('takes a company contact but never the principal investigator', () => {
+  it('takes the principal investigator, with the role as a constant', () => {
     const [record] = records([award()]);
     expect(record!.people).toEqual([
       {
-        externalId: 'uei:SATYSBWG3FL7:person:david-bilyeu',
-        name: 'David Bilyeu',
-        role: 'Chief Executive Officer',
-        title: 'Chief Executive Officer',
+        externalId: 'uei:SATYSBWG3FL7:person:james-szabo',
+        name: 'James Szabo',
+        role: 'Principal investigator',
+        title: null,
         since: 2026,
       },
     ]);
   });
 
-  it('takes no person when the contact has no title', () => {
-    // 'Contact Name' is blank or untitled on most awards; a name with no role
-    // is not a fact worth publishing.
-    expect(records([award({ 'Contact Title': '' })])[0]!.people).toEqual([]);
-    expect(records([award({ 'Contact Name': '  ' })])[0]!.people).toEqual([]);
+  it('keeps the PI title when the award records one', () => {
+    // Only 70 of 3,940 sampled awards carry a 'PI Title', so it is a bonus
+    // field, never a condition of publishing the person.
+    const [record] = records([award({ 'PI Title': 'Chief Scientist' })]);
+    expect(record!.people[0]).toMatchObject({
+      name: 'James Szabo',
+      role: 'Principal investigator',
+      title: 'Chief Scientist',
+    });
+  });
+
+  it('never takes the company contact', () => {
+    // Regression guard for the bug fixed on 2026-09-06: 'Contact Name' names
+    // the agency desk that processed the award, which put 10,963 federal
+    // program officers in the corpus.
+    const [record] = records([
+      award({ 'PI Name': '', 'Contact Name': 'Rajesh  Mehta', 'Contact Title': 'Program Director' }),
+    ]);
+    expect(record!.people).toEqual([]);
+  });
+
+  it('collapses one PI across the firm\'s awards to a single person', () => {
+    const [record] = records([
+      award(),
+      award({ Contract: 'C2', 'Award Year': '2024', 'Proposal Award Date': '2024-03-01' }),
+    ]);
+    expect(record!.people).toHaveLength(1);
+    // First seen wins, so the year is the one on the award that introduced them.
+    expect(record!.people[0]!.since).toBe(2026);
   });
 
   it('publishes no domain for a platform-hosted website', () => {

@@ -83,7 +83,17 @@ function fixture() {
       { id: 'r-1', companyId: 'c-lose' },
       { id: 'r-2', companyId: 'c-keep' },
     ]),
-    person: table([{ id: 'p-1', companyId: 'c-lose' }]),
+    // The role edge (the renamed old Person table), plus the deduplicated
+    // humans it points at.
+    personRole: table([
+      { id: 'pr-1', companyId: 'c-lose', personId: 'h-keep' },
+      { id: 'pr-2', companyId: 'c-keep', personId: 'h-lose' },
+      { id: 'pr-3', investorId: 'i-lose', personId: 'h-lose' },
+    ]),
+    person: table([
+      { id: 'h-keep', slug: 'jane-smith', name: 'Jane Smith', mergedIntoId: null, createdAt: new Date() },
+      { id: 'h-lose', slug: 'jane-a-smith', name: 'Jane A. Smith', mergedIntoId: null, createdAt: new Date() },
+    ]),
     investorHolding: table([{ id: 'h-1', companyId: 'c-lose', investorId: 'i-lose' }]),
     acquisitionDeal: table([{ id: 'a-1', companyId: 'c-lose' }]),
     exitEvent: table([{ id: 'e-1', companyId: 'c-lose' }]),
@@ -146,6 +156,18 @@ function fixture() {
         submittedById: null,
         createdAt: new Date('2026-02-01'),
       },
+      // A person citation anchors to the ROLE row, never to the human, so a
+      // person merge must not touch it — the same overloading as above.
+      {
+        id: 'cit-role',
+        sourceId: 'src-4',
+        entityType: 'person',
+        entityId: 'pr-2',
+        field: '',
+        note: null,
+        submittedById: null,
+        createdAt: new Date('2026-02-01'),
+      },
     ]),
     entityIdentifier: table([
       {
@@ -184,6 +206,15 @@ function fixture() {
         source: 'SEC_ADV',
         createdAt: new Date('2026-03-01'),
       },
+      {
+        id: 'ei-person',
+        scheme: 'WIKIDATA',
+        value: 'Q30',
+        entityType: 'person',
+        entityId: 'h-lose',
+        source: 'BACKFILL',
+        createdAt: new Date('2026-03-01'),
+      },
     ]),
     mergeCandidate: table([
       {
@@ -217,7 +248,8 @@ function snapshot(db: ReturnType<typeof fixture>['db']) {
 
   return {
     rounds: of(db.fundingRound, 'companyId'),
-    people: of(db.person, 'companyId'),
+    roles: of(db.personRole, 'companyId'),
+    rolePeople: of(db.personRole, 'personId'),
     holdings: of(db.investorHolding, 'companyId'),
     acquisitions: of(db.acquisitionDeal, 'companyId'),
     exits: of(db.exitEvent, 'companyId'),
@@ -246,14 +278,16 @@ describe('MergeService company merge', () => {
 
     for (const t of [
       db.fundingRound,
-      db.person,
+      db.personRole,
       db.investorHolding,
       db.acquisitionDeal,
       db.exitEvent,
       db.diversitySignal,
       db.changeProposal,
     ]) {
-      expect(t.rows.every((r) => r.companyId === 'c-keep')).toBe(true);
+      // A firm-officer role has no company at all, so only the rows that had
+      // one are expected to have moved.
+      expect(t.rows.every((r) => r.companyId === undefined || r.companyId === 'c-keep')).toBe(true);
     }
   });
 
@@ -457,6 +491,67 @@ describe('MergeService investor merge', () => {
     expect(db.investorHolding.rows[0]!.investorId).toBe('i-lose');
     expect(db.fund.rows[0]!.managerId).toBe('i-lose');
     expect(snapshot(db)).toEqual(before);
+  });
+});
+
+describe('MergeService person merge', () => {
+  it('moves every role onto the survivor, company-side and firm-side alike', async () => {
+    const { db, service } = fixture();
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+
+    expect(db.personRole.rows.every((r) => r.personId === 'h-keep')).toBe(true);
+  });
+
+  it("moves the human's own identifiers", async () => {
+    const { db, service } = fixture();
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+
+    expect(db.entityIdentifier.rows.find((r) => r.id === 'ei-person')!.entityId).toBe('h-keep');
+  });
+
+  it('leaves the role citations completely alone', async () => {
+    // This is the whole reason the migration renamed the table in place: a
+    // person citation's entityId IS the role row, whose id never moves.
+    const { db, service } = fixture();
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+
+    expect(db.citation.rows.find((r) => r.id === 'cit-role')!.entityId).toBe('pr-2');
+  });
+
+  it('writes no revision — a person spans many companies, and a timeline has one', async () => {
+    const { db, service } = fixture();
+    const before = db.revision.rows.length;
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+    expect(db.revision.rows).toHaveLength(before);
+  });
+
+  it('tombstones the losing person instead of deleting them', async () => {
+    // Deleting frees nothing here, but the slug still has to redirect and the
+    // identifiers stay claimed.
+    const { db, service } = fixture();
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+
+    expect(db.person.rows).toHaveLength(2);
+    expect(db.person.rows.find((r) => r.id === 'h-lose')!.mergedIntoId).toBe('h-keep');
+  });
+
+  it('round-trips through unmerge, restoring role counts exactly', async () => {
+    const { db, service } = fixture();
+    const before = snapshot(db);
+    const { mergeRecordId } = await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+    await service.unmerge(mergeRecordId, 'admin-1');
+
+    expect(snapshot(db)).toEqual(before);
+    expect(db.person.rows.find((r) => r.id === 'h-lose')!.mergedIntoId).toBeNull();
+  });
+
+  it('refuses to merge a person who has already been merged away', async () => {
+    const { service } = fixture();
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+
+    await expect(service.merge('person', 'h-keep', 'h-lose', 'admin-1')).rejects.toThrow(
+      /already been merged away/,
+    );
   });
 });
 

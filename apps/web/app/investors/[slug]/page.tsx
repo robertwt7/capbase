@@ -163,6 +163,51 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
 
       <section className="border-t border-line py-8">
         <SectionHeader
+          title="People"
+          note={
+            investor.people.length > 0
+              ? `${formatCount(investor.people.length)} named`
+              : undefined
+          }
+          size="md"
+          className="mb-5 border-b-0 pb-0"
+        />
+        {investor.people.length > 0 ? (
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-px overflow-hidden rounded-[10px] border border-line bg-line">
+            {investor.people.map((person) => (
+              <li key={person.id} className="flex flex-col gap-1 bg-surface px-4 py-3.5">
+                {person.personSlug ? (
+                  <Link
+                    href={`/people/${person.personSlug}`}
+                    className="font-display text-[15px] font-semibold tracking-tight text-ink transition-colors hover:text-graphite-700"
+                  >
+                    {person.name}
+                  </Link>
+                ) : (
+                  <span className="font-display text-[15px] font-semibold tracking-tight text-ink">
+                    {person.name}
+                  </span>
+                )}
+                <span className="font-mono text-xs tracking-[0.02em] text-graphite-500">
+                  {person.title || person.role}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          // Only Wikidata names a firm's officers, and it covers a few hundred
+          // firms — so an empty block is the norm, not a failure.
+          <EmptyState>
+            <p>
+              No people recorded for {investor.name} yet. US regulatory filings name the firm but
+              rarely its partners.
+            </p>
+          </EmptyState>
+        )}
+      </section>
+
+      <section className="border-t border-line py-8">
+        <SectionHeader
           title="Portfolio"
           note={
             investor.portfolioCount > 0

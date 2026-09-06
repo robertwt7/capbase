@@ -213,8 +213,11 @@ describe('vocabularies', () => {
     expect(new Set(IDENTIFIER_SCHEMES).size).toBe(IDENTIFIER_SCHEMES.length);
   });
 
-  it('excludes funds from the identifiable types', () => {
+  it('admits people but still excludes funds from the identifiable types', () => {
     // Funds are ingest-only, have no page, and their names collide degenerately.
-    expect(IDENTIFIABLE_TYPES).toEqual(['company', 'investor']);
+    // People are in because Wikidata publishes a QID for a human exactly as it
+    // does for a company — and that QID points at the deduplicated Person row,
+    // not at the PersonRole edge a citation anchors to.
+    expect(IDENTIFIABLE_TYPES).toEqual(['company', 'investor', 'person']);
   });
 });

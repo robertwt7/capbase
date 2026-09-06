@@ -38,7 +38,7 @@ model User {
 
   companies      Company[]
   rounds         FundingRound[]
-  people         Person[]
+  people         PersonRole[]
   investors      InvestorHolding[]
   investorFirms  Investor[]
   acquisitions   AcquisitionDeal[]
@@ -175,7 +175,7 @@ model Company {
   updatedAt        DateTime     @updatedAt
 
   rounds       FundingRound[]
-  people       Person[]
+  people       PersonRole[]
   investors    InvestorHolding[]
   acquisitions AcquisitionDeal[]
   exits        ExitEvent[]
@@ -322,6 +322,7 @@ model Investor {
   holdings       InvestorHolding[]
   roundPositions RoundInvestor[]
   funds          Fund[]
+  people         PersonRole[]
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
@@ -420,14 +421,40 @@ model InvestorHolding {
   @@index([moderationStatus])
 }
 
-model Person {
-  id        String  @id @default(cuid())
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  name      String
-  role      String
-  since     Int
-  prior     String?
+/// One role: a person at a company or an investor firm.
+///
+/// This is the ORIGINAL `Person` table, renamed in place. Its row ids are
+/// unchanged, which is why every `Citation` with entityType='person' stays
+/// anchored and no citation migration was needed. `CitableType`/
+/// `ReviewableType` 'person' still means THIS row, exactly as 'investor' means
+/// `InvestorHolding` while `Investor` is a separate table.
+model PersonRole {
+  id String @id @default(cuid())
+
+  /// The deduplicated human. Nullable on the same grounds as
+  /// InvestorHolding.investorId: seed phase 002 creates people through a nested
+  /// `people: { create: … }` and shipped seed phases are immutable. Every write
+  /// path populates it and the backfill fills the seeded rows, so treat
+  /// non-null as an invariant.
+  personId String?
+  person   Person? @relation(fields: [personId], references: [id], onDelete: SetNull)
+
+  /// Exactly one of these is set. companyId became nullable when the investor
+  /// side was added — every row that predates it has one.
+  companyId  String?
+  company    Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  investorId String?
+  investor   Investor? @relation(fields: [investorId], references: [id], onDelete: Cascade)
+
+  name String
+  role String
+  /// One of ROLE_KINDS, or null when the source's role is free text.
+  kind  String?
+  since Int
+  /// When the role ended, when the source dates it. Null means "no end
+  /// recorded", which is not the same as "still there".
+  endYear     Int?
+  prior       String?
   linkedinUrl String?
   title       String?
 
@@ -443,7 +470,42 @@ model Person {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
+  @@index([investorId])
+  @@index([personId])
   @@index([moderationStatus])
+}
+
+/// A human, deduplicated across every company and firm they appear at.
+model Person {
+  id   String @id @default(cuid())
+  slug String @unique
+  name String
+  /// normalizeName(name) — the exact-equality dedup key, indexed so the ingest
+  /// match index is one query rather than a scan.
+  normalizedName String
+
+  roles PersonRole[]
+
+  /// Merge tombstone, identical in purpose to Company/Investor: the row is KEPT
+  /// so its slug redirects and its identifiers stay claimed.
+  mergedIntoId String?
+  mergedInto   Person?  @relation("PersonMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom   Person[] @relation("PersonMerge")
+
+  /// Set when someone asks to be removed (privacy policy §6). A SEPARATE column
+  /// from moderationStatus, because ingest auto-APPROVES on every run and would
+  /// flip a REJECTED row straight back — the suppression has to be a fact the
+  /// ingest match index reads and honours, the same way it honours mergedIntoId.
+  suppressedAt DateTime?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([normalizedName])
+  @@index([mergedIntoId])
+  @@index([moderationStatus])
+  @@index([moderationStatus, name])
 }
 
 model AcquisitionDeal {

@@ -194,22 +194,36 @@ function toRound(key: string, row: SbirRow): NormalizedRound | null {
 }
 
 /**
- * Company contacts only. `PI Name` is present on nearly every award but names
- * the principal investigator — a role on the grant, not a role at the company —
- * so it is deliberately skipped.
+ * Principal investigators.
+ *
+ * `Contact Name` was read here until 2026-09-06 and was wrong: measured over
+ * the live bulk file it is populated almost exclusively for DoD and NASA
+ * awards, and names the agency desk that processed the grant, not anyone at the
+ * company. It put 10,963 rows in the corpus led by NSF program directors at
+ * 299, 249 and 222 companies each. The old `!name || !title` guard is what
+ * selected for them: 1,655 of the 2,491 populated contact rows carry no title.
+ *
+ * `PI Name` is on every award (3,940/3,940 sampled) and is firm-specific: of
+ * 3,392 distinct PIs, 3,373 appear at exactly one firm, 19 at two, none at
+ * three.
+ *
+ * The role is the constant 'Principal investigator' rather than `PI Title`,
+ * which is present on only 70 of 3,940 rows — requiring it, as the old guard
+ * did, would drop 98% of them. The constant is structural: it is what the
+ * column means, not a guess about the person.
  */
 function peopleMap(key: string, row: SbirRow, year: number): Map<string, NormalizedPerson> {
   const out = new Map<string, NormalizedPerson>();
-  const name = (row['Contact Name'] ?? '').replace(/\s+/g, ' ').trim();
-  const title = (row['Contact Title'] ?? '').replace(/\s+/g, ' ').trim();
-  if (!name || !title) return out;
+  const name = (row['PI Name'] ?? '').replace(/\s+/g, ' ').trim();
+  if (!name) return out;
 
+  const title = (row['PI Title'] ?? '').replace(/\s+/g, ' ').trim();
   const externalId = `${key}:person:${kebab(name)}`;
   out.set(externalId, {
     externalId,
     name,
-    role: title,
-    title,
+    role: 'Principal investigator',
+    title: title || null,
     since: year || new Date().getUTCFullYear(),
   });
   return out;

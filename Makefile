@@ -167,6 +167,9 @@ ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See d
 # Identifiers before merge detection (the detector reads them), and both before
 # citations, which is unchanged.
 	cd apps/jobs && node dist/backfill-identifiers.js
+# People are collapsed AFTER identifiers (the QID pass writes through the same
+# crosswalk) and BEFORE merge detection, which sweeps the variants it leaves.
+	cd apps/jobs && node dist/backfill-people.js
 	cd apps/jobs && node dist/detect-merges.js
 	cd apps/jobs && node dist/backfill-citations.js
 
@@ -196,6 +199,24 @@ backfill-identifiers: ## Mint EntityIdentifier rows from stored provenance (no n
 .PHONY: backfill-identifiers-prod
 backfill-identifiers-prod: ## [VPS] Mint identifiers inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-identifiers.js
+
+.PHONY: backfill-people
+backfill-people: ## Collapse PersonRole rows into one Person per human (no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-people.js
+
+.PHONY: backfill-people-prod
+backfill-people-prod: ## [VPS] Collapse role rows into people inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-people.js
+
+.PHONY: purge-sbir-people
+purge-sbir-people: ## One-shot: delete SBIR person rows read from 'Contact Name' (federal program officers)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/purge-sbir-people.js
+
+.PHONY: purge-sbir-people-prod
+purge-sbir-people-prod: ## [VPS] Delete the SBIR agency-contact person rows inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/purge-sbir-people.js
 
 .PHONY: merge-candidates
 merge-candidates: ## Propose duplicate pairs from shared domain / normalized name (re-runnable)

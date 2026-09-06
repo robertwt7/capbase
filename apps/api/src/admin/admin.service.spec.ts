@@ -67,12 +67,25 @@ function makePrisma(
   return { prisma, tx };
 }
 
-/** Prisma double for the child-entity (non-proposal) moderation path. */
-function makeRowPrisma(row: Record<string, unknown>) {
+/**
+ * Prisma double for the child-entity (non-proposal) moderation path.
+ *
+ * `existingPerson` seeds the deduplicated-human lookup that approving a role
+ * runs; null means the name is new and a Person gets minted.
+ */
+function makeRowPrisma(
+  row: Record<string, unknown>,
+  existingPerson: Record<string, unknown> | null = null,
+) {
   const tx = {
     company: { update: jest.fn(async () => row) },
     fundingRound: { update: jest.fn(async () => row) },
-    person: { update: jest.fn(async () => row) },
+    personRole: { update: jest.fn(async () => row) },
+    person: {
+      findFirst: jest.fn(async () => existingPerson),
+      findUnique: jest.fn(async () => null),
+      create: jest.fn(async () => ({ id: 'h-new' })),
+    },
     investorHolding: {
       update: jest.fn(async () => row),
       findUniqueOrThrow: jest.fn(async () => row),
@@ -269,6 +282,70 @@ describe('AdminService.moderate (contributed rows)', () => {
       slug: 'sequoia-capital',
       name: 'Sequoia Capital',
     });
+  });
+
+  it('resolves an approved person to a new human, and points the role at them', async () => {
+    // The same thing approving a holding does for its firm: the contribution
+    // becomes reachable from the entity directory, not just the company page.
+    const { prisma, tx } = makeRowPrisma({ id: 'x1', companyId: 'c1', name: 'Jane Q. Smith' });
+    const service = new AdminService(prisma as unknown as PrismaService);
+
+    await service.moderate('person', 'x1', 'APPROVED', 'admin1');
+
+    expect(tx.person.create.mock.calls[0]![0]).toMatchObject({
+      data: { slug: 'jane-q-smith', normalizedName: 'jane q smith', moderationStatus: 'APPROVED' },
+    });
+    expect(tx.personRole.update).toHaveBeenLastCalledWith({
+      where: { id: 'x1' },
+      data: { personId: 'h-new' },
+    });
+  });
+
+  it('attaches an approved person to the human already holding that name', async () => {
+    const { prisma, tx } = makeRowPrisma(
+      { id: 'x1', companyId: 'c1', name: 'JANE  SMITH' },
+      { id: 'h-known', suppressedAt: null, mergedIntoId: null },
+    );
+    const service = new AdminService(prisma as unknown as PrismaService);
+
+    await service.moderate('person', 'x1', 'APPROVED', 'admin1');
+
+    expect(tx.person.create).not.toHaveBeenCalled();
+    expect(tx.personRole.update).toHaveBeenLastCalledWith({
+      where: { id: 'x1' },
+      data: { personId: 'h-known' },
+    });
+  });
+
+  it('follows a tombstone to the survivor', async () => {
+    const { prisma, tx } = makeRowPrisma(
+      { id: 'x1', companyId: 'c1', name: 'Jane Smith' },
+      { id: 'h-lost', suppressedAt: null, mergedIntoId: 'h-live' },
+    );
+    const service = new AdminService(prisma as unknown as PrismaService);
+
+    await service.moderate('person', 'x1', 'APPROVED', 'admin1');
+
+    expect(tx.personRole.update).toHaveBeenLastCalledWith({
+      where: { id: 'x1' },
+      data: { personId: 'h-live' },
+    });
+  });
+
+  it('publishes the role unattached when the person asked to be removed', async () => {
+    // A removal request has to survive a contribution as much as it survives an
+    // ingest run; recreating them under a new row would defeat it.
+    const { prisma, tx } = makeRowPrisma(
+      { id: 'x1', companyId: 'c1', name: 'Jane Smith' },
+      { id: 'h-gone', suppressedAt: new Date(), mergedIntoId: null },
+    );
+    const service = new AdminService(prisma as unknown as PrismaService);
+
+    await service.moderate('person', 'x1', 'APPROVED', 'admin1');
+
+    expect(tx.person.create).not.toHaveBeenCalled();
+    // Only the status flip ran; no second update repointed the role.
+    expect(tx.personRole.update).toHaveBeenCalledTimes(1);
   });
 
   it.each(['company', 'round', 'person', 'investor', 'acquisition', 'exit', 'diversity'] as const)(

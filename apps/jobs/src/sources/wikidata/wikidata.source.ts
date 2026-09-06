@@ -7,7 +7,14 @@ import type {
   NormalizedRecord,
 } from '../ingestion-source';
 import { WikidataClient } from './wikidata.client';
-import { WIKIDATA, mapInvestorFirms, mapWikidata, qidOf, type WikidataBundle } from './wikidata.mapper';
+import {
+  WIKIDATA,
+  mapInvestorFirms,
+  mapPeople,
+  mapWikidata,
+  qidOf,
+  type WikidataBundle,
+} from './wikidata.mapper';
 import {
   acquisitionsQuery,
   chunkQids,
@@ -69,11 +76,45 @@ export class WikidataSource implements IngestionSource {
   }
 
   /** The ~640 entities that ARE investor firms by P31 class, independent of
-   *  whether Wikidata records a P1951 edge for them. */
+   *  whether Wikidata records a P1951 edge for them — with the officers
+   *  Wikidata names on them. */
   async fetchInvestors(opts: FetchOptions): Promise<NormalizedInvestorFirm[]> {
     const rows = await this.client.runQuery(investorFirmsQuery());
     const firms = mapInvestorFirms(rows).slice(0, opts.limit);
+    await this.attachOfficers(firms);
     this.logger.log(`Normalized ${firms.length} Wikidata investor firms`);
     return firms;
+  }
+
+  /**
+   * Founders and CEOs of the firms themselves, through the SAME query the
+   * company pass uses.
+   *
+   * P112 and P169 on a firm are the same statements as on a company, so no new
+   * query is written — only the QID list changes. Chunked and throttled by the
+   * client exactly as the company pass is.
+   */
+  private async attachOfficers(firms: NormalizedInvestorFirm[]): Promise<void> {
+    const byQid = new Map(firms.map((f) => [f.externalId, f]));
+    const chunks = chunkQids([...byQid.keys()]);
+
+    for (const [i, chunk] of chunks.entries()) {
+      const rows = await this.client.runQuery(peopleQuery(chunk));
+      // One firm's rows at a time: mapPeople keys the externalId on the entity
+      // the statement is about, so it must not see another firm's bindings.
+      const grouped = new Map<string, typeof rows>();
+      for (const b of rows) {
+        const qid = qidOf(b.company);
+        if (!qid || !byQid.has(qid)) continue;
+        const list = grouped.get(qid);
+        if (list) list.push(b);
+        else grouped.set(qid, [b]);
+      }
+      for (const [qid, bindings] of grouped) {
+        const firm = byQid.get(qid)!;
+        firm.people = mapPeople(qid, bindings, firm.foundedYear ?? 0);
+      }
+      this.logger.log(`Fetched firm officers batch ${i + 1}/${chunks.length}`);
+    }
   }
 }
