@@ -54,9 +54,7 @@ export class PeopleService {
     const where: Prisma.PersonWhereInput = {
       ...PUBLIC_PERSON,
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
-      // "At more than one company" is asked of the ROLES, because that is where
-      // the company lives; a person with two roles at one company is not it.
-      ...(query.multiCompany && { roles: { some: { ...PUBLIC_ROLES, companyId: { not: null } } } }),
+      ...(query.multiCompany && { id: { in: await this.multiCompanyIds() } }),
     };
 
     const [total, rows] = await this.prisma.$transaction([
@@ -87,12 +85,37 @@ export class PeopleService {
       companyCount: companyCounts.get(r.id) ?? 0,
     }));
 
-    // `multiCompany` in SQL can only ask "has a company role", which a person
-    // with two roles at ONE company also satisfies. The exact question is
-    // answered here, against the count above.
-    const filtered = query.multiCompany ? items.filter((p) => p.companyCount > 1) : items;
+    return { items, total, page, pageSize };
+  }
 
-    return { items: filtered, total, page, pageSize };
+  /**
+   * Ids of everyone holding roles at MORE THAN ONE public company.
+   *
+   * Raw SQL because no Prisma relation filter can express "count(distinct
+   * companyId) > 1". A `roles: { some: … }` filter can only ask "has a company
+   * role", which nearly everyone satisfies — it reported 75,926 people where
+   * the true answer is 4,393, and post-filtering the page fixed the rows while
+   * leaving `total` a lie and paging through mostly-empty pages.
+   *
+   * The id set is the whole qualifying population, not one page. That is the
+   * cost of an exact count here; it is a few thousand cuids today and grows
+   * with serial founders rather than with the corpus, so it stays small
+   * relative to the 76k people it filters.
+   */
+  private async multiCompanyIds(): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<{ personId: string }[]>`
+      SELECT r."personId"
+        FROM "PersonRole" r
+        JOIN "Company" c
+          ON c.id = r."companyId"
+         AND c."moderationStatus" = 'APPROVED'
+         AND c."mergedIntoId" IS NULL
+       WHERE r."moderationStatus" = 'APPROVED'
+         AND r."personId" IS NOT NULL
+       GROUP BY r."personId"
+      HAVING count(DISTINCT r."companyId") > 1
+    `;
+    return rows.map((r) => r.personId);
   }
 
   /**

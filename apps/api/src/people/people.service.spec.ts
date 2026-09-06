@@ -45,6 +45,7 @@ describe('PeopleService', () => {
   let findUnique: jest.Mock;
   let citationFindMany: jest.Mock;
   let roleFindMany: jest.Mock;
+  let queryRaw: jest.Mock;
 
   beforeEach(() => {
     findMany = jest.fn();
@@ -55,9 +56,12 @@ describe('PeopleService', () => {
     citationFindMany = jest.fn(async () => []);
     // The distinct (personId, companyId) pairs behind companyCount.
     roleFindMany = jest.fn(async () => []);
+    // The exact "roles at 2+ public companies" id set.
+    queryRaw = jest.fn(async () => []);
     const prisma = {
       person: { findMany, count, findFirst, findUnique, update: jest.fn() },
       personRole: { findMany: roleFindMany },
+      $queryRaw: queryRaw,
       citation: { findMany: citationFindMany },
       entityIdentifier: { findMany: jest.fn(async () => []) },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
@@ -131,36 +135,31 @@ describe('PeopleService', () => {
       expect(result).toMatchObject({ page: 3, pageSize: 10, total: 0 });
     });
 
-    it('multiCompany drops a person whose several roles are all at one company', async () => {
-      // The SQL filter can only ask "has a company role"; the exact question
-      // needs the whole role list, so the page is filtered here too.
-      count.mockResolvedValue(2);
-      findMany.mockResolvedValue([
-        personRow({
-          id: 'h-one',
-          roles: [
-            role({ id: 'a', company: { slug: 'acme', name: 'Acme', domain: '' } }),
-            role({ id: 'b', company: { slug: 'acme', name: 'Acme', domain: '' } }),
-          ],
-        }),
-        personRow({
-          id: 'h-two',
-          slug: 'serial-founder',
-          roles: [
-            role({ id: 'c', company: { slug: 'acme', name: 'Acme', domain: '' } }),
-            role({ id: 'd', company: { slug: 'helia', name: 'Helia', domain: '' } }),
-          ],
-        }),
-      ]);
+    it('multiCompany narrows the query itself, so total is not a lie', async () => {
+      // A `roles: { some: … }` filter can only ask "has a company role", which
+      // nearly everyone satisfies: it reported 75,926 people against a true
+      // 4,393. Post-filtering the page would fix the rows and leave the count
+      // and the pagination wrong, so the id set goes into the WHERE.
+      queryRaw.mockResolvedValue([{ personId: 'h-two' }]);
+      count.mockResolvedValue(1);
+      findMany.mockResolvedValue([personRow({ id: 'h-two', slug: 'serial-founder' })]);
 
-      roleFindMany.mockResolvedValue([
-        { personId: 'h-one', companyId: 'c-acme' },
-        { personId: 'h-two', companyId: 'c-acme' },
-        { personId: 'h-two', companyId: 'c-helia' },
-      ]);
+      const { items, total } = await service.findAll({ multiCompany: true });
 
-      const { items } = await service.findAll({ multiCompany: true });
+      expect(total).toBe(1);
       expect(items.map((p) => p.slug)).toEqual(['serial-founder']);
+      expect(findMany.mock.calls[0]![0]).toMatchObject({
+        where: { id: { in: ['h-two'] } },
+      });
+      // Both halves of the page query see the same filter.
+      expect(count.mock.calls[0]![0]).toMatchObject({ where: { id: { in: ['h-two'] } } });
+    });
+
+    it('does not run the multi-company query when the filter is off', async () => {
+      count.mockResolvedValue(0);
+      findMany.mockResolvedValue([]);
+      await service.findAll();
+      expect(queryRaw).not.toHaveBeenCalled();
     });
 
     it('counts companies exactly, not from the role sample', async () => {
