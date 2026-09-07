@@ -606,7 +606,11 @@ export async function getCompanyHistory(
 /** Every approved company's slug + last update, for the sitemap. */
 export async function getCompanySlugs(): Promise<CompanySlugEntry[]> {
   try {
-    return await apiFetch<CompanySlugEntry[]>('/companies/sitemap');
+    // `no-store`: this payload is far past Next's 2MB fetch-cache limit, and
+    // over it the cache does not merely skip — it hands back a TRUNCATED list
+    // (35,943 companies came back as 11,058). The sitemap routes set their own
+    // `s-maxage`, so nothing is lost by going to the API each time.
+    return await apiFetch<CompanySlugEntry[]>('/companies/sitemap', { cache: 'no-store' });
   } catch (err) {
     // Never emit mock slugs into a production sitemap — an empty list is safer.
     console.warn('[data] getCompanySlugs failed; sitemap gets no company URLs:', err);
@@ -729,7 +733,11 @@ export const getPerson = cache(async function getPerson(
 
 export async function getPersonSlugs(): Promise<PersonSlugEntry[]> {
   try {
-    return await apiFetch<PersonSlugEntry[]>('/people/sitemap');
+    // `no-store`: this payload is far past Next's 2MB fetch-cache limit, and
+    // over it the cache does not merely skip — it hands back a TRUNCATED list
+    // (35,943 companies came back as 11,058). The sitemap routes set their own
+    // `s-maxage`, so nothing is lost by going to the API each time.
+    return await apiFetch<PersonSlugEntry[]>('/people/sitemap', { cache: 'no-store' });
   } catch (err) {
     console.warn('[data] getPersonSlugs failed; sitemap gets no person URLs:', err);
     return [];
@@ -738,7 +746,11 @@ export async function getPersonSlugs(): Promise<PersonSlugEntry[]> {
 
 export async function getInvestorSlugs(): Promise<InvestorSlugEntry[]> {
   try {
-    return await apiFetch<InvestorSlugEntry[]>('/investors/sitemap');
+    // `no-store`: this payload is far past Next's 2MB fetch-cache limit, and
+    // over it the cache does not merely skip — it hands back a TRUNCATED list
+    // (35,943 companies came back as 11,058). The sitemap routes set their own
+    // `s-maxage`, so nothing is lost by going to the API each time.
+    return await apiFetch<InvestorSlugEntry[]>('/investors/sitemap', { cache: 'no-store' });
   } catch (err) {
     // Never emit mock slugs into a production sitemap — an empty list is safer.
     console.warn('[data] getInvestorSlugs failed; sitemap gets no investor URLs:', err);

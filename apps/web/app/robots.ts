@@ -17,6 +17,8 @@ export default function robots(): MetadataRoute.Robots {
         '/companies/*/contribute',
       ],
     },
+    // The index; it points at the per-entity child sitemaps, which are paged
+    // because the protocol caps one file at 50,000 URLs.
     sitemap: `${SITE_URL}/sitemap.xml`,
   };
 }

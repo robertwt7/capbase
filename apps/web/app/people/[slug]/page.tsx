@@ -7,9 +7,11 @@ import type { PersonRole } from '@repo/api';
 import { Citation } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
+import { JsonLd } from '@/components/JsonLd';
 import { Badge, SectionHeader } from '@/components/ui';
 import { getPerson } from '@/lib/data';
 import { formatCount } from '@/lib/format';
+import { personBreadcrumbJsonLd, personJsonLd } from '@/lib/schema';
 
 const DESCRIPTION_MAX = 160;
 
@@ -88,6 +90,11 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
 
   return (
     <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+      {/* schema.org Person — `sameAs` carries the Wikidata QID, which is what
+          tells a search engine WHICH person this is rather than leaving it to
+          guess from the name. */}
+      <JsonLd data={personJsonLd(person)} />
+      <JsonLd data={personBreadcrumbJsonLd(person)} />
       <Link
         href="/people"
         className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
