@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, lint, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: capbase
+          POSTGRES_PASSWORD: capbase
+          POSTGRES_DB: capbase
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U capbase"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # prisma.config.ts reads DATABASE_URL even for `prisma generate`.
+      DATABASE_URL: postgresql://capbase:capbase@localhost:5432/capbase?schema=public
+      JWT_SECRET: ci-only-secret
+      ADMIN_EMAIL: admin@capbase.fyi
+      ADMIN_PASSWORD: ci-admin-password
+      # Nothing listens here: CI proves the web build never needs a live API.
+      API_URL: http://127.0.0.1:9
+      TURBO_TELEMETRY_DISABLED: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: corepack enable
+
+      - uses: actions/cache@v4
+        with:
+          # Yarn 4 global cache (no enableGlobalCache: false in .yarnrc.yml).
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - run: yarn install --immutable
+
+      - run: yarn build
+
+      # Lint depends on ^build (type-aware rules need workspace dist types).
+      - run: yarn lint
+
+      - run: yarn test
+
+      - name: Migrate and seed the e2e database
+        run: |
+          yarn workspace @repo/db migrate:deploy
+          SEED_DEMO=true yarn workspace @repo/db seed
+
+      - run: yarn workspace api test:e2e
+
+  docker:
+    name: Docker images build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, web, jobs]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}

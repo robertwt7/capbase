@@ -1,0 +1,3 @@
+we also need a design system, this monochrome thing we need to make it components before we can enhance the UIs even further. please create those component and its structure then update claude.md as well after.
+
+also     "lint": "next lint", is broken because next 16 doesn't have next lint anymore i think? please fix the yarn lint across the workspaces and create a proper recommended lint so we can catch pitfalls. especially nextjs, react and stuff

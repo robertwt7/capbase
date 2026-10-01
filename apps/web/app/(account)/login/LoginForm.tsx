@@ -63,6 +63,12 @@ export function LoginForm({ next }: { next?: string }) {
               type="password"
               autoComplete="current-password"
             />
+            <Link
+              href="/forgot-password"
+              className="-mt-1.5 self-end font-sans text-[13px] text-graphite-500 underline underline-offset-[3px] hover:text-ink"
+            >
+              Forgot password?
+            </Link>
 
             {formError ? <FormError>{formError}</FormError> : null}
 

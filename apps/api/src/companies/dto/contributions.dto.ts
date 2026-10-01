@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -8,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -28,6 +30,7 @@ import {
 
 class RoundInvestorDto implements RoundInvestor {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   name!: string;
 
@@ -37,6 +40,7 @@ class RoundInvestorDto implements RoundInvestor {
 
 export class CreateFundingRoundDto implements CreateFundingRoundInput {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   name!: string;
 
@@ -54,9 +58,11 @@ export class CreateFundingRoundDto implements CreateFundingRoundInput {
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   lead?: string | null;
 
   @IsArray()
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => RoundInvestorDto)
   investors!: RoundInvestorDto[];
@@ -65,15 +71,18 @@ export class CreateFundingRoundDto implements CreateFundingRoundInput {
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }
 
 export class CreatePersonDto implements CreatePersonInput {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   name!: string;
 
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   role!: string;
 
@@ -82,25 +91,30 @@ export class CreatePersonDto implements CreatePersonInput {
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   prior?: string;
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   linkedinUrl?: string | null;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   title?: string | null;
 
   /** Primary document backing this contribution. Optional, but prompted: an
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }
 
 export class CreateInvestorDto implements CreateInvestorInput {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   name!: string;
 
@@ -108,6 +122,7 @@ export class CreateInvestorDto implements CreateInvestorInput {
   type!: InvestorType;
 
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   firstRound!: string;
 
@@ -117,21 +132,25 @@ export class CreateInvestorDto implements CreateInvestorInput {
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   websiteUrl?: string | null;
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   linkedinUrl?: string | null;
 
   /** Primary document backing this contribution. Optional, but prompted: an
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }
 
 export class CreateAcquisitionDto implements CreateAcquisitionInput {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   target!: string;
 
@@ -144,6 +163,7 @@ export class CreateAcquisitionDto implements CreateAcquisitionInput {
   amountUsd?: number | null;
 
   @IsString()
+  @MaxLength(10000)
   @MinLength(1)
   rationale!: string;
 
@@ -151,6 +171,7 @@ export class CreateAcquisitionDto implements CreateAcquisitionInput {
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }
 
@@ -167,6 +188,7 @@ export class CreateExitDto implements CreateExitInput {
   valueUsd?: number | null;
 
   @IsString()
+  @MaxLength(10000)
   @MinLength(1)
   detail!: string;
 
@@ -174,19 +196,23 @@ export class CreateExitDto implements CreateExitInput {
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }
 
 export class CreateDiversityDto implements CreateDiversityInput {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   label!: string;
 
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   value!: string;
 
   @IsString()
+  @MaxLength(10000)
   @MinLength(1)
   note!: string;
 
@@ -194,5 +220,6 @@ export class CreateDiversityDto implements CreateDiversityInput {
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }

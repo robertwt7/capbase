@@ -23,6 +23,20 @@ enum ReviewStatus {
 // Ledger of applied seed phases (Flyway-style). The seed runner
 // (prisma/seed.ts) only executes phases not recorded here; `--baseline` marks
 // phases as applied without running them (for DBs that predate the runner).
+/// One forgot-password link. Only the SHA-256 of the token is stored, so a
+/// database leak can't be replayed into account takeovers.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
 model SeedHistory {
   name      String   @id
   appliedAt DateTime @default(now())
@@ -35,6 +49,13 @@ model User {
   passwordHash String
   role         Role     @default(USER)
   createdAt    DateTime @default(now())
+  /// Bumped on password change/reset and on ban; a JWT carrying an older
+  /// version is rejected, which is how sessions are revoked server-side.
+  tokenVersion Int       @default(0)
+  /// Set by an admin. A banned user can't sign in, and every live session dies.
+  bannedAt     DateTime?
+
+  passwordResetTokens PasswordResetToken[]
 
   companies      Company[]
   rounds         FundingRound[]

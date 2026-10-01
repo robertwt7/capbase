@@ -5,6 +5,7 @@
     "DATABASE_URL",
     "JWT_SECRET",
     "JWT_EXPIRES_IN",
+    "CORS_ORIGIN",
     "ADMIN_EMAIL",
     "ADMIN_PASSWORD",
     "ADMIN_NAME",

@@ -58,7 +58,7 @@ export function CompanyForm() {
           </h1>
           <p className="mt-3 max-w-prose text-sm text-graphite-500">
             Thanks for contributing. Your company is now in the moderation queue — it goes live once
-            an admin approves it. Contributing has unlocked full company profiles for you.
+            an admin approves it. Once approved, it unlocks full company profiles for you for 30 days.
           </p>
           <div className="mt-6 flex items-center gap-4">
             <Button variant="primary" shape="pill" href="/profile">

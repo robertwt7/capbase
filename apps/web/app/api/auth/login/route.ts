@@ -22,6 +22,9 @@ export async function POST(req: Request) {
     cache: 'no-store',
   });
 
+  if (res.status === 403) {
+    return NextResponse.json({ message: 'This account has been suspended.' }, { status: 403 });
+  }
   if (!res.ok) {
     return NextResponse.json({ message: 'Invalid email or password' }, { status: 401 });
   }

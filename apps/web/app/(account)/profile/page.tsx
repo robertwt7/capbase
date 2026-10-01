@@ -51,7 +51,11 @@ export default async function ProfilePage() {
         </div>
       </div>
 
-      <AccessPanel access={access} role={user.role} />
+      <AccessPanel
+        access={access}
+        role={user.role}
+        hasPending={items.some((i) => i.moderationStatus === 'PENDING')}
+      />
 
       <SavedCompanies items={savedCompanies} />
 
@@ -74,9 +78,11 @@ export default async function ProfilePage() {
 function AccessPanel({
   access,
   role,
+  hasPending,
 }: {
   access: { unlocked: boolean; unlockedUntil: string | null };
   role: 'USER' | 'ADMIN';
+  hasPending: boolean;
 }) {
   if (role === 'ADMIN') {
     return (
@@ -105,8 +111,9 @@ function AccessPanel({
         {access.unlockedUntil
           ? `Your access lapsed after ${formatDate(access.unlockedUntil)}. `
           : ''}
-        Contribute anything — a new company, a round, a person — to unlock all full profiles for the
-        next 30 days.
+        {hasPending
+          ? 'Your submission is in the review queue — full profiles unlock for 30 days once it is approved.'
+          : 'Contribute anything — a new company, a round, a person — and once it is approved, every full profile unlocks for 30 days.'}
       </p>
     </Card>
   );

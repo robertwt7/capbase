@@ -6,7 +6,16 @@ import { apiFetch } from './api';
 
 export const TOKEN_COOKIE = 'capbase_token';
 
-/** Read the admin JWT from the httpOnly cookie (set by the login route handler). */
+/** Flags for the session cookie, wherever it is (re)issued. */
+export const TOKEN_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  path: '/',
+  maxAge: 60 * 60 * 24 * 7,
+} as const;
+
+/** Read the session JWT from the httpOnly cookie (set by the login route handler). */
 export async function getToken(): Promise<string | undefined> {
   const store = await cookies();
   return store.get(TOKEN_COOKIE)?.value;

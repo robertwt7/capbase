@@ -42,6 +42,64 @@ export class UsersService {
     return this.prisma.user.update({ where: { id }, data });
   }
 
+  /** Set a new password and revoke every session minted before it. */
+  setPassword(id: string, passwordHash: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    });
+  }
+
+  /** When this user's newest reset link was issued, or null. */
+  async lastResetRequestAt(userId: string): Promise<Date | null> {
+    const row = await this.prisma.passwordResetToken.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    return row?.createdAt ?? null;
+  }
+
+  /** Issue a reset link, retiring any older unused one so only the newest works. */
+  async createResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.passwordResetToken.deleteMany({
+        where: { userId, usedAt: null },
+      }),
+      this.prisma.passwordResetToken.create({
+        data: { userId, tokenHash, expiresAt },
+      }),
+    ]);
+  }
+
+  /**
+   * Spend a reset token: set the password, revoke sessions, mark the token used.
+   * Returns false when the token is unknown, used, expired, or its user banned.
+   */
+  async consumeResetToken(tokenHash: string, passwordHash: string): Promise<boolean> {
+    const token = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: { select: { bannedAt: true } } },
+    });
+    if (!token || token.usedAt || token.expiresAt < new Date() || token.user.bannedAt) {
+      return false;
+    }
+    // The conditional updateMany is the guard against a double-submit race:
+    // only one request can flip usedAt from null.
+    return this.prisma.$transaction(async (tx) => {
+      const spent = await tx.passwordResetToken.updateMany({
+        where: { id: token.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      if (spent.count === 0) return false;
+      await tx.user.update({
+        where: { id: token.userId },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
+      });
+      return true;
+    });
+  }
+
   /** The user's saved companies (approved only), newest first. */
   async listSavedCompanies(userId: string): Promise<SavedCompanyItem[]> {
     const rows = await this.prisma.savedCompany.findMany({
@@ -101,10 +159,14 @@ export class UsersService {
     return count > 0;
   }
 
-  /** Most recent contribution timestamp across all contributable models, or null. */
+  /**
+   * Most recent APPROVED contribution timestamp across all contributable
+   * models, or null. Pending and rejected rows never count: otherwise one junk
+   * submission would unlock everything for the whole window.
+   */
   async lastContributionAt(userId: string): Promise<Date | null> {
     const opts = {
-      where: { submittedById: userId },
+      where: { submittedById: userId, moderationStatus: 'APPROVED' as const },
       orderBy: { createdAt: 'desc' as const },
       select: { createdAt: true },
     };

@@ -20,7 +20,11 @@ export function RegisterForm({ next }: { next?: string }) {
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerFormSchema),
     defaultValues: registerFormDefaults,
-    mode: 'onBlur',
+    // onTouched, not onBlur: once a field is touched it revalidates on every
+    // keystroke, so a fixed "passwords do not match" clears before the click.
+    // Otherwise the click's own blur removes the message, the button jumps,
+    // and the first click lands on empty space.
+    mode: 'onTouched',
   });
 
   const onSubmit = form.handleSubmit(async (values) => {

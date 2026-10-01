@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsIn,
@@ -7,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -32,26 +34,31 @@ import {
 export class CompanyEditFieldsDto implements CompanyEditFields {
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   name?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   domain?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   oneLiner?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10000)
   @MinLength(1)
   description?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   hq?: string;
 
@@ -67,7 +74,9 @@ export class CompanyEditFieldsDto implements CompanyEditFields {
   @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(300, { each: true })
   industry?: string[];
 
   @IsOptional()
@@ -90,18 +99,22 @@ export class CompanyEditFieldsDto implements CompanyEditFields {
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   websiteUrl?: string | null;
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   linkedinUrl?: string | null;
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   twitterUrl?: string | null;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   legalName?: string | null;
 
   @IsOptional()
@@ -124,6 +137,7 @@ export class CreateChangeProposalDto implements CreateChangeProposalInput {
 
   @IsOptional()
   @IsString()
+  @MaxLength(10000)
   note?: string | null;
 
   /** Sits on the proposal, NOT on CompanyEditFieldsDto: that class is the
@@ -131,5 +145,6 @@ export class CreateChangeProposalDto implements CreateChangeProposalInput {
       adding a key there would make it look editable. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }

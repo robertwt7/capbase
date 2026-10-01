@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { validateEnv } from './config/env';
 import { CompaniesModule } from './companies/companies.module';
 import { FundsModule } from './funds/funds.module';
 import { InvestorsModule } from './investors/investors.module';
@@ -13,10 +14,11 @@ import { UsersModule } from './users/users.module';
 
 import { AppService } from './app.service';
 import { AppController } from './app.controller';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     PrismaModule,
     UsersModule,
     AuthModule,
@@ -27,7 +29,7 @@ import { AppController } from './app.controller';
     MarketModule,
     AdminModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}
