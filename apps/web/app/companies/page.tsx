@@ -23,7 +23,7 @@ export default async function CompaniesPage({
   const result = await getCompanies(companyListQuery(sp));
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <SectionHeader title="Companies" note={`${formatCount(result.total)} profiles`} />
       <CompanyDirectory result={result} initial={sp} />
     </PageContainer>

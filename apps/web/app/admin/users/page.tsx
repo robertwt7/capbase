@@ -29,7 +29,7 @@ export default async function AdminUsers({
   };
 
   return (
-    <main className="mx-auto max-w-[1180px] px-6 py-9">
+    <div className="mx-auto max-w-[1180px] px-6 py-9">
       <header className="border-b border-ink pb-6">
         <h1 className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">
           Users
@@ -95,7 +95,7 @@ export default async function AdminUsers({
         href={href}
         className="mt-6"
       />
-    </main>
+    </div>
   );
 }
 
@@ -139,7 +139,7 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
             You
           </span>
         ) : (
-          <div className="flex justify-end gap-2">
+          <div className="flex items-center justify-end gap-3">
             <form
               action={setRoleAction.bind(
                 null,

@@ -16,7 +16,7 @@ export default async function MarketsPage() {
   const [marketStats, marketTotals] = await Promise.all([getMarketStats(), getMarketTotals()]);
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <SectionHeader title="Markets" note={marketTotals.quarter} />
 
       <div

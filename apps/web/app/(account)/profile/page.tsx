@@ -23,7 +23,7 @@ export default async function ProfilePage() {
   ]);
 
   return (
-    <main className={styles.profileMain}>
+    <div className={styles.profileMain}>
       <div className={styles.identity}>
         <div>
           <h1 className={styles.name}>
@@ -71,7 +71,7 @@ export default async function ProfilePage() {
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }
 

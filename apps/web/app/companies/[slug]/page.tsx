@@ -72,7 +72,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
     : false;
 
   return (
-    <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+    <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
       <JsonLd data={companyJsonLd(company)} />
       <JsonLd data={companyBreadcrumbJsonLd(company)} />
 
@@ -431,7 +431,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         </Link>
         .
       </footer>
-    </main>
+    </div>
   );
 }
 

@@ -22,7 +22,7 @@ export default async function PeoplePage({
   const result = await getPeople(personListQuery(sp));
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <SectionHeader title="People" note={`${formatCount(result.total)} people`} />
       <PeopleDirectory result={result} initial={sp} />
     </PageContainer>

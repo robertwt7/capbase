@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { PageContainer } from '@/components/ui';
 import { SUPPORT_EMAIL } from '@/lib/site';
+import { CookiePreferencesButton } from './ConsentBanner';
 
 // The keyword-anchored labels ("Crunchbase alternative") are deliberate
 // internal anchor text for the comparison landing pages.
@@ -40,7 +41,7 @@ const COLUMNS: { label: string; links: { label: string; href: string }[] }[] = [
   },
 ];
 
-export function SiteFooter() {
+export function SiteFooter({ showCookiePreferences }: { showCookiePreferences: boolean }) {
   return (
     <footer className="mt-24 border-t border-line">
       <PageContainer className="py-12">
@@ -76,6 +77,9 @@ export function SiteFooter() {
             © {new Date().getFullYear()} Capbase
           </span>
           <span>Data from SEC EDGAR, Wikidata, and community contributions</span>
+          {showCookiePreferences ? (
+            <CookiePreferencesButton className="cursor-pointer transition-colors hover:text-ink" />
+          ) : null}
           <a href={`mailto:${SUPPORT_EMAIL}`} className="transition-colors hover:text-ink">
             {SUPPORT_EMAIL}
           </a>

@@ -72,7 +72,7 @@ export default async function CompanyHistory({
   const { company } = detail;
 
   return (
-    <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8 pb-16">
+    <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8 pb-16">
       <Link
         href={`/companies/${company.slug}`}
         className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
@@ -132,7 +132,7 @@ export default async function CompanyHistory({
           className="mt-8"
         />
       </section>
-    </main>
+    </div>
   );
 }
 

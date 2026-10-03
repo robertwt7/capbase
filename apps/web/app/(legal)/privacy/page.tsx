@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/privacy' },
 };
 
-const LAST_UPDATED = '19 July 2026';
+const LAST_UPDATED = '3 October 2026';
 
 export default function PrivacyPage() {
   return (
@@ -55,8 +55,16 @@ export default function PrivacyPage() {
           Essential for the Service to work; it is not used for tracking.
         </li>
         <li>
+          <strong>capbase_consent</strong> — remembers whether you accepted or declined analytics
+          cookies, for about six months. Essential; it holds only that choice.
+        </li>
+        <li>
           <strong>_ga, _ga_*</strong> — Google Analytics 4 cookies used to measure how the site is
-          used (pages visited, approximate location, device type).
+          used (pages visited, approximate location, device type).{' '}
+          <strong>Off by default:</strong> Google Analytics does not load, and these cookies are not
+          set, unless you choose &ldquo;Accept analytics&rdquo; in the cookie banner. You can change
+          your choice at any time with &ldquo;Cookie preferences&rdquo; in the site footer;
+          declining removes the cookies.
         </li>
       </ul>
 

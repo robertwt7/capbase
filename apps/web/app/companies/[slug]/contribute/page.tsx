@@ -61,7 +61,7 @@ export default async function ContributeToCompanyPage({
   const siteKey = turnstileSiteKey();
 
   return (
-    <PageContainer as="main" className="pt-8 pb-20">
+    <PageContainer className="pt-8 pb-20">
       <Link
         href={`/companies/${company.slug}`}
         className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"

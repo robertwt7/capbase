@@ -89,7 +89,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
   );
 
   return (
-    <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+    <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
       {/* schema.org Person — `sameAs` carries the Wikidata QID, which is what
           tells a search engine WHICH person this is rather than leaving it to
           guess from the name. */}
@@ -176,7 +176,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
           ))}
         </ul>
       </section>
-    </main>
+    </div>
   );
 }
 

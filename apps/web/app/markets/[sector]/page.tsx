@@ -63,7 +63,7 @@ export default async function SectorPage({
   const base = `/markets/${sectorSlug(sector)}`;
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <Eyebrow>
         <Link href="/markets" className="transition-colors hover:text-ink">
           Markets

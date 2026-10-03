@@ -6,7 +6,7 @@ import { PageContainer } from '@/components/ui';
 // carry its own mono styling without fighting the [&_p] selectors.
 export default function LegalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <article
         className="max-w-[70ch]
           [&_h1]:font-display [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight [&_h1]:text-ink

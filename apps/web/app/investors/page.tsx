@@ -22,7 +22,7 @@ export default async function InvestorsPage({
   const result = await getInvestors(investorListQuery(sp));
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <SectionHeader title="Investors" note={`${formatCount(result.total)} firms`} />
       <InvestorDirectory result={result} initial={sp} />
     </PageContainer>

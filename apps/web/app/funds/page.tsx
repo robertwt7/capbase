@@ -23,7 +23,7 @@ export default async function FundsPage({
   const result = await getFunds(query);
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <SectionHeader title="Funds" note={`${formatCount(result.total)} funds`} />
       <FundDirectory result={result} initial={sp} />
     </PageContainer>

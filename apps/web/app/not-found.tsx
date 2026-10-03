@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: 'Not found', robots: { index: false }
 
 export default function NotFound() {
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <Eyebrow>404</Eyebrow>
       <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-ink">
         Nothing on this page of the ledger

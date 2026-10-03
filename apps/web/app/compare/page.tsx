@@ -61,7 +61,7 @@ export default async function ComparePage({
   const current = selected.map((c) => c.slug);
 
   return (
-    <PageContainer as="main" className="pt-8 pb-20">
+    <PageContainer className="pt-8 pb-20">
       <SectionHeader
         as="h1"
         title="Compare companies"

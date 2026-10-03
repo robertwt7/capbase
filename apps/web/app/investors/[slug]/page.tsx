@@ -46,7 +46,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   const hasLinks = Boolean(investor.websiteUrl || investor.linkedinUrl);
 
   return (
-    <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+    <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
       <Link
         href="/investors"
         className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
@@ -258,7 +258,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           </EmptyState>
         )}
       </section>
-    </main>
+    </div>
   );
 }
 

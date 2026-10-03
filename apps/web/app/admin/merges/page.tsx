@@ -45,7 +45,7 @@ export default async function MergeQueue({
   const typeParam = activeType ? `&type=${activeType}` : '';
 
   return (
-    <main className="mx-auto max-w-[1180px] px-6 py-9">
+    <div className="mx-auto max-w-[1180px] px-6 py-9">
       <header className="border-b border-ink pb-6">
         <h1 className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">
           Merge queue
@@ -99,7 +99,7 @@ export default async function MergeQueue({
           ))}
         </ol>
       )}
-    </main>
+    </div>
   );
 }
 

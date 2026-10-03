@@ -56,7 +56,7 @@ export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string })
 
   if (submitted) {
     return (
-      <main className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+      <div className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
         <Card emphasis className="p-9">
           <Eyebrow>Submitted</Eyebrow>
           <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">
@@ -75,12 +75,12 @@ export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string })
             </Button>
           </div>
         </Card>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+    <div className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
       <header className="mb-8">
         <Eyebrow>Contribute</Eyebrow>
         <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">
@@ -199,6 +199,6 @@ export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string })
           </Button>
         </form>
       </Form>
-    </main>
+    </div>
   );
 }

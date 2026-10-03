@@ -40,7 +40,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
   });
 
   return (
-    <main className="flex items-center justify-center px-5 py-20 sm:px-8">
+    <div className="flex items-center justify-center px-5 py-20 sm:px-8">
       <Card className="w-full max-w-[380px]">
         {done ? (
           <div className="flex flex-col gap-3.5 p-8" role="status">
@@ -88,6 +88,6 @@ export function ResetPasswordForm({ token }: { token: string }) {
           </Form>
         )}
       </Card>
-    </main>
+    </div>
   );
 }
