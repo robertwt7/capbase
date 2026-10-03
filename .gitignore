@@ -68,6 +68,7 @@ infra/certbot/www
 
 # infra: backup recipients (keep the .example) + any stray key material
 infra/backup/recipients.txt
+infra/backup/rclone.conf
 *.key
 
 # Local database dumps (make db-dump)

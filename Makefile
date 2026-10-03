@@ -296,8 +296,11 @@ deploy-app: check-env ## [App VPS] Build + start web/api/jobs/nginx (reads infra
 
 .PHONY: deploy-all
 deploy-all: ENVF := infra/env/all.env
-deploy-all: check-env ## [1 VPS] Build + start EVERYTHING incl. Postgres (reads infra/env/all.env)
-	$(COMPOSE_ALL) up -d --build
+deploy-all: check-env ## [1 VPS] Build, back up, then start EVERYTHING incl. Postgres (SKIP_BACKUP=1 to skip)
+# Build first so the backup → migrate window is seconds, not a whole build.
+	$(COMPOSE_ALL) build
+	@scripts/predeploy-backup.sh
+	$(COMPOSE_ALL) up -d
 
 .PHONY: deploy-tls
 deploy-tls: ## [App/1 VPS] One-time Let's Encrypt cert bootstrap (needs DNS + ports 80/443)
