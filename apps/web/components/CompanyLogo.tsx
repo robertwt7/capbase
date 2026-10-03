@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface CompanyLogoProps {
   name: string;
@@ -9,38 +9,49 @@ interface CompanyLogoProps {
   size?: number;
 }
 
-// Logos are the only color in the interface, so they carry weight. We resolve a
-// real mark from the company domain and fall back to a monogram chip if it fails
-// to load, which keeps the grid intact when a logo is missing.
+/** Same-origin logo proxy (app/api/logo/[domain]); lib/schema.ts mirrors it. */
+const logoPath = (domain: string) => `/api/logo/${encodeURIComponent(domain)}`;
+
+// Logos are the only color in the interface, so they carry weight. The monogram
+// is always rendered underneath and the logo only fades in once it has actually
+// loaded — so a missing logo never leaves an empty chip, even when the image
+// fails during server render, before React could attach `onError`.
 export function CompanyLogo({ name, domain, size = 44 }: CompanyLogoProps) {
-  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
   const monogram = name.charAt(0).toUpperCase();
+
+  // The image may have settled before hydration; read its state directly.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth > 0) setLoaded(true);
+  }, []);
 
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-line bg-surface"
+      className="relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-line bg-surface"
       style={{ width: size, height: size }}
-      aria-hidden={failed ? undefined : true}
+      aria-hidden="true"
     >
-      {failed ? (
-        <span
-          className="font-display font-bold leading-none tracking-tight text-graphite-700"
-          style={{ fontSize: size * 0.4 }}
-        >
-          {monogram}
-        </span>
-      ) : (
+      <span
+        className="font-display leading-none font-bold tracking-tight text-graphite-700"
+        style={{ fontSize: size * 0.4 }}
+      >
+        {monogram}
+      </span>
+      {domain ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          className="size-full object-contain p-[18%]"
-          src={`https://logo.clearbit.com/${domain}`}
-          alt={`${name} logo`}
+          ref={imgRef}
+          className={`absolute inset-0 size-full bg-surface object-contain p-[18%] transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          src={logoPath(domain)}
+          alt=""
           width={size}
           height={size}
           loading="lazy"
-          onError={() => setFailed(true)}
+          onLoad={() => setLoaded(true)}
         />
-      )}
+      ) : null}
     </span>
   );
 }

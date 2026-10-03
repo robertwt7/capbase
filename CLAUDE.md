@@ -141,8 +141,10 @@ pages are URL-driven: the client components only mirror filter state to the URL 
 `router.replace`, page resets on filter change) and render the page plus `<Pagination>`;
 the server component refetches. The mock arrays in the file remain ONLY as an offline
 fallback if the API is unreachable in local dev — they are illustrative, not real. Domain
-types are re-exported from `@repo/api` (single source of truth). Company logos resolve from
-`domain` via Clearbit in `components/CompanyLogo.tsx`, with a monogram fallback.
+types are re-exported from `@repo/api` (single source of truth). Company logos resolve from `domain` through the same-origin proxy
+`app/api/logo/[domain]` (DuckDuckGo icons; Clearbit's API is gone) in `components/CompanyLogo.tsx`; the
+monogram is always rendered underneath, so a missing logo never leaves an empty chip. The brand
+logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw it inline.
 
 ### Routes
 

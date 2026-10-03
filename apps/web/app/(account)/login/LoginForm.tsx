@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { LogoMark } from '@/components/Logo';
 import { Button, Card, Form, FormError, TextField } from '@/components/ui';
 import {
   loginFormDefaults,
@@ -44,6 +45,7 @@ export function LoginForm({ next }: { next?: string }) {
       <Card className="w-full max-w-[380px]">
         <Form {...form}>
           <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
+            <LogoMark className="mb-1 h-7 self-start text-ink" />
             <h1 className="font-display text-[22px] font-bold text-ink">Sign in</h1>
             <p className="mb-2 font-sans text-[13px] text-graphite-500">
               Contribute company and funding data to unlock full profiles.

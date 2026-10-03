@@ -4,7 +4,7 @@ import { CompanyTable } from '@/components/CompanyTable';
 import { JsonLd } from '@/components/JsonLd';
 import { Button, Eyebrow, SectionHeader, Stat } from '@/components/ui';
 import { getCompanies, getMarketStats, getMarketTotals } from '@/lib/data';
-import { formatCount, formatUsd, signedPct } from '@/lib/format';
+import { formatCount, formatCountCompact, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
 import { siteOrganizationJsonLd, websiteJsonLd } from '@/lib/schema';
 
@@ -26,18 +26,18 @@ export default async function Home() {
 
       <section className="mx-auto max-w-(--page-max) px-(--page-pad) pt-20">
         <div className="max-w-3xl">
-          <Eyebrow>{marketTotals.quarter} · private market intelligence</Eyebrow>
+          <Eyebrow>Open private-market data</Eyebrow>
           <h1 className="mt-5 font-display text-[clamp(2.25rem,5.4vw,4rem)] leading-[1.02] font-extrabold tracking-[-0.035em] text-ink">
-            The cap table of the private economy, in the open.
+            Private market data, open to everyone.
           </h1>
           <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-graphite-700">
-            Funding rounds, investors, people, and exits for the companies shaping each sector —
-            a free, crowdsourced alternative to Crunchbase and PitchBook. Open to read, open to
-            build on.
+            Search companies, funding rounds, investors, funds and the people behind them —
+            built from SEC filings and public records, with a source on every fact. The free
+            alternative to Crunchbase and PitchBook.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Button variant="primary" shape="pill" href="/companies">
-              Browse companies
+              Explore the data
             </Button>
             <Button variant="outline" shape="pill" href="/contribute">
               Contribute a company
@@ -47,11 +47,13 @@ export default async function Home() {
 
         <div
           className="mt-12 flex flex-wrap gap-x-14 gap-y-3 border-t border-b border-t-ink border-b-line py-7"
-          aria-label={`${marketTotals.quarter} market totals`}
+          aria-label="What Capbase covers"
         >
-          <Stat size="lg" label="Capital deployed" value={formatUsd(marketTotals.totalRaisedUsd)} />
-          <Stat size="lg" label="Disclosed deals" value={formatCount(marketTotals.dealCount)} />
-          <Stat size="lg" label="Unicorns" value={formatCount(marketTotals.newUnicorns)} />
+          <Stat size="lg" label="Companies" value={formatCountCompact(marketTotals.companyCount)} />
+          <Stat size="lg" label="Deals" value={formatCountCompact(marketTotals.dealCount)} />
+          <Stat size="lg" label="Investors" value={formatCountCompact(marketTotals.investorCount)} />
+          <Stat size="lg" label="Funds" value={formatCountCompact(marketTotals.fundCount)} />
+          <Stat size="lg" label="People" value={formatCountCompact(marketTotals.personCount)} />
         </div>
       </section>
 

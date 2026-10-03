@@ -15,16 +15,15 @@
 }
 
 .brand {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
   color: var(--ink);
   text-decoration: none;
 }
 
 /* Eyebrow primitive supplies the label styling; only spacing stays local. */
 .brandTag {
-  margin-left: 6px;
+  margin-left: 10px;
 }
 
 .session {

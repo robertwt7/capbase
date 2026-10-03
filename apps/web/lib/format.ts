@@ -23,6 +23,18 @@ export function formatCount(value: number): string {
   return new Intl.NumberFormat('en-US').format(value);
 }
 
+/**
+ * Headline count, rounded DOWN so it never overstates: 36,029 → "36K+",
+ * 7,810 → "7.8K+", 1,240,000 → "1.2M+". Exact below 1,000.
+ */
+export function formatCountCompact(value: number): string {
+  const floor1 = (n: number) => (Math.floor(n * 10) / 10).toString();
+  if (value >= 1_000_000) return `${floor1(value / 1_000_000).replace(/\.0$/, '')}M+`;
+  if (value >= 10_000) return `${Math.floor(value / 1_000)}K+`;
+  if (value >= 1_000) return `${floor1(value / 1_000).replace(/\.0$/, '')}K+`;
+  return formatCount(value);
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
     year: 'numeric',

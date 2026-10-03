@@ -3,9 +3,6 @@ import type { MarketStat, MarketTotals } from '@repo/api';
 
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Valuation threshold for the "unicorn" count on the landing hero. */
-const UNICORN_USD = 1_000_000_000;
-
 interface SectorCompanyRow {
   sector: string;
   companyCount: number;
@@ -23,7 +20,10 @@ interface SectorRoundRow {
 interface TotalsRow {
   totalRaisedUsd: number;
   dealCount: number;
-  unicorns: number;
+  companyCount: number;
+  investorCount: number;
+  fundCount: number;
+  personCount: number;
 }
 
 /** Trailing-90-days vs the 90 days before; 0 when the prior window is empty. */
@@ -115,13 +115,26 @@ export class MarketService {
         (
           SELECT COUNT(*) FROM "Company"
           WHERE "moderationStatus" = 'APPROVED' AND "mergedIntoId" IS NULL
-            AND "lastValuationUsd" >= ${UNICORN_USD}
-        )::int AS unicorns
+        )::int AS "companyCount",
+        (
+          SELECT COUNT(*) FROM "Investor"
+          WHERE "moderationStatus" = 'APPROVED' AND "mergedIntoId" IS NULL
+        )::int AS "investorCount",
+        (
+          SELECT COUNT(*) FROM "Fund" WHERE "moderationStatus" = 'APPROVED'
+        )::int AS "fundCount",
+        (
+          SELECT COUNT(*) FROM "Person"
+          WHERE "mergedIntoId" IS NULL AND "suppressedAt" IS NULL
+        )::int AS "personCount"
     `;
     return {
       totalRaisedUsd: row?.totalRaisedUsd ?? 0,
       dealCount: row?.dealCount ?? 0,
-      newUnicorns: row?.unicorns ?? 0,
+      companyCount: row?.companyCount ?? 0,
+      investorCount: row?.investorCount ?? 0,
+      fundCount: row?.fundCount ?? 0,
+      personCount: row?.personCount ?? 0,
       quarter: currentQuarter(),
     };
   }

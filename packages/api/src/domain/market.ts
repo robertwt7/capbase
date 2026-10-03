@@ -9,7 +9,11 @@ export interface MarketStat {
 
 export interface MarketTotals {
   totalRaisedUsd: number;
-  dealCount: number;
-  newUnicorns: number;
+  dealCount: number; // approved non-grant rounds on approved companies
+  // Directory sizes, counted with the same filters the list endpoints use.
+  companyCount: number;
+  investorCount: number;
+  fundCount: number;
+  personCount: number;
   quarter: string;
 }

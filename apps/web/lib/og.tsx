@@ -12,12 +12,14 @@
 
 import { readFile } from 'node:fs/promises';
 
+import { MARK_PATH, MARK_VIEWBOX, WORDMARK_PATH } from '@/components/Logo';
+
 export const OG = {
-  ink: '#0e0e10',
-  paper: '#fbfbfc',
-  graphite700: '#3a3a40',
-  graphite500: '#75757e',
-  line: '#e6e6ea',
+  ink: '#141210',
+  paper: '#f0ece3',
+  graphite700: '#4a453d',
+  graphite500: '#6e675c',
+  line: '#ded8cc',
 } as const;
 
 export const OG_SIZE = { width: 1200, height: 630 };
@@ -33,13 +35,20 @@ export async function loadOgFonts() {
   ];
 }
 
-/** The stepped-corner brand mark, built from two rects (no clip-path needed). */
+/** The cap brand mark, `size` px wide (Satori renders inline SVG). */
 export function OgMark({ size = 72 }: { size?: number }) {
-  const step = size * 0.6;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: size, height: size }}>
-      <div style={{ width: size, height: step, background: OG.ink }} />
-      <div style={{ width: step, height: size - step, background: OG.ink }} />
-    </div>
+    <svg width={size} height={(size * 250) / 370} viewBox={MARK_VIEWBOX}>
+      <path fill={OG.ink} fillRule="evenodd" d={MARK_PATH} />
+    </svg>
+  );
+}
+
+/** The `capbase` wordmark alone, `height` px tall. */
+export function OgWordmark({ height = 64 }: { height?: number }) {
+  return (
+    <svg width={(height * 1006) / 250} height={height} viewBox="400 0 1006 250">
+      <path fill={OG.ink} fillRule="evenodd" d={WORDMARK_PATH} />
+    </svg>
   );
 }

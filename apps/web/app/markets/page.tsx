@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 
 import { PageContainer, SectionHeader, Stat } from '@/components/ui';
 import { getMarketStats, getMarketTotals } from '@/lib/data';
-import { formatCount, formatUsd } from '@/lib/format';
+import { formatCount } from '@/lib/format';
 import { MarketTable } from './MarketTable';
 
 export const metadata: Metadata = {
@@ -21,11 +21,11 @@ export default async function MarketsPage() {
 
       <div
         className="mt-6 flex flex-wrap gap-x-14 gap-y-3 border-t border-b border-t-ink border-b-line py-7"
-        aria-label={`${marketTotals.quarter} market totals`}
+        aria-label="Market totals"
       >
-        <Stat size="lg" label="Capital deployed" value={formatUsd(marketTotals.totalRaisedUsd)} />
+        <Stat size="lg" label="Companies" value={formatCount(marketTotals.companyCount)} />
         <Stat size="lg" label="Disclosed deals" value={formatCount(marketTotals.dealCount)} />
-        <Stat size="lg" label="Unicorns" value={formatCount(marketTotals.newUnicorns)} />
+        <Stat size="lg" label="Investors" value={formatCount(marketTotals.investorCount)} />
       </div>
 
       <div className="mt-10">

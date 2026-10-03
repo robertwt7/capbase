@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { LogoMark } from '@/components/Logo';
 import { Button, Card, Form, FormError, TextField, TurnstileField } from '@/components/ui';
 import {
   registerFormDefaults,
@@ -66,6 +67,7 @@ export function RegisterForm({
       <Card className="w-full max-w-[380px]">
         <Form {...form}>
           <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
+            <LogoMark className="mb-1 h-7 self-start text-ink" />
             <h1 className="font-display text-[22px] font-bold text-ink">Create your account</h1>
             <p className="mb-2 font-sans text-[13px] text-graphite-500">
               Join the open company database and start contributing.

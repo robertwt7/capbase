@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { logout } from '@/app/(account)/actions';
 import { getSession } from '@/lib/auth';
+import { Logo } from './Logo';
 import { MobileNav, PrimaryNav } from './SiteNav';
 import { Button } from './ui';
 
@@ -13,21 +14,10 @@ export async function SiteHeader() {
       <div className="mx-auto flex h-15 max-w-(--page-max) items-center gap-7 px-(--page-pad) max-md:gap-3">
         <Link
           href="/"
-          className="inline-flex items-center gap-2.5"
+          className="inline-flex shrink-0 items-center"
           aria-label="Capbase home"
         >
-          {/* Stepped corner echoes the funding-ladder signature. */}
-          <span
-            className="size-4 bg-ink"
-            aria-hidden="true"
-            style={{
-              clipPath:
-                'polygon(0 0, 100% 0, 100% 60%, 60% 60%, 60% 100%, 0 100%)',
-            }}
-          />
-          <span className="font-display text-lg font-bold tracking-tight text-ink">
-            Capbase
-          </span>
+          <Logo className="h-[22px] text-ink" title="" />
         </Link>
 
         <PrimaryNav />

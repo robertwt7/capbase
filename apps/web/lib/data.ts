@@ -387,7 +387,10 @@ const fallbackMarketStats: MarketStat[] = [
 const fallbackMarketTotals: MarketTotals = {
   totalRaisedUsd: 110_600_000_000,
   dealCount: 4615,
-  newUnicorns: 38,
+  companyCount: 12,
+  investorCount: 8,
+  fundCount: 0,
+  personCount: 24,
   quarter: 'Q2 2026',
 };
 

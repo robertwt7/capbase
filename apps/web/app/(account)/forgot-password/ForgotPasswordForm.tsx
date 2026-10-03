@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { LogoMark } from '@/components/Logo';
 import { Button, Card, Form, FormError, TextField } from '@/components/ui';
 import {
   forgotPasswordFormDefaults,
@@ -40,6 +41,7 @@ export function ForgotPasswordForm() {
       <Card className="w-full max-w-[380px]">
         {sent ? (
           <div className="flex flex-col gap-3.5 p-8" role="status">
+            <LogoMark className="mb-1 h-7 self-start text-ink" />
             <h1 className="font-display text-[22px] font-bold text-ink">Check your email</h1>
             <p className="font-sans text-[13px] text-graphite-500">
               If an account exists for{' '}
@@ -53,6 +55,7 @@ export function ForgotPasswordForm() {
         ) : (
           <Form {...form}>
             <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
+              <LogoMark className="mb-1 h-7 self-start text-ink" />
               <h1 className="font-display text-[22px] font-bold text-ink">Reset your password</h1>
               <p className="mb-2 font-sans text-[13px] text-graphite-500">
                 Enter the email you signed up with and we&apos;ll send you a reset link.

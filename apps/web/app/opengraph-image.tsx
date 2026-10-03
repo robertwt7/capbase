@@ -1,6 +1,6 @@
 import { ImageResponse } from 'next/og';
 
-import { loadOgFonts, OG, OG_SIZE, OgMark } from '@/lib/og';
+import { loadOgFonts, OG, OG_SIZE, OgMark, OgWordmark } from '@/lib/og';
 
 export const alt = 'Capbase — free company and startup funding data';
 export const size = OG_SIZE;
@@ -23,17 +23,7 @@ export default async function Image() {
         <OgMark size={84} />
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <div
-            style={{
-              fontFamily: 'Archivo',
-              fontSize: 112,
-              fontWeight: 700,
-              color: OG.ink,
-              letterSpacing: '-0.03em',
-            }}
-          >
-            Capbase
-          </div>
+          <OgWordmark height={112} />
           <div
             style={{
               marginTop: 20,

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { Logo } from '../../components/Logo';
 import { Button, Eyebrow } from '../../components/ui';
 import { getMergeQueue } from '../../lib/admin';
 import { getSession } from '../../lib/auth';
@@ -26,8 +27,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <div className={styles.shell}>
       <header className={styles.bar}>
-        <Link href="/admin" className={styles.brand}>
-          Capbase <Eyebrow className={styles.brandTag}>moderation</Eyebrow>
+        <Link href="/admin" className={styles.brand} aria-label="Capbase moderation">
+          <Logo className="h-5" title="" />
+          <Eyebrow className={styles.brandTag}>moderation</Eyebrow>
         </Link>
         {session ? (
           <div className={styles.session}>

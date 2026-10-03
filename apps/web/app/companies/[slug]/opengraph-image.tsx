@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 
 import { getCompanyDetail } from '@/lib/data';
 import { formatUsd } from '@/lib/format';
-import { loadOgFonts, OG, OG_SIZE, OgMark } from '@/lib/og';
+import { loadOgFonts, OG, OG_SIZE, OgMark, OgWordmark } from '@/lib/og';
 
 export const alt = 'Company funding profile on Capbase';
 export const size = OG_SIZE;
@@ -39,17 +39,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
           }}
         >
           <OgMark size={84} />
-          <div
-            style={{
-              fontFamily: 'Archivo',
-              fontSize: 96,
-              fontWeight: 700,
-              color: OG.ink,
-              letterSpacing: '-0.03em',
-            }}
-          >
-            Capbase
-          </div>
+          <OgWordmark height={96} />
           <div
             style={{
               borderTop: `2px solid ${OG.line}`,
@@ -89,18 +79,9 @@ export default async function Image({ params }: { params: Promise<{ slug: string
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            <OgMark size={40} />
-            <span
-              style={{
-                fontFamily: 'IBM Plex Mono',
-                fontSize: 24,
-                letterSpacing: '0.1em',
-                color: OG.graphite500,
-              }}
-            >
-              CAPBASE
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <OgMark size={52} />
+            <OgWordmark height={30} />
           </div>
           <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 22, color: OG.graphite500 }}>
             capbase.fyi

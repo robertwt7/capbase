@@ -48,7 +48,7 @@ export function companyJsonLd(company: Company) {
     address: { '@type': 'PostalAddress', addressLocality: company.hq },
     ...(sameAs.length > 0 && { sameAs }),
     // Same logo source CompanyLogo uses.
-    ...(company.domain && { logo: `https://logo.clearbit.com/${company.domain}` }),
+    ...(company.domain && { logo: `${SITE_URL}/api/logo/${encodeURIComponent(company.domain)}` }),
   };
 }
 

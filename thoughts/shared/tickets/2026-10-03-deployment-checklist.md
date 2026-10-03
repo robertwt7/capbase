@@ -19,3 +19,28 @@ Full detail: `infra/README.md`. `[L]` = laptop, `[V]` = VPS.
 15. Set up an external uptime monitor on `https://capbase.fyi/api/health`.
 
 Changing `all.env` later: edit it, then re-run `make deploy-all` to recreate the containers with the new values.
+
+rclone.conf needs three values from Cloudflare R2. You already have a Cloudflare account, so R2 is the easy choice:
+
+1. In the R2 dashboard, create a bucket named capbase-backups.
+2. Go to R2 → Manage API tokens and create a token with Object Read & Write, scoped to that bucket. It gives you an Access Key ID and a Secret Access Key.
+3. Note your Account ID. It's shown on the R2 overview page.
+4. On the bucket, add a lifecycle rule under Settings → Object lifecycle rules that deletes objects after 30 days.
+
+Then, on the server:
+
+cp infra/backup/rclone.conf.example infra/backup/rclone.conf
+chmod 600 infra/backup/rclone.conf
+
+Edit the file and keep only the [offsite] R2 section:
+
+[offsite]
+type = s3
+provider = Cloudflare
+access_key_id = <Access Key ID>
+secret_access_key = <Secret Access Key>
+endpoint = https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+acl = private
+no_check_bucket = true
+
+Test the connection with rclone --config infra/backup/rclone.conf lsd offsite:, then run make deploy-backup. The upload goes to offsite:capbase-backups by default, so if you name the bucket something else, set BACKUP_RCLONE_REMOTE in all.env.

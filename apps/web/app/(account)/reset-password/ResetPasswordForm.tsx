@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { LogoMark } from '@/components/Logo';
 import { Button, Card, Form, FormError, TextField } from '@/components/ui';
 import {
   resetPasswordFormDefaults,
@@ -44,6 +45,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
       <Card className="w-full max-w-[380px]">
         {done ? (
           <div className="flex flex-col gap-3.5 p-8" role="status">
+            <LogoMark className="mb-1 h-7 self-start text-ink" />
             <h1 className="font-display text-[22px] font-bold text-ink">Password updated</h1>
             <p className="font-sans text-[13px] text-graphite-500">
               You&apos;re signed out everywhere. Sign in with your new password.
@@ -55,6 +57,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         ) : (
           <Form {...form}>
             <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
+              <LogoMark className="mb-1 h-7 self-start text-ink" />
               <h1 className="font-display text-[22px] font-bold text-ink">Choose a new password</h1>
 
               <TextField

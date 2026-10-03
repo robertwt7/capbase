@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { PageContainer } from '@/components/ui';
 import { SUPPORT_EMAIL } from '@/lib/site';
 import { CookiePreferencesButton } from './ConsentBanner';
+import { LogoMark } from './Logo';
 
 // The keyword-anchored labels ("Crunchbase alternative") are deliberate
 // internal anchor text for the comparison landing pages.
@@ -69,11 +70,7 @@ export function SiteFooter({ showCookiePreferences }: { showCookiePreferences: b
 
         <div className="mt-12 flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2 border-t border-line pt-6 font-mono text-xs text-graphite-500">
           <span className="inline-flex items-center gap-2.5">
-            <span
-              className="size-3 bg-ink"
-              aria-hidden="true"
-              style={{ clipPath: 'polygon(0 0, 100% 0, 100% 60%, 60% 60%, 60% 100%, 0 100%)' }}
-            />
+            <LogoMark className="h-3 text-ink" />
             © {new Date().getFullYear()} Capbase
           </span>
           <span>Data from SEC EDGAR, Wikidata, and community contributions</span>
