@@ -214,6 +214,9 @@ model Company {
   @@index([moderationStatus, status])
   @@index([moderationStatus, name])
   @@index([moderationStatus, totalRaisedUsd])
+  /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_name_trgm_idx")
+  @@index([oneLiner(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_oneLiner_trgm_idx")
 }
 
 // A company pinned to a user's personal watchlist.
@@ -350,6 +353,8 @@ model Investor {
   @@index([moderationStatus])
   @@index([moderationStatus, type])
   @@index([moderationStatus, name])
+  /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Investor_name_trgm_idx")
   @@index([domain])
 }
 
@@ -407,6 +412,8 @@ model Fund {
   @@index([moderationStatus, vintageYear])
   @@index([moderationStatus, grossAssetsUsd])
   @@index([moderationStatus, name])
+  /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Fund_name_trgm_idx")
 }
 
 model InvestorHolding {
@@ -527,6 +534,8 @@ model Person {
   @@index([mergedIntoId])
   @@index([moderationStatus])
   @@index([moderationStatus, name])
+  /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Person_name_trgm_idx")
 }
 
 model AcquisitionDeal {
