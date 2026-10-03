@@ -14,7 +14,9 @@ import {
   MERGE_STATUSES,
   type IdentifiableType,
   type MergeQueueResponse,
+  type AdminUser,
   type MergeStatus,
+  type Paginated,
   type PendingSubmissionsResponse,
   type ReviewableType,
   type ReviewStatus,
@@ -26,9 +28,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PeopleService } from '../people/people.service';
 import { AdminService } from './admin.service';
+import { ListUsersDto, UpdateUserDto } from './dto/admin-users.dto';
 import { ManualMergeCandidateDto, MergeDecisionDto } from './dto/merge.dto';
 import { ModerationDecisionDto } from './dto/moderation-decision.dto';
 import { MergeService } from './merge/merge.service';
+import { AdminUsersService } from './users/admin-users.service';
 
 const REVIEW_STATUSES: ReviewStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
 const REVIEWABLE_TYPES: ReviewableType[] = [
@@ -50,6 +54,7 @@ export class AdminController {
     private readonly admin: AdminService,
     private readonly merges: MergeService,
     private readonly people: PeopleService,
+    private readonly users: AdminUsersService,
   ) {}
 
   @Get('submissions')
@@ -119,6 +124,23 @@ export class AdminController {
   @Post('merges/records/:id/unmerge')
   unmerge(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.merges.unmerge(id, user.id);
+  }
+
+  // --- Users ---------------------------------------------------------------
+
+  @Get('users')
+  listUsers(@Query() query: ListUsersDto): Promise<Paginated<AdminUser>> {
+    return this.users.list(query);
+  }
+
+  /** Ban/unban and change role. Banning also rejects the user's pending queue. */
+  @Patch('users/:id')
+  updateUser(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<AdminUser> {
+    return this.users.update(id, dto, user.id);
   }
 
   // --- Privacy -------------------------------------------------------------

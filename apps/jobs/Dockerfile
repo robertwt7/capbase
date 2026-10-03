@@ -28,6 +28,8 @@ RUN yarn turbo build --filter=jobs
 # --- Runtime (long-running scheduler + health endpoint) ---
 FROM base AS runner
 ENV NODE_ENV=production
-COPY --from=builder /app ./
+# Unprivileged at runtime: the official image ships a `node` user (uid 1000).
+COPY --from=builder --chown=node:node /app ./
+USER node
 EXPOSE 3002
 CMD ["node", "apps/jobs/dist/main.js"]

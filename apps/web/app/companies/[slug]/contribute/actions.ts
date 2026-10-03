@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import type { z } from 'zod';
 
 import {
+  contributionErrorMessage,
   submitAcquisition,
   submitDiversity,
   submitExit,
@@ -43,54 +44,82 @@ async function handleContribution<T>(
 
   try {
     await submit(parsed.data);
-  } catch {
-    return { ok: false, formError: 'Submission failed. Please check your inputs and try again.' };
+  } catch (err) {
+    return { ok: false, formError: contributionErrorMessage(err) };
   }
 
   revalidatePath(`/companies/${slug}`);
   return { ok: true };
 }
 
-export async function addRoundAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function addRoundAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   return handleContribution(slug, roundFormSchema.safeParse(values), (data) =>
-    submitRound(slug, toRoundInput(data)),
+    submitRound(slug, toRoundInput(data), turnstileToken),
   );
 }
 
-export async function addInvestorAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function addInvestorAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   return handleContribution(slug, investorFormSchema.safeParse(values), (data) =>
-    submitInvestor(slug, toInvestorInput(data)),
+    submitInvestor(slug, toInvestorInput(data), turnstileToken),
   );
 }
 
-export async function addPersonAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function addPersonAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   return handleContribution(slug, personFormSchema.safeParse(values), (data) =>
-    submitPerson(slug, toPersonInput(data)),
+    submitPerson(slug, toPersonInput(data), turnstileToken),
   );
 }
 
-export async function addAcquisitionAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function addAcquisitionAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   return handleContribution(slug, acquisitionFormSchema.safeParse(values), (data) =>
-    submitAcquisition(slug, toAcquisitionInput(data)),
+    submitAcquisition(slug, toAcquisitionInput(data), turnstileToken),
   );
 }
 
-export async function addExitAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function addExitAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   return handleContribution(slug, exitFormSchema.safeParse(values), (data) =>
-    submitExit(slug, toExitInput(data)),
+    submitExit(slug, toExitInput(data), turnstileToken),
   );
 }
 
-export async function addDiversityAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function addDiversityAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   return handleContribution(slug, diversityFormSchema.safeParse(values), (data) =>
-    submitDiversity(slug, toDiversityInput(data)),
+    submitDiversity(slug, toDiversityInput(data), turnstileToken),
   );
 }
 
 /** Edit proposal: diff the submitted values against the company's *current*
     values (server-authoritative — the client never sends "old" state) and
     submit only the changed fields. */
-export async function proposeEditAction(slug: string, values: unknown): Promise<ActionResult> {
+export async function proposeEditAction(
+  slug: string,
+  values: unknown,
+  turnstileToken?: string | null,
+): Promise<ActionResult> {
   if (!slug) {
     return { ok: false, formError: 'Missing company reference. Reload and try again.' };
   }
@@ -115,9 +144,9 @@ export async function proposeEditAction(slug: string, values: unknown): Promise<
   }
 
   try {
-    await submitProposal(slug, input);
-  } catch {
-    return { ok: false, formError: 'Submission failed. Please check your inputs and try again.' };
+    await submitProposal(slug, input, turnstileToken);
+  } catch (err) {
+    return { ok: false, formError: contributionErrorMessage(err) };
   }
 
   revalidatePath(`/companies/${slug}`);

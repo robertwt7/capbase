@@ -32,7 +32,7 @@ export default async function AlternativePage({
   if (!competitor) notFound();
 
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <JsonLd
         data={{
           '@context': 'https://schema.org',

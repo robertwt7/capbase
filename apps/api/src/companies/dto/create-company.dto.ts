@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsIn,
@@ -7,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -44,22 +46,27 @@ class FinancialsDto implements CompanyFinancials {
 
 export class CreateCompanyDto implements CreateCompanyInput {
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   name!: string;
 
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   domain!: string;
 
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   oneLiner!: string;
 
   @IsString()
+  @MaxLength(10000)
   @MinLength(1)
   description!: string;
 
   @IsString()
+  @MaxLength(300)
   @MinLength(1)
   hq!: string;
 
@@ -72,7 +79,9 @@ export class CreateCompanyDto implements CreateCompanyInput {
 
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(300, { each: true })
   industry!: string[];
 
   @IsIn([...COMPANY_STATUSES])
@@ -97,18 +106,22 @@ export class CreateCompanyDto implements CreateCompanyInput {
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   websiteUrl?: string | null;
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   linkedinUrl?: string | null;
 
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   twitterUrl?: string | null;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   legalName?: string | null;
 
   @IsOptional()
@@ -127,5 +140,6 @@ export class CreateCompanyDto implements CreateCompanyInput {
       uncited fact renders as explicitly uncited rather than looking sourced. */
   @IsOptional()
   @IsUrl()
+  @MaxLength(2048)
   sourceUrl?: string | null;
 }

@@ -43,11 +43,14 @@ Files here:
 | `docker-compose.all.yml` | single-VPS override: api/jobs wait for the local postgres |
 | `env/*.env.example` | commented env templates — copy to `*.env` and fill in |
 | `nginx/conf.d/capbase.conf` | the vhost — **static**, domain hardcoded (no templating) |
+| `docker-compose.glitchtip.yml` | optional overlay: self-hosted GlitchTip error tracking |
+| `nginx/conf.d/glitchtip.conf` | the `errors.capbase.fyi` vhost (boots fine before GlitchTip runs) |
 | `certbot/init-letsencrypt.sh` | one-time TLS bootstrap (`make deploy-tls`) |
 | `backup/recipients.txt.example` | where the age **public** key goes on the VPS |
+| `backup/rclone.conf.example` | the off-site bucket remote (R2 or B2) for backups |
 
-Real `env/*.env` files, `backup/recipients.txt`, `*.key` and `certbot/conf|www`
-state are gitignored.
+Real `env/*.env` files, `backup/recipients.txt`, `backup/rclone.conf`, `*.key`
+and `certbot/conf|www` state are gitignored.
 
 ## Prerequisites
 
@@ -133,8 +136,15 @@ also prints the full user table for exactly this reason.
 ```sh
 # on the VPS — the public key printed by `make backup-keygen`
 echo 'age1…' > infra/backup/recipients.txt
+apt-get install -y age rclone
+cp infra/backup/rclone.conf.example infra/backup/rclone.conf   # fill in the bucket token
+make deploy-backup              # one run now: proves dump, verify, encrypt AND upload
 make deploy-backup-cron
 ```
+
+Set `OPS_ALERT_EMAIL` (or a GlitchTip DSN) in `infra/env/all.env` so a failing
+night is loud. From here on every `make deploy-all` also snapshots the database
+before the migrations run — see [Backups](#backups).
 
 **There is no `make deploy-seed` in this flow.** The dump already contains every
 seed phase *and* its `SeedHistory` rows, so the seed runner would skip everything
@@ -195,27 +205,131 @@ Override the local port with `TUNNEL_PORT=`.
 ## Backups
 
 `make deploy-backup` does the whole cycle in one run: `pg_dump` → **restore it
-into a scratch database and print row counts** → encrypt → prune → optional
-upload. The verify step is not optional decoration — an untested backup isn't a
+into a scratch database and print row counts** → encrypt → prune → **off-site
+upload**. The verify step is not optional decoration — an untested backup isn't a
 backup, so every run proves the dump restores before it is kept.
 
 - **Encryption is `age` in public-key mode.** The VPS holds only
   `infra/backup/recipients.txt` (the public key), so it can *write* backups but
   never read them. That is the intended property — verify it by trying `age -d`
   on the box and watching it fail.
-- **Retention**: `BACKUP_KEEP_DAYS` (default 14) in `infra/env/all.env`. The
-  nightly cron (`make deploy-backup-cron`, `BACKUP_HOUR=3`) logs to
-  `/var/log/capbase-backup.log`.
+- **Settings** (`BACKUP_*` in `infra/env/all.env`) are read by the script itself,
+  so the cron and `make` see the same values. Local retention is
+  `BACKUP_KEEP_DAYS` (default 14). The nightly cron (`make deploy-backup-cron`,
+  `BACKUP_HOUR=3`) logs to `/var/log/capbase-backup.log`.
 - **Free-space guard**: refuses to run below `BACKUP_MIN_FREE_MB` (2048) rather
   than half-writing a dump onto a full disk.
-- **Monthly habit** — prove the recovery path from where the identity lives:
-  ```sh
-  scp user@host:/var/backups/capbase/capbase-….dump.age .
-  make deploy-backup-verify FILE=capbase-….dump.age IDENTITY=~/.capbase/backup-identity.key
-  ```
-- **Off-site**: not wired up. Backups are already encrypted, so any bucket is
-  safe the day you have one — uncomment a `BACKUP_UPLOAD_CMD` in
-  `infra/env/all.env`. **Until then, a dead VPS takes its backups with it.**
+- **Before every deploy**: `make deploy-all` builds the images, then takes a
+  `capbase-predeploy-*.dump.age` snapshot, *then* recreates the api container
+  (which runs the migrations). A bad migration is a restore of a dump minutes
+  old. It refuses to deploy when backups aren't set up; `SKIP_BACKUP=1` overrides.
+- **Failures alert.** Any non-zero exit — dump, verify, encrypt or upload —
+  posts an error event to GlitchTip (`JOBS_SENTRY_DSN`, or `OPS_SENTRY_DSN`) and/or
+  emails `OPS_ALERT_EMAIL` through Resend (`scripts/notify-failure.sh`). Set at
+  least one, or a failing cron is silent.
+
+### Off-site copy (Cloudflare R2 or Backblaze B2)
+
+A backup on the same disk as the database dies with the VPS. Every run copies the
+encrypted dump to a bucket with `rclone`, then checks the object's size matches:
+
+```sh
+apt-get install -y rclone
+cp infra/backup/rclone.conf.example infra/backup/rclone.conf && chmod 600 infra/backup/rclone.conf
+# edit: keep the R2 or the B2 section, paste a token scoped to ONE bucket
+rclone --config infra/backup/rclone.conf lsd offsite:     # sanity check
+make deploy-backup                                       # → "Off-site upload → offsite:capbase-backups/…"
+```
+
+- **Retention in the bucket is a lifecycle rule** (delete after 30 days), set in
+  the R2/B2 dashboard as the template describes — the VPS token never needs
+  delete rights, so a compromised box can't wipe the off-site history.
+- Uploads use `--immutable`: an existing object is never overwritten.
+- The objects are already age-encrypted; the bucket never sees plaintext.
+- `make deploy-doctor` shows the newest off-site object next to the newest local one.
+
+### Restore drill (monthly)
+
+Prove the recovery path from where it would actually start — the bucket and your
+laptop, not the VPS. Put a copy of `rclone.conf` on the laptop (a read-only
+token is enough):
+
+```sh
+rclone --config rclone.conf lsf offsite:capbase-backups | sort | tail -3
+rclone --config rclone.conf copy offsite:capbase-backups/capbase-….dump.age .
+make deploy-backup-verify FILE=capbase-….dump.age IDENTITY=~/.capbase/backup-identity.key
+```
+
+`deploy-backup-verify` decrypts with your identity and restores into a throwaway
+database, printing row counts. To actually restore production from it, decrypt
+(`age -d -i ~/.capbase/backup-identity.key -o capbase.dump capbase-….dump.age`)
+and ship it with `make deploy-restore FILE=capbase.dump VPS=user@host CONFIRM=yes`.
+
+## Error tracking & uptime
+
+Two separate systems, on purpose: **GlitchTip** (self-hosted, Sentry protocol)
+collects errors from inside the apps, and an **external uptime monitor** notices
+when the box itself is gone — which GlitchTip, living on that box, never can.
+
+### GlitchTip (errors.capbase.fyi)
+
+The apps carry the Sentry SDKs (`@sentry/nestjs` in api + jobs, `@sentry/nextjs`
+in web). Each is a **no-op until its DSN is set**, so this whole section is
+optional and can be done after launch.
+
+What gets reported: api 5xx (never 4xx — a 404 is the API working), every
+server-side render/route/action error in web plus errors the browser hits, and
+every failed ingest (the cron *and* manual `ingest-prod` backfills).
+
+```sh
+# once — needs the main stack running
+make deploy-glitchtip-init
+```
+
+That script is idempotent. It writes `GLITCHTIP_DB_PASSWORD` /
+`GLITCHTIP_SECRET_KEY` (and `GLITCHTIP_EMAIL_URL` from `RESEND_API_KEY`, so alerts
+go out through Resend's SMTP relay) into `infra/env/all.env`, creates a
+`glitchtip` role + database on the existing Postgres, boots GlitchTip (it runs its
+own migrations), and prompts for the dashboard account. Sign-ups are disabled for
+everyone else. Then:
+
+1. **DNS + cert** — add an `errors` A record pointing at the VPS, and reissue the
+   cert with both names (one lineage, both vhosts use it):
+   ```sh
+   CERT_DOMAINS='capbase.fyi errors.capbase.fyi' FORCE=1 make deploy-tls
+   ```
+2. Sign in at `https://errors.capbase.fyi`, create an organisation and three
+   projects: **web**, **api**, **jobs**.
+3. Paste each project's DSN into `infra/env/all.env` as `WEB_SENTRY_DSN`,
+   `API_SENTRY_DSN`, `JOBS_SENTRY_DSN`, then `make deploy-all`.
+4. In each project, add an alert rule that emails you on a new issue.
+5. Prove it end to end (the plan's manual check): stop the API's database access
+   briefly or hit a broken page and watch the event land in each project.
+
+Day-2: `make deploy-glitchtip` after a pull or version bump,
+`make deploy-glitchtip-logs` to tail it. Footprint: one all-in-one container
+(web + worker, ~170 MB idle, capped at `GLITCHTIP_MEM_LIMIT=640m`) plus a 128 MB
+Valkey, and a handful of Postgres connections — well inside `max_connections=50`.
+Events are kept 30 days (`GLITCHTIP_RETENTION_DAYS`). Its database is **not** in
+the nightly dump; error events are disposable.
+
+The CSP's `connect-src` already allows `https://errors.capbase.fyi` for the
+browser SDK.
+
+### External uptime monitor
+
+Use any free external monitor — UptimeRobot or Better Stack both work — with two
+HTTP checks, every 5 minutes, alerting by email (and push, if you like):
+
+| Check | URL | Healthy when |
+| --- | --- | --- |
+| Site | `https://capbase.fyi/` | HTTP 200 |
+| Web + API + DB | `https://capbase.fyi/api/health` | HTTP 200 and body contains `"ok":true` |
+
+`/api/health` is a route on the web container that calls the API's DB-backed
+`/health` — so one check covers nginx, web, api and Postgres together. Stop the
+api container once (`docker stop capbase-api`) to watch the alert fire, then
+start it again.
 
 ## Credentials
 
@@ -282,6 +396,7 @@ adapter-based, so `?connection_limit=` is a no-op and the real ceiling is
 | `PG_MEM_LIMIT` | `3g` | comfortably above `shared_buffers` |
 | `API_MEM_LIMIT` / `WEB_MEM_LIMIT` | `768m` | — |
 | `JOBS_MEM_LIMIT` | `1536m` | highest: ADV unzips multi-MB bulk files |
+| `GLITCHTIP_MEM_LIMIT` | `640m` | only if you run GlitchTip (+128 MB Valkey) |
 
 Ceilings total ≈ 6.3 GB on an 8 GB box — these are limits, not reservations, and
 steady state sits far below. If an on-box `next build` gets OOM-killed during a
@@ -299,6 +414,35 @@ git pull && make deploy-all   # redeploy
 
 On a single VPS these all cover **the whole stack** — the Makefile detects the
 topology from whether `infra/env/app.env` exists.
+
+Every app container runs as the unprivileged `node` user, and every service has a
+healthcheck (`make deploy-ps` should show all of them `healthy`): api and web are
+deep checks that touch Postgres, jobs answers on `/`, nginx on a loopback-only
+`/nginx-health`.
+
+### Rollback
+
+`make deploy-all` tags the app images with the commit it built
+(`capbase-api:<sha>` …), points `:latest` at the live one, and keeps the newest
+five releases on disk (`RELEASES_KEEP`). To go back:
+
+```sh
+make deploy-releases              # what's on disk, plus current/previous
+make deploy-rollback SHA=<sha>    # re-run api/web/jobs on those images — no rebuild
+```
+
+**Code rolls back; the database does not.** If the release you are leaving ran a
+migration the older code can't live with, restore the snapshot `deploy-all` took
+just before it — the newest `capbase-predeploy-*.dump.age` — as in the
+[restore drill](#restore-drill-monthly), then roll back.
+
+### Ingest lock
+
+The cron and manual backfills (`make ingest-prod`, `ingest-all`, …) share a
+Postgres advisory lock, so they can't race each other's upserts. A cron tick that
+finds a backfill running logs `Ingest lock held by another process` and skips; a
+backfill that finds the cron running exits **75** and asks you to retry. The lock
+lives on a database session, so a crashed run can never leave it stuck.
 
 TLS does not need re-running: certbot renews on a 12h check cycle and nginx
 reloads every 6h.
@@ -320,9 +464,12 @@ reloads every 6h.
   80/443 must be reachable *before* running it. Check `dig +short capbase.fyi`
   and the firewall. `FORCE=1 make deploy-tls` recreates a bad cert. If it
   complains about `server_name`, `DOMAIN` and the vhost disagree — fix both.
-- **Backup failed** — check `/var/log/capbase-backup.log`. Common causes:
-  `recipients.txt` missing (put the age public key there), `age` not installed
-  (`apt-get install -y age`), or the free-space guard tripping.
+- **Backup failed** (you got an alert) — check `/var/log/capbase-backup.log`.
+  Common causes: `recipients.txt` missing (put the age public key there), `age`
+  or `rclone` not installed (`apt-get install -y age rclone`), an expired bucket
+  token, or the free-space guard tripping.
+- **`make deploy-all` refuses: "Backups aren't set up"** — the pre-migrate backup
+  needs `infra/backup/recipients.txt`. Set backups up, or `SKIP_BACKUP=1` once.
 - **Disk filling up** — `make deploy-doctor` shows the volume, container logs and
   backup directory. Logs are capped at 10 MB × 3 per container; the usual culprit
   is the backup directory with a long `BACKUP_KEEP_DAYS`, or Docker build cache
@@ -403,12 +550,10 @@ the box you SSH into; in a split they target the DB VPS.
 
 - **PITR / WAL archiving** (pgbackrest, wal-g). Nightly dumps bound data loss at
   24h, which is the accepted trade for one box.
-- **Off-site backup storage** — the `BACKUP_UPLOAD_CMD` hook exists and the blobs
-  are already encrypted; it just needs a bucket.
 - **Postgres TLS** — `sslmode=require` + server certs. Moot on a single box where
   the connection never leaves the Docker network.
 - **CI image builds** — build/push in CI and pull on the VPS instead of building
-  on-box.
+  on-box (the SHA tags `deploy-all` already uses would carry over).
 - **`postgres:16` → `17`** — the tag is a pinned major on purpose; a bump is its
   own maintenance task because the data directory is not forward-compatible. The
   sequence is: `make deploy-backup`, `make deploy-down`, remove the

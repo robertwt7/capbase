@@ -34,7 +34,12 @@ FROM base AS runner
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
-COPY --from=builder /app ./
+# Unprivileged at runtime: the official image ships a `node` user (uid 1000).
+COPY --from=builder --chown=node:node /app ./
+USER node
+# Cache Yarn for that user now, so `yarn workspace @repo/db migrate:deploy` on
+# boot never reaches for the network.
+RUN corepack install
 EXPOSE 3000
 # Apply pending migrations, then start the API.
 CMD ["sh", "-c", "yarn workspace @repo/db migrate:deploy && node apps/api/dist/main.js"]

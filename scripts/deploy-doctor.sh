@@ -22,3 +22,13 @@ ss -tlnp 2>/dev/null | grep ':5432' || echo "  not listening on the host at all 
 echo; echo "=== Newest backup ==="
 ls -lt "${BACKUP_DIR:-/var/backups/capbase}"/capbase-*.dump.age 2>/dev/null | head -1 \
   || echo "  ⚠️  NO BACKUPS FOUND — run: make deploy-backup-cron"
+
+echo; echo "=== Newest off-site backup ==="
+if [ -f infra/backup/rclone.conf ] && command -v rclone >/dev/null; then
+  remote="$(sed -n 's/^BACKUP_RCLONE_REMOTE=//p' infra/env/all.env 2>/dev/null | tail -1)"
+  remote="${remote:-offsite:capbase-backups}"
+  rclone --config infra/backup/rclone.conf lsl "$remote" 2>/dev/null | sort -k2,3 | tail -1 \
+    || echo "  ⚠️  could not list $remote"
+else
+  echo "  ⚠️  NO OFF-SITE COPY — add infra/backup/rclone.conf (see infra/README.md → Backups)"
+fi

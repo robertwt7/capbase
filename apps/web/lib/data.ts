@@ -3,6 +3,7 @@
 // Getters fetch live data from the NestJS API (see ./api). The arrays below are
 // kept only as an offline FALLBACK so the UI still renders if the API is
 // unreachable in local dev; they are illustrative demo figures, not verified.
+// `allowMockFallback` refuses them in production builds.
 //
 // Domain types are the single source of truth in @repo/api and are shared with
 // the NestJS backend. They are re-exported here so existing component imports
@@ -465,6 +466,19 @@ const fallbackFunds: FundSummary[] = [
   },
 ];
 
+/**
+ * Gate for the offline fallback. Returns (after logging) only outside
+ * production; in production it rethrows so the route's error boundary renders.
+ * On an open-data site an honest outage page beats invented companies.
+ */
+function allowMockFallback(label: string, err: unknown): void {
+  if (process.env.NODE_ENV === 'production') {
+    console.error(`[data] ${label} failed:`, err);
+    throw err;
+  }
+  console.warn(`[data] ${label} fell back to mock data:`, err);
+}
+
 /** Build a query string from defined params only. */
 function toSearchParams(query: object): string {
   const params = new URLSearchParams();
@@ -511,7 +525,7 @@ export async function getCompanies(query: CompanyListQuery = {}): Promise<Pagina
   try {
     return await apiFetch<Paginated<Company>>(`/companies${toSearchParams(query)}`);
   } catch (err) {
-    console.warn('[data] getCompanies fell back to mock data:', err);
+    allowMockFallback('getCompanies', err);
     return paginateFallbackCompanies(query);
   }
 }
@@ -558,7 +572,8 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
     });
   } catch (err) {
     redirectIfMerged(err, '/companies');
-    console.warn(`[data] getCompanyDetail(${slug}) fell back to mock data:`, err);
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    allowMockFallback(`getCompanyDetail(${slug})`, err);
     const company = fallbackCompanies.find((c) => c.slug === slug);
     if (!company) return undefined;
     // Offline fallback renders the full mock profile (unlocked).
@@ -645,7 +660,7 @@ export async function getInvestors(
   try {
     return await apiFetch<Paginated<InvestorSummary>>(`/investors${toSearchParams(query)}`);
   } catch (err) {
-    console.warn('[data] getInvestors fell back to mock data:', err);
+    allowMockFallback('getInvestors', err);
     return paginateFallbackInvestors(query);
   }
 }
@@ -681,7 +696,7 @@ export async function getFunds(query: FundListQuery = {}): Promise<Paginated<Fun
   try {
     return await apiFetch<Paginated<FundSummary>>(`/funds${toSearchParams(query)}`);
   } catch (err) {
-    console.warn('[data] getFunds fell back to mock data:', err);
+    allowMockFallback('getFunds', err);
     return paginateFallbackFunds(query);
   }
 }
@@ -692,7 +707,8 @@ export async function getInvestor(slug: string): Promise<InvestorDetailResponse 
     return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`);
   } catch (err) {
     redirectIfMerged(err, '/investors');
-    console.warn(`[data] getInvestor(${slug}) fell back to mock data:`, err);
+    if (err instanceof ApiError && err.status === 404) return null;
+    allowMockFallback(`getInvestor(${slug})`, err);
     const match = fallbackInvestors.find((i) => i.slug === slug);
     if (!match) return null;
     const funds = fallbackFunds.filter((f) => f.manager.slug === slug);
@@ -762,7 +778,7 @@ export async function getMarketStats(): Promise<MarketStat[]> {
   try {
     return await apiFetch<MarketStat[]>('/market/stats');
   } catch (err) {
-    console.warn('[data] getMarketStats fell back to mock data:', err);
+    allowMockFallback('getMarketStats', err);
     return fallbackMarketStats;
   }
 }
@@ -771,7 +787,7 @@ export async function getMarketTotals(): Promise<MarketTotals> {
   try {
     return await apiFetch<MarketTotals>('/market/totals');
   } catch (err) {
-    console.warn('[data] getMarketTotals fell back to mock data:', err);
+    allowMockFallback('getMarketTotals', err);
     return fallbackMarketTotals;
   }
 }

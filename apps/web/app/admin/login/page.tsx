@@ -38,7 +38,7 @@ export default function AdminLogin() {
   }
 
   return (
-    <main className={styles.loginMain}>
+    <div className={styles.loginMain}>
       <Card className={styles.loginCard}>
         <form className={styles.loginForm} onSubmit={onSubmit}>
           <h1 className={styles.loginTitle}>Admin sign in</h1>
@@ -67,6 +67,6 @@ export default function AdminLogin() {
           </Button>
         </form>
       </Card>
-    </main>
+    </div>
   );
 }

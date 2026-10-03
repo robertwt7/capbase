@@ -267,6 +267,11 @@ ps: ## Show status of the stack
 # `git pull`. See infra/README.md.
 # ---------------------------------------------------------------------------
 
+# Release tag for the app images: the commit being deployed (+ -dirty when the
+# VPS checkout has local edits, so a tag never claims code it doesn't contain).
+GIT_SHA ?= $(shell git describe --always --dirty --abbrev=12 --exclude='*' 2>/dev/null || echo unknown)
+RELEASE  = IMAGE_TAG=$(GIT_SHA) GIT_SHA=$(GIT_SHA)
+
 COMPOSE_DB  := $(COMPOSE) -p capbase -f infra/docker-compose.db.yml --env-file infra/env/db.env
 COMPOSE_APP := $(COMPOSE) -p capbase -f infra/docker-compose.app.yml --env-file infra/env/app.env
 COMPOSE_ALL := $(COMPOSE) -p capbase \
@@ -292,12 +297,31 @@ deploy-db: check-env ## [DB VPS] Start Postgres (reads infra/env/db.env)
 .PHONY: deploy-app
 deploy-app: ENVF := infra/env/app.env
 deploy-app: check-env ## [App VPS] Build + start web/api/jobs/nginx (reads infra/env/app.env)
-	$(COMPOSE_APP) up -d --build
+	$(RELEASE) $(COMPOSE_APP) up -d --build
+	@scripts/release-images.sh promote $(GIT_SHA)
 
 .PHONY: deploy-all
 deploy-all: ENVF := infra/env/all.env
-deploy-all: check-env ## [1 VPS] Build + start EVERYTHING incl. Postgres (reads infra/env/all.env)
-	$(COMPOSE_ALL) up -d --build
+deploy-all: check-env ## [1 VPS] Build, back up, then start EVERYTHING incl. Postgres (SKIP_BACKUP=1 to skip)
+# Build first so the backup → migrate window is seconds, not a whole build.
+# Images are tagged with the commit SHA so `deploy-rollback` can go back.
+	$(RELEASE) $(COMPOSE_ALL) build
+	@scripts/predeploy-backup.sh
+	$(RELEASE) $(COMPOSE_ALL) up -d
+	@scripts/release-images.sh promote $(GIT_SHA)
+
+.PHONY: deploy-rollback
+deploy-rollback: ## [VPS] Re-run api/web/jobs on an earlier release's images, no rebuild (SHA=…)
+	@test -n "$(SHA)" || { echo "❌ SHA= is required — see: make deploy-releases"; exit 1; }
+	@scripts/release-images.sh check $(SHA)
+	@echo "⚠️  Code rolls back; the database does NOT. If the newer release migrated the"
+	@echo "   schema, restore its capbase-predeploy-* backup too (infra/README.md → Rollback)."
+	IMAGE_TAG=$(SHA) GIT_SHA=$(SHA) $(COMPOSE_STACK) up -d --no-build api web jobs
+	@scripts/release-images.sh promote $(SHA)
+
+.PHONY: deploy-releases
+deploy-releases: ## [VPS] List the app releases still on disk (rollback targets)
+	@scripts/release-images.sh list
 
 .PHONY: deploy-tls
 deploy-tls: ## [App/1 VPS] One-time Let's Encrypt cert bootstrap (needs DNS + ports 80/443)
@@ -342,6 +366,25 @@ deploy-down: ## [VPS] Stop the stack (keeps the database volume — never uses -
 .PHONY: deploy-doctor
 deploy-doctor: ## [VPS] Report disk, volume size, log sizes, container health, backup age
 	@scripts/deploy-doctor.sh
+
+# ---------------------------------------------------------------------------
+# Error tracking: self-hosted GlitchTip at errors.capbase.fyi (single VPS).
+# An overlay on the same compose project, so `deploy-all` leaves it running.
+# ---------------------------------------------------------------------------
+
+COMPOSE_GLITCHTIP := $(COMPOSE_ALL) -f infra/docker-compose.glitchtip.yml
+
+.PHONY: deploy-glitchtip-init
+deploy-glitchtip-init: ## [1 VPS] One-time GlitchTip setup: secrets, database, first boot, admin account
+	@ENVF=infra/env/all.env scripts/glitchtip-init.sh
+
+.PHONY: deploy-glitchtip
+deploy-glitchtip: ## [1 VPS] (Re)start GlitchTip after a pull or version bump
+	$(COMPOSE_GLITCHTIP) up -d glitchtip glitchtip-valkey
+
+.PHONY: deploy-glitchtip-logs
+deploy-glitchtip-logs: ## [1 VPS] Tail GlitchTip logs
+	$(COMPOSE_GLITCHTIP) logs -f glitchtip
 
 # ---------------------------------------------------------------------------
 # Backups (age public-key encryption; the identity never touches the VPS)

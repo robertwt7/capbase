@@ -17,7 +17,9 @@ services:
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
-    image: capbase-api
+    # Tagged with the git SHA by `make deploy-all`, so `make deploy-rollback`
+    # has the previous release to go back to. :latest = what is deployed.
+    image: capbase-api:${IMAGE_TAG:-latest}
     container_name: capbase-api
     restart: unless-stopped
     logging: *default-logging
@@ -28,12 +30,19 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}
+      # Public origin for links in emails (password reset).
+      SITE_URL: ${SITE_URL:-https://${DOMAIN:?set DOMAIN in your env file}}
+      # Cloudflare Turnstile; empty skips the bot check on register/contribute.
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      # GlitchTip project DSN (errors.capbase.fyi); empty disables reporting.
+      SENTRY_DSN: ${API_SENTRY_DSN:-}
+      GIT_SHA: ${GIT_SHA:-}
     # Internal only — the browser never hits the API (API_URL is server-side).
     # Uncomment to expose on localhost for debugging:
     # ports: ['127.0.0.1:3000:3000']
     healthcheck:
       test:
-        ['CMD', 'node', '-e', "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+        ['CMD', 'node', '-e', "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -43,7 +52,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
-    image: capbase-web
+    image: capbase-web:${IMAGE_TAG:-latest}
     container_name: capbase-web
     restart: unless-stopped
     logging: *default-logging
@@ -55,7 +64,21 @@ services:
       SITE_URL: ${SITE_URL:-https://${DOMAIN:?set DOMAIN in your env file}}
       # GA4 measurement id — read server-side at runtime; empty disables GA.
       NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
+      # Turnstile site key — read server-side per request; empty hides the widget.
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      # GlitchTip project DSN, used server-side and handed to the browser SDK
+      # at runtime (a DSN is public by design); empty disables reporting.
+      SENTRY_DSN: ${WEB_SENTRY_DSN:-}
+      GIT_SHA: ${GIT_SHA:-}
     # No published port — nginx is the only public entrypoint.
+    # Deep check: /api/health answers 200 only if the API and Postgres do too.
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
     depends_on:
       api:
         condition: service_healthy
@@ -64,7 +87,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/jobs/Dockerfile
-    image: capbase-jobs
+    image: capbase-jobs:${IMAGE_TAG:-latest}
     container_name: capbase-jobs
     restart: unless-stopped
     logging: *default-logging
@@ -77,6 +100,16 @@ services:
       CRON_SCHEDULE: ${CRON_SCHEDULE:-0 6 * * *}
       INGEST_ON_BOOT: ${INGEST_ON_BOOT:-false}
       INGEST_LIMIT: ${INGEST_LIMIT:-50}
+      # Failed ingests (cron and manual backfills) are reported here.
+      SENTRY_DSN: ${JOBS_SENTRY_DSN:-}
+      GIT_SHA: ${GIT_SHA:-}
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://localhost:3002/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       api:
         condition: service_healthy
@@ -101,9 +134,15 @@ services:
     # Reload every 6h so renewed certs are picked up without a restart. Still
     # re-execs the official entrypoint so its /docker-entrypoint.d scripts run.
     command: sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec /docker-entrypoint.sh nginx -g "daemon off;"'
+    # /nginx-health is answered by the default server, loopback only.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/nginx-health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   certbot:
-    image: certbot/certbot
+    image: certbot/certbot:v5.8.0 # pinned: an unreviewed major must not reach the cert path
     container_name: capbase-certbot
     restart: unless-stopped
     logging: *default-logging
@@ -116,7 +155,7 @@ services:
 
   # One-shot seed against the configured DATABASE_URL: `make deploy-seed`.
   seed:
-    image: capbase-api
+    image: capbase-api:${IMAGE_TAG:-latest}
     profiles: ['seed']
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
@@ -130,7 +169,7 @@ services:
   # Reuses the api image for the same reason `seed` does — it carries @repo/db,
   # bcrypt and tsx.
   rotate-admin:
-    image: capbase-api
+    image: capbase-api:${IMAGE_TAG:-latest}
     profiles: ['admin']
     logging: *default-logging
     environment:

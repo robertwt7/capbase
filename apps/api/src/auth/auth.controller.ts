@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   Patch,
@@ -10,6 +11,7 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type {
   AuthResponse,
   AuthUser,
@@ -22,18 +24,23 @@ import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { CurrentUser, type RequestUser } from './decorators/current-user.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { TurnstileGuard } from './guards/turnstile.guard';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly users: UsersService,
+    private readonly config: ConfigService,
   ) {}
 
+  @UseGuards(TurnstileGuard)
   @Post('register')
   register(@Body() dto: RegisterDto): Promise<AuthResponse> {
     return this.auth.register(dto);
@@ -42,6 +49,22 @@ export class AuthController {
   @Post('login')
   login(@Body() dto: LoginDto): Promise<AuthResponse> {
     return this.auth.login(dto);
+  }
+
+  /** Always 200, whether or not the email is registered. */
+  @Post('forgot-password')
+  @HttpCode(200)
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<{ ok: true }> {
+    const siteUrl = this.config.get<string>('SITE_URL', 'http://localhost:3001');
+    await this.auth.requestPasswordReset(dto.email, siteUrl);
+    return { ok: true };
+  }
+
+  @Post('reset-password')
+  @HttpCode(200)
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<{ ok: true }> {
+    await this.auth.resetPassword(dto.token, dto.password);
+    return { ok: true };
   }
 
   @UseGuards(JwtAuthGuard)
@@ -63,12 +86,12 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('me/password')
-  async changePassword(
+  /** Revokes every session; the response carries a fresh token for this one. */
+  changePassword(
     @CurrentUser() current: RequestUser,
     @Body() dto: ChangePasswordDto,
-  ): Promise<{ ok: true }> {
-    await this.auth.changePassword(current.id, dto);
-    return { ok: true };
+  ): Promise<AuthResponse> {
+    return this.auth.changePassword(current.id, dto);
   }
 
   @UseGuards(JwtAuthGuard)

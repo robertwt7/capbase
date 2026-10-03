@@ -39,10 +39,11 @@ function GroupLabel({ children }: { children: ReactNode }) {
 
 /** The full company form pre-filled from live data. The server action diffs the
     submitted values against current values and stores only the changed fields. */
-export function EditCompanyForm({ slug, companyName, company }: {
+export function EditCompanyForm({ slug, companyName, company, turnstileSiteKey }: {
   slug: string;
   companyName: string;
   company: Company;
+  turnstileSiteKey?: string;
 }) {
   const form = useForm<EditFormValues>({
     resolver: zodResolver(editFormSchema),
@@ -53,7 +54,8 @@ export function EditCompanyForm({ slug, companyName, company }: {
   return (
     <ContributionShell
       form={form}
-      action={(values) => proposeEditAction(slug, values)}
+      action={(values, token) => proposeEditAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Propose changes"

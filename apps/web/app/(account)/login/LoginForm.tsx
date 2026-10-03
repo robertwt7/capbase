@@ -40,7 +40,7 @@ export function LoginForm({ next }: { next?: string }) {
   });
 
   return (
-    <main className="flex items-center justify-center px-5 py-20 sm:px-8">
+    <div className="flex items-center justify-center px-5 py-20 sm:px-8">
       <Card className="w-full max-w-[380px]">
         <Form {...form}>
           <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
@@ -63,6 +63,12 @@ export function LoginForm({ next }: { next?: string }) {
               type="password"
               autoComplete="current-password"
             />
+            <Link
+              href="/forgot-password"
+              className="-mt-1.5 self-end font-sans text-[13px] text-graphite-500 underline underline-offset-[3px] hover:text-ink"
+            >
+              Forgot password?
+            </Link>
 
             {formError ? <FormError>{formError}</FormError> : null}
 
@@ -82,6 +88,6 @@ export function LoginForm({ next }: { next?: string }) {
           </form>
         </Form>
       </Card>
-    </main>
+    </div>
   );
 }

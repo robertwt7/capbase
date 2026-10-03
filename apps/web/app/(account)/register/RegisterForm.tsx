@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
-import { Button, Card, Form, FormError, TextField } from '@/components/ui';
+import { Button, Card, Form, FormError, TextField, TurnstileField } from '@/components/ui';
 import {
   registerFormDefaults,
   registerFormSchema,
@@ -14,13 +14,26 @@ import {
   type RegisterFormValues,
 } from '@/lib/validation/auth';
 
-export function RegisterForm({ next }: { next?: string }) {
+export function RegisterForm({
+  next,
+  turnstileSiteKey,
+}: {
+  next?: string;
+  turnstileSiteKey?: string;
+}) {
   const router = useRouter();
   const [formError, setFormError] = useState<string>();
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every attempt: a Turnstile token is single-use.
+  const [challenge, setChallenge] = useState(0);
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerFormSchema),
     defaultValues: registerFormDefaults,
-    mode: 'onBlur',
+    // onTouched, not onBlur: once a field is touched it revalidates on every
+    // keystroke, so a fixed "passwords do not match" clears before the click.
+    // Otherwise the click's own blur removes the message, the button jumps,
+    // and the first click lands on empty space.
+    mode: 'onTouched',
   });
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -28,8 +41,10 @@ export function RegisterForm({ next }: { next?: string }) {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(toRegisterInput(values)),
+      body: JSON.stringify({ ...toRegisterInput(values), turnstileToken }),
     });
+    setTurnstileToken(null);
+    setChallenge((n) => n + 1);
     if (res.ok) {
       router.replace(next || '/');
       router.refresh();
@@ -47,7 +62,7 @@ export function RegisterForm({ next }: { next?: string }) {
   });
 
   return (
-    <main className="flex items-center justify-center px-5 py-20 sm:px-8">
+    <div className="flex items-center justify-center px-5 py-20 sm:px-8">
       <Card className="w-full max-w-[380px]">
         <Form {...form}>
           <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3.5 p-8">
@@ -79,6 +94,12 @@ export function RegisterForm({ next }: { next?: string }) {
               autoComplete="new-password"
             />
 
+            <TurnstileField
+              key={challenge}
+              siteKey={turnstileSiteKey}
+              onToken={setTurnstileToken}
+            />
+
             {formError ? <FormError>{formError}</FormError> : null}
 
             <Button variant="primary" block type="submit" disabled={form.formState.isSubmitting}>
@@ -97,6 +118,6 @@ export function RegisterForm({ next }: { next?: string }) {
           </form>
         </Form>
       </Card>
-    </main>
+    </div>
   );
 }

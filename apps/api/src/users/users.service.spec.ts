@@ -50,6 +50,21 @@ describe('UsersService.hasRecentContribution', () => {
     const service = new UsersService(prismaWith({ changeProposal: { createdAt: new Date() } }));
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
   });
+
+  it('only counts APPROVED contributions, on every model', async () => {
+    const prisma = prismaWith({});
+    await new UsersService(prisma).hasRecentContribution('u1', since);
+    for (const m of MODELS) {
+      const { findFirst } = (
+        prisma as unknown as Record<(typeof MODELS)[number], { findFirst: jest.Mock }>
+      )[m];
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { submittedById: 'u1', moderationStatus: 'APPROVED' },
+        }),
+      );
+    }
+  });
 });
 
 type SavedRow = { createdAt: Date; company: Record<string, unknown> };

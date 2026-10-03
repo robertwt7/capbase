@@ -80,8 +80,15 @@ describe('Submissions & moderation (e2e)', () => {
     expect(submit.body.moderationStatus).toBe('PENDING');
     const roundId = submit.body.id;
 
-    // Not visible yet (still PENDING). Read as the contributor, who is unlocked
-    // by their own submission, so the gate returns the full approved round list.
+    // A pending submission must not unlock the give-to-get gate — otherwise one
+    // junk submission buys full access for the whole window.
+    const lockedAccess = await request(app.getHttpServer())
+      .get('/auth/me/contributions')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(lockedAccess.body.access.unlocked).toBe(false);
+
+    // Not visible yet (still PENDING).
     const before = await request(app.getHttpServer())
       .get('/companies/helia')
       .set('Authorization', `Bearer ${userToken}`)
@@ -103,6 +110,13 @@ describe('Submissions & moderation (e2e)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ status: 'APPROVED' })
       .expect(200);
+
+    // Approval unlocks the contributor.
+    const unlockedAccess = await request(app.getHttpServer())
+      .get('/auth/me/contributions')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(unlockedAccess.body.access.unlocked).toBe(true);
 
     // Now visible to the (unlocked) contributor.
     const after = await request(app.getHttpServer())

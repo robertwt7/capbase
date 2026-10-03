@@ -1,7 +1,8 @@
-import { GoogleAnalytics } from '@next/third-parties/google';
 import type { Metadata } from 'next';
 import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 
+import { ConsentBanner } from '@/components/ConsentBanner';
+import { ErrorTracking } from '@/components/ErrorTracking';
 import { SiteFooter } from '@/components/SiteFooter';
 import { SiteHeader } from '@/components/SiteHeader';
 import { SITE_NAME, SITE_URL } from '@/lib/site';
@@ -48,7 +49,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   // Read server-side at runtime (this is an RSC), so no Docker build arg is
-  // needed; unset in dev → GA is a silent no-op.
+  // needed; unset in dev → GA and its consent banner are a silent no-op. GA
+  // itself only loads once the visitor accepts (ConsentBanner).
   const gaId = process.env.NEXT_PUBLIC_GA_ID;
 
   return (
@@ -56,10 +58,20 @@ export default function RootLayout({
       <body
         className={`${archivo.variable} ${plexSans.variable} ${plexMono.variable} antialiased`}
       >
+        <a
+          href="#content"
+          className="sr-only z-50 rounded-sm bg-primary px-4 py-2 font-sans text-sm font-medium text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+        >
+          Skip to content
+        </a>
         <SiteHeader />
-        {children}
-        <SiteFooter />
-        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
+        {/* The one <main> landmark: pages render plain containers inside it. */}
+        <main id="content" tabIndex={-1} className="outline-none">
+          {children}
+        </main>
+        <SiteFooter showCookiePreferences={Boolean(gaId)} />
+        <ConsentBanner gaId={gaId} />
+        <ErrorTracking dsn={process.env.SENTRY_DSN} release={process.env.GIT_SHA} />
       </body>
     </html>
   );

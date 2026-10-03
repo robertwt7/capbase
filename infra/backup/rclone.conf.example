@@ -1,0 +1,32 @@
+# rclone remote for off-site backups. Copy to infra/backup/rclone.conf on the
+# VPS (gitignored, chmod 600), keep ONE section, and name it `offsite` — or set
+# BACKUP_RCLONE_REMOTE to whatever you call it.
+#
+# The token only needs write access to one bucket. Backups are age-encrypted
+# before upload, so the bucket never sees plaintext; retention is a lifecycle
+# rule on the bucket (delete after 30 days), not something this box enforces.
+#
+# Test it:  rclone --config infra/backup/rclone.conf lsd offsite:
+
+# ── Cloudflare R2 ───────────────────────────────────────────────────────────
+# Dashboard → R2 → Create bucket `capbase-backups`, then R2 → Manage API tokens
+# → "Object Read & Write" scoped to that bucket. Lifecycle: bucket → Settings →
+# Object lifecycle rules → delete objects after 30 days.
+[offsite]
+type = s3
+provider = Cloudflare
+access_key_id = CHANGE_ME
+secret_access_key = CHANGE_ME
+endpoint = https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+acl = private
+no_check_bucket = true
+
+# ── Backblaze B2 (alternative) ──────────────────────────────────────────────
+# Buckets → Create `capbase-backups` (private) → Lifecycle Settings: "Keep only
+# the last version" + delete hidden after 30 days. App Keys → key restricted to
+# that bucket with read+write.
+#[offsite]
+#type = b2
+#account = CHANGE_ME_keyID
+#key = CHANGE_ME_applicationKey
+#hard_delete = false

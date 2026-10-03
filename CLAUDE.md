@@ -65,7 +65,7 @@ anymore).
 
 #### Components (`components/ui/`)
 
-`Button`, `Card`, `Badge`, `Input`, `Textarea`, `Select`, `Label`, `Separator`, `Form` are
+`Button`, `Card`, `Badge`, `Input`, `Textarea`, `Select`, `Label`, `Separator`, `Form`, `Sheet` are
 **real shadcn/ui components** (CLI-generated, then re-themed monochrome onto the existing CSS
 variables — no accent, no red destructive). Files are lowercase (`button.tsx`, `card.tsx`,
 `badge.tsx`, …) per shadcn convention; the barrel `index.ts` re-exports the capitalised
@@ -88,6 +88,19 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   the form-level (non-field) error box, used by both the RHF forms and the auth/admin pages.
 - **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`** stay
   bespoke Tailwind role components (no shadcn equivalent), as does `FundingLadder`.
+- **`Sheet`** (Radix Dialog) backs the small-screen nav drawer in `components/SiteNav.tsx`
+  (`PrimaryNav` + `MobileNav`, both setting `aria-current`).
+- **`TurnstileField`** — the Cloudflare Turnstile challenge on register and every
+  contribution form. Renders nothing without a site key. The key is read **server-side
+  per request** (`lib/turnstile.ts`, env `TURNSTILE_SITE_KEY`) and passed down as a prop;
+  the token travels through the server action to the API in the `x-turnstile-token`
+  header. Tokens are single-use: forms remount the widget (`key`) after every attempt.
+
+**Landmarks:** the root layout owns the skip link and the single `<main id="content">`.
+Pages render plain containers (`<div>` / `PageContainer`) — never their own `<main>`.
+
+**Analytics consent:** GA loads only after opt-in (`components/ConsentBanner.tsx`,
+`capbase_consent` cookie); with no `NEXT_PUBLIC_GA_ID` there is no banner at all.
 
 **Build new UI from these primitives + Tailwind utilities.** Never re-inline a button,
 badge, card, etc. — extend the primitive. Bespoke layout (grids, the Funding Ladder spine)
@@ -152,6 +165,8 @@ types are re-exported from `@repo/api` (single source of truth). Company logos r
   (what changed, from what to what, who, when). Deliberately ungated: it shows data
   past the `PREVIEW_LIMIT` contribution gate, which is the right trade for an
   open-data project's audit trail.
+- `/admin/users` — account list: search, ban/unban (a ban revokes sessions and rejects
+  the user's pending queue), make/revoke admin.
 - `/admin` — moderation queue (ADMIN only). `/admin/login` signs in via
   `app/api/admin/login` which stores the JWT in an httpOnly `capbase_token` cookie.
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
@@ -169,6 +184,18 @@ Prisma rows → shared `@repo/api` types (`src/companies/company.mapper.ts`). DT
 `class-validator` and `implements` the shared `Create*Input` types. Config comes from
 env (`apps/api/.env`, see `.env.example`). Registration sends a welcome email through
 `MailModule` (`src/mail/`, Resend) — a no-op that only logs when `RESEND_API_KEY` is unset.
+
+Abuse controls: every contribution route uses the `@Contribution()` decorator
+(`JwtAuthGuard` + `PendingCapGuard` + `TurnstileGuard`). The cap is
+`MAX_PENDING_SUBMISSIONS` (30, `@repo/api`) PENDING rows per user → 429; admins are
+exempt. `TurnstileGuard` (also on `POST /auth/register`) is a no-op without
+`TURNSTILE_SECRET` and fails closed when Cloudflare is unreachable. The JWT is only
+identity: `JwtStrategy` re-reads the user, so role, ban and `tokenVersion` come from the DB.
+
+Errors go to self-hosted GlitchTip via `@sentry/nestjs` (`src/instrument.ts`, imported
+first in `main.ts`; `SentryGlobalFilter` reports 5xx, never 4xx). No-op without `SENTRY_DSN`.
+The same pattern is in `apps/jobs` and, as `@sentry/nextjs` in `instrumentation.ts` plus a
+lazily-loaded browser SDK (`lib/sentry-client.ts`), in `apps/web`.
 
 ## Database (packages/db, `@repo/db`)
 
@@ -386,7 +413,10 @@ last one clobber `totalRaisedUsd`:
   says who owns the company, not what it raised.
 
 The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
-SEC Form D only — every other source is a snapshot, run by hand). Backfills:
+SEC Form D only — every other source is a snapshot, run by hand). Cron and `backfill.ts`
+share a Postgres advisory lock (`ingest/ingest-lock.ts`, a dedicated `pg` client because
+advisory locks are per-session): a cron tick skips while a backfill runs, and a backfill
+exits 75 while the cron runs. Failed ingests are reported to GlitchTip. Backfills:
 `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
 (ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D) and `make ingest-all`
@@ -449,7 +479,12 @@ vars, and every container has a `mem_limit` + capped logs. nginx serves a **stat
 hardcoded and `deploy-tls` enforces that it matches `DOMAIN`). Key targets:
 `deploy-secrets` (generate all credentials), `backup-keygen` (age keypair, run on the
 laptop — the VPS only ever holds the public key), `deploy-backup` (dump → verify-restore
-→ encrypt → prune) and `deploy-backup-cron`, `deploy-restore` (ship a local dump to prod
+→ encrypt → prune → rclone upload to R2/B2 via `infra/backup/rclone.conf`; any failure
+alerts through `scripts/notify-failure.sh`) and `deploy-backup-cron`. `deploy-all` builds
+SHA-tagged images, takes a `predeploy` backup, then recreates the containers;
+`deploy-rollback SHA=…` / `deploy-releases` go back. GlitchTip (`errors.capbase.fyi`) is
+an optional overlay: `deploy-glitchtip-init`, `deploy-glitchtip`. App containers run as
+`node` (non-root) and every service has a healthcheck. `deploy-restore` (ship a local dump to prod
 over SSH), `rotate-admin-password` (the `001-admin-user` seed phase upserts with
 `update: {}`, so re-seeding can never rotate), and `deploy-doctor`.
 

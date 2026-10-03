@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { logout } from '@/app/(account)/actions';
 import { getSession } from '@/lib/auth';
+import { MobileNav, PrimaryNav } from './SiteNav';
 import { Button } from './ui';
 
 export async function SiteHeader() {
@@ -9,38 +10,37 @@ export async function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-paper/85 backdrop-blur-md backdrop-saturate-150">
-      <div className="mx-auto flex h-15 max-w-(--page-max) items-center gap-7 px-(--page-pad)">
-        <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Capbase home">
+      <div className="mx-auto flex h-15 max-w-(--page-max) items-center gap-7 px-(--page-pad) max-md:gap-3">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2.5"
+          aria-label="Capbase home"
+        >
           {/* Stepped corner echoes the funding-ladder signature. */}
           <span
             className="size-4 bg-ink"
             aria-hidden="true"
-            style={{ clipPath: 'polygon(0 0, 100% 0, 100% 60%, 60% 60%, 60% 100%, 0 100%)' }}
+            style={{
+              clipPath:
+                'polygon(0 0, 100% 0, 100% 60%, 60% 60%, 60% 100%, 0 100%)',
+            }}
           />
-          <span className="font-display text-lg font-bold tracking-tight text-ink">Capbase</span>
+          <span className="font-display text-lg font-bold tracking-tight text-ink">
+            Capbase
+          </span>
         </Link>
 
-        <nav className="flex gap-[22px] max-md:hidden" aria-label="Primary">
-          <Link href="/companies" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
-            Companies
-          </Link>
-          <Link href="/investors" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
-            Investors
-          </Link>
-          <Link href="/funds" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
-            Funds
-          </Link>
-          <Link href="/markets" className="text-sm font-medium text-graphite-500 transition-colors hover:text-ink">
-            Markets
-          </Link>
-        </nav>
+        <PrimaryNav />
 
         <form
-          className="ml-auto flex h-[38px] w-80 max-w-[38vw] items-center gap-2 rounded-[9px] border border-line bg-surface px-3 transition-colors focus-within:border-graphite-500 max-md:w-auto max-md:max-w-none max-md:flex-1"
+          className="ml-auto flex h-[38px] w-80 max-w-[38vw] items-center gap-2 rounded-[9px] border border-line bg-surface px-3 transition-colors focus-within:border-graphite-500 max-md:w-auto max-md:max-w-none max-md:min-w-0 max-md:flex-1"
           role="search"
           action="/companies"
         >
-          <span className="grid size-[18px] shrink-0 place-items-center rounded border border-line font-mono text-xs text-graphite-500" aria-hidden="true">
+          <span
+            className="grid size-[18px] shrink-0 place-items-center rounded border border-line font-mono text-xs text-graphite-500"
+            aria-hidden="true"
+          >
             /
           </span>
           <input
@@ -52,10 +52,15 @@ export async function SiteHeader() {
           />
         </form>
 
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex shrink-0 items-center gap-4 max-md:hidden">
           {session ? (
             <>
-              <Button variant="primary" shape="pill" size="sm" href="/contribute">
+              <Button
+                variant="primary"
+                shape="pill"
+                size="sm"
+                href="/contribute"
+              >
                 Contribute
               </Button>
               <Button variant="ghost" size="sm" href="/profile">
@@ -78,6 +83,8 @@ export async function SiteHeader() {
             </>
           )}
         </div>
+
+        <MobileNav userName={session?.name ?? null} logoutAction={logout} />
       </div>
     </header>
   );

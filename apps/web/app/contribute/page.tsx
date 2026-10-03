@@ -1,4 +1,5 @@
 import { requireUser } from '../../lib/auth';
+import { turnstileSiteKey } from '../../lib/turnstile';
 import { CompanyForm } from './CompanyForm';
 
 export const metadata = {
@@ -8,5 +9,5 @@ export const metadata = {
 
 export default async function ContributePage() {
   await requireUser('/contribute');
-  return <CompanyForm />;
+  return <CompanyForm turnstileSiteKey={turnstileSiteKey()} />;
 }

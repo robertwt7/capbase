@@ -39,7 +39,7 @@ export default async function AdminQueue({
   const typeParam = activeType ? `&type=${activeType}` : '';
 
   return (
-    <main className={styles.main}>
+    <div className={styles.main}>
       <div className={styles.head}>
         <h1 className={styles.title}>Submission queue</h1>
         <p className={styles.sub}>
@@ -159,6 +159,6 @@ export default async function AdminQueue({
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }

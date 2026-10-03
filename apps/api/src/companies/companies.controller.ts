@@ -8,7 +8,7 @@ import type {
 } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Contribution } from '../auth/decorators/contribution.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -61,14 +61,15 @@ export class CompaniesController {
   }
 
   // --- Contributions (any authenticated user; created as PENDING) ---
+  // Each is capped by the user's pending backlog and Turnstile-checked.
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post()
   create(@Body() dto: CreateCompanyDto, @CurrentUser() user: RequestUser) {
     return this.companies.createCompany(dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/rounds')
   addRound(
     @Param('slug') slug: string,
@@ -78,7 +79,7 @@ export class CompaniesController {
     return this.companies.addRound(slug, dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/people')
   addPerson(
     @Param('slug') slug: string,
@@ -88,7 +89,7 @@ export class CompaniesController {
     return this.companies.addPerson(slug, dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/investors')
   addInvestor(
     @Param('slug') slug: string,
@@ -98,7 +99,7 @@ export class CompaniesController {
     return this.companies.addInvestor(slug, dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/acquisitions')
   addAcquisition(
     @Param('slug') slug: string,
@@ -108,7 +109,7 @@ export class CompaniesController {
     return this.companies.addAcquisition(slug, dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/exits')
   addExit(
     @Param('slug') slug: string,
@@ -118,7 +119,7 @@ export class CompaniesController {
     return this.companies.addExit(slug, dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/diversity')
   addDiversity(
     @Param('slug') slug: string,
@@ -128,7 +129,7 @@ export class CompaniesController {
     return this.companies.addDiversity(slug, dto, user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Contribution()
   @Post(':slug/proposals')
   propose(
     @Param('slug') slug: string,

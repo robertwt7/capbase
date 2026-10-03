@@ -1,7 +1,12 @@
+// Must stay the first import — see instrument.ts.
+import './instrument';
+
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import * as Sentry from '@sentry/nestjs';
 
 import { AppModule } from './app.module';
+import { IngestLock } from './ingest/ingest-lock';
 import { IngestService } from './ingest/ingest.service';
 
 // One-off CLI: `node dist/backfill [days] [limit] [source]` — runs a single
@@ -20,7 +25,17 @@ async function main() {
   });
   try {
     const ingest = app.get(IngestService);
-    const result = await ingest.run({ days, limit, sources });
+    const locked = await app
+      .get(IngestLock)
+      .runExclusive(`backfill ${source}`, () => ingest.run({ days, limit, sources }));
+    if (!locked.ran) {
+      // Not an error worth paging about, but a failure for `make ingest-all`,
+      // whose later steps assume this one ran.
+      logger.error('Another ingest holds the lock (the cron?) — retry when it finishes');
+      process.exitCode = 75; // EX_TEMPFAIL
+      return;
+    }
+    const result = locked.result;
     logger.log(
       `Backfill done: ${result.upserted}/${result.processed} upserted, ${result.investors} investor firms, ${result.funds} funds`,
     );
@@ -29,4 +44,13 @@ async function main() {
   }
 }
 
-void main().then(() => process.exit(0));
+main().then(
+  () => process.exit(process.exitCode ?? 0),
+  async (err: unknown) => {
+    // A failed manual backfill is as worth knowing about as a failed cron run.
+    new Logger('Backfill').error(`Backfill failed: ${String(err)}`);
+    Sentry.captureException(err, { tags: { ingest: 'backfill' } });
+    await Sentry.flush(5000);
+    process.exit(1);
+  },
+);

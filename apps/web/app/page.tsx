@@ -20,7 +20,7 @@ export default async function Home() {
   ]);
 
   return (
-    <main>
+    <div>
       <JsonLd data={websiteJsonLd()} />
       <JsonLd data={siteOrganizationJsonLd()} />
 
@@ -103,6 +103,6 @@ export default async function Home() {
         </div>
       </section>
 
-    </main>
+    </div>
   );
 }

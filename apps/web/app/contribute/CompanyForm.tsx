@@ -16,6 +16,7 @@ import {
   SourceUrlField,
   TextareaField,
   TextField,
+  TurnstileField,
 } from '@/components/ui';
 import { CITIES } from '@/lib/cities';
 import {
@@ -27,9 +28,12 @@ import { applyServerErrors } from '@/lib/validation/utils';
 
 import { createCompanyAction } from './actions';
 
-export function CompanyForm() {
+export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string>();
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every attempt: a Turnstile token is single-use.
+  const [challenge, setChallenge] = useState(0);
 
   const form = useForm<CompanyFormValues>({
     resolver: zodResolver(companyFormSchema),
@@ -39,7 +43,9 @@ export function CompanyForm() {
 
   const onSubmit = form.handleSubmit(async (values) => {
     setFormError(undefined);
-    const result = await createCompanyAction(values);
+    const result = await createCompanyAction(values, turnstileToken);
+    setTurnstileToken(null);
+    setChallenge((n) => n + 1);
     if (result.ok) {
       setSubmitted(true);
       return;
@@ -50,7 +56,7 @@ export function CompanyForm() {
 
   if (submitted) {
     return (
-      <main className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+      <div className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
         <Card emphasis className="p-9">
           <Eyebrow>Submitted</Eyebrow>
           <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">
@@ -58,7 +64,7 @@ export function CompanyForm() {
           </h1>
           <p className="mt-3 max-w-prose text-sm text-graphite-500">
             Thanks for contributing. Your company is now in the moderation queue — it goes live once
-            an admin approves it. Contributing has unlocked full company profiles for you.
+            an admin approves it. Once approved, it unlocks full company profiles for you for 30 days.
           </p>
           <div className="mt-6 flex items-center gap-4">
             <Button variant="primary" shape="pill" href="/profile">
@@ -69,12 +75,12 @@ export function CompanyForm() {
             </Button>
           </div>
         </Card>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+    <div className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
       <header className="mb-8">
         <Eyebrow>Contribute</Eyebrow>
         <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">
@@ -184,6 +190,8 @@ export function CompanyForm() {
 
           <SourceUrlField control={form.control} />
 
+          <TurnstileField key={challenge} siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+
           {formError ? <FormError>{formError}</FormError> : null}
 
           <Button variant="primary" block type="submit" disabled={form.formState.isSubmitting}>
@@ -191,6 +199,6 @@ export function CompanyForm() {
           </Button>
         </form>
       </Form>
-    </main>
+    </div>
   );
 }

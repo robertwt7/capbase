@@ -1,9 +1,11 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 
 import { changePassword, updateProfile } from '@/lib/account';
 import { ApiError } from '@/lib/api';
+import { TOKEN_COOKIE, TOKEN_COOKIE_OPTIONS } from '@/lib/auth';
 import {
   passwordFormSchema,
   profileFormSchema,
@@ -47,7 +49,10 @@ export async function changePasswordAction(values: unknown): Promise<ActionResul
   }
 
   try {
-    await changePassword(toPasswordInput(parsed.data));
+    // Changing the password revokes every session, this one included; keep
+    // the user signed in here with the fresh token the API hands back.
+    const auth = await changePassword(toPasswordInput(parsed.data));
+    (await cookies()).set(TOKEN_COOKIE, auth.accessToken, TOKEN_COOKIE_OPTIONS);
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
       return { ok: false, fieldErrors: { currentPassword: 'Current password is incorrect.' } };

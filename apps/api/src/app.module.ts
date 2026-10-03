@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_FILTER } from '@nestjs/core';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { validateEnv } from './config/env';
 import { CompaniesModule } from './companies/companies.module';
 import { FundsModule } from './funds/funds.module';
 import { InvestorsModule } from './investors/investors.module';
@@ -13,10 +16,12 @@ import { UsersModule } from './users/users.module';
 
 import { AppService } from './app.service';
 import { AppController } from './app.controller';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    SentryModule.forRoot(),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     PrismaModule,
     UsersModule,
     AuthModule,
@@ -27,7 +32,12 @@ import { AppController } from './app.controller';
     MarketModule,
     AdminModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  controllers: [AppController, HealthController],
+  providers: [
+    AppService,
+    // Reports unexpected errors (not HttpExceptions — a 404 or a 400 is the API
+    // working) to GlitchTip, then answers like Nest's default filter.
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
+  ],
 })
 export class AppModule {}

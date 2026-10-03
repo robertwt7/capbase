@@ -14,7 +14,7 @@ export default async function SettingsPage() {
   const user = await requireUser('/profile/settings');
 
   return (
-    <main className="mx-auto w-full max-w-[560px] px-(--page-pad) pt-8 pb-20">
+    <div className="mx-auto w-full max-w-[560px] px-(--page-pad) pt-8 pb-20">
       <Link
         href="/profile"
         className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
@@ -28,6 +28,6 @@ export default async function SettingsPage() {
           <SettingsForms user={user} />
         </div>
       </div>
-    </main>
+    </div>
   );
 }

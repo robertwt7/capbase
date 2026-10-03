@@ -72,7 +72,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
     : false;
 
   return (
-    <main className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+    <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
       <JsonLd data={companyJsonLd(company)} />
       <JsonLd data={companyBreadcrumbJsonLd(company)} />
 
@@ -431,7 +431,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         </Link>
         .
       </footer>
-    </main>
+    </div>
   );
 }
 
@@ -454,8 +454,8 @@ function LockNote({
     <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 rounded-[10px] border border-dashed border-graphite-300 bg-paper px-[18px] py-3.5">
       <span className="font-sans text-[13px] text-graphite-700">
         Showing <span className="font-mono text-ink">{shown}</span> of{' '}
-        <span className="font-mono text-ink">{total}</span> — any contribution unlocks every profile
-        for 30 days.
+        <span className="font-mono text-ink">{total}</span> — any approved contribution unlocks every
+        profile for 30 days.
       </span>
       {signedIn ? (
         <span className="flex flex-wrap items-center gap-3">

@@ -1,3 +1,4 @@
+import { turnstileSiteKey } from '../../../lib/turnstile';
 import { RegisterForm } from './RegisterForm';
 
 export const metadata = {
@@ -11,5 +12,5 @@ export default async function RegisterPage({
   searchParams: Promise<{ next?: string }>;
 }) {
   const { next } = await searchParams;
-  return <RegisterForm next={next} />;
+  return <RegisterForm next={next} turnstileSiteKey={turnstileSiteKey()} />;
 }

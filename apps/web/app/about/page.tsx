@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function AboutPage() {
   return (
-    <PageContainer as="main" className="pt-14 pb-20">
+    <PageContainer className="pt-14 pb-20">
       <SectionHeader as="h1" title="About Capbase" note="Open source" />
 
       <div className="mt-7 grid max-w-[70ch] gap-10">
