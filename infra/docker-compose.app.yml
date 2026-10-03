@@ -30,6 +30,8 @@ services:
       MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}
       # Public origin for links in emails (password reset).
       SITE_URL: ${SITE_URL:-https://${DOMAIN:?set DOMAIN in your env file}}
+      # Cloudflare Turnstile; empty skips the bot check on register/contribute.
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
     # Internal only — the browser never hits the API (API_URL is server-side).
     # Uncomment to expose on localhost for debugging:
     # ports: ['127.0.0.1:3000:3000']
@@ -57,6 +59,8 @@ services:
       SITE_URL: ${SITE_URL:-https://${DOMAIN:?set DOMAIN in your env file}}
       # GA4 measurement id — read server-side at runtime; empty disables GA.
       NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
+      # Turnstile site key — read server-side per request; empty hides the widget.
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     # No published port — nginx is the only public entrypoint.
     depends_on:
       api:

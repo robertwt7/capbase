@@ -1,10 +1,12 @@
 import { describe, it, expect, jest, beforeAll, afterAll } from '@jest/globals';
 import type { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { UsersService } from '../users/users.service';
 import { CompaniesController } from './companies.controller';
 import { CompaniesService } from './companies.service';
 
@@ -22,7 +24,12 @@ describe('CompaniesController routing', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [CompaniesController],
-      providers: [{ provide: CompaniesService, useValue: { listSlugs, getCompanyDetail } }],
+      providers: [
+        { provide: CompaniesService, useValue: { listSlugs, getCompanyDetail } },
+        // The contribution routes' guards need these to be constructible.
+        { provide: UsersService, useValue: {} },
+        { provide: ConfigService, useValue: { get: () => undefined } },
+      ],
     })
       .overrideGuard(OptionalJwtAuthGuard)
       .useValue({ canActivate: () => true })

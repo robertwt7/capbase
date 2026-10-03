@@ -187,6 +187,22 @@ export class UsersService {
     return dates.reduce((a, b) => (a > b ? a : b));
   }
 
+  /** PENDING submissions this user has in the moderation queue right now. */
+  async countPending(userId: string): Promise<number> {
+    const where = { submittedById: userId, moderationStatus: 'PENDING' as const };
+    const counts = await Promise.all([
+      this.prisma.company.count({ where }),
+      this.prisma.fundingRound.count({ where }),
+      this.prisma.personRole.count({ where }),
+      this.prisma.investorHolding.count({ where }),
+      this.prisma.acquisitionDeal.count({ where }),
+      this.prisma.exitEvent.count({ where }),
+      this.prisma.diversitySignal.count({ where }),
+      this.prisma.changeProposal.count({ where }),
+    ]);
+    return counts.reduce((a, b) => a + b, 0);
+  }
+
   /** True if the user has submitted any contribution at/after `since`. */
   async hasRecentContribution(userId: string, since: Date): Promise<boolean> {
     const last = await this.lastContributionAt(userId);

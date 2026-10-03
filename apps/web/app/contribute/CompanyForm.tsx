@@ -16,6 +16,7 @@ import {
   SourceUrlField,
   TextareaField,
   TextField,
+  TurnstileField,
 } from '@/components/ui';
 import { CITIES } from '@/lib/cities';
 import {
@@ -27,9 +28,12 @@ import { applyServerErrors } from '@/lib/validation/utils';
 
 import { createCompanyAction } from './actions';
 
-export function CompanyForm() {
+export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string>();
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every attempt: a Turnstile token is single-use.
+  const [challenge, setChallenge] = useState(0);
 
   const form = useForm<CompanyFormValues>({
     resolver: zodResolver(companyFormSchema),
@@ -39,7 +43,9 @@ export function CompanyForm() {
 
   const onSubmit = form.handleSubmit(async (values) => {
     setFormError(undefined);
-    const result = await createCompanyAction(values);
+    const result = await createCompanyAction(values, turnstileToken);
+    setTurnstileToken(null);
+    setChallenge((n) => n + 1);
     if (result.ok) {
       setSubmitted(true);
       return;
@@ -183,6 +189,8 @@ export function CompanyForm() {
           />
 
           <SourceUrlField control={form.control} />
+
+          <TurnstileField key={challenge} siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
 
           {formError ? <FormError>{formError}</FormError> : null}
 

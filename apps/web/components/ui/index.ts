@@ -67,3 +67,4 @@ export {
 } from './form';
 export { TextField, TextareaField, SelectField } from './fields';
 export { SourceUrlField } from './SourceUrlField';
+export { TurnstileField } from './TurnstileField';

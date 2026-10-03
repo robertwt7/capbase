@@ -44,6 +44,7 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}
       SITE_URL: ${SITE_URL:-http://localhost:3001}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
     ports:
       - '3000:3000'
     depends_on:
@@ -70,6 +71,7 @@ services:
       SITE_URL: ${SITE_URL:-https://capbase.fyi}
       # Read server-side in the root layout at runtime — no build arg needed.
       NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - '3001:3001'
     depends_on:

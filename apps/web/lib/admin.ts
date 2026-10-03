@@ -1,10 +1,13 @@
 import type {
+  AdminUser,
   IdentifiableType,
   MergeQueueResponse,
   MergeStatus,
+  Paginated,
   PendingSubmissionsResponse,
   ReviewableType,
   ReviewStatus,
+  UpdateUserInput,
 } from '@repo/api';
 
 import { apiFetch } from './api';
@@ -76,6 +79,28 @@ export async function unmergeRecord(recordId: string): Promise<void> {
   await apiFetch(`/admin/merges/records/${recordId}/unmerge`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** Accounts, newest first, optionally filtered by email/name (admin-only). */
+export async function getUsers(q: string | undefined, page: number): Promise<Paginated<AdminUser>> {
+  const token = await getToken();
+  const params = new URLSearchParams({ page: String(page) });
+  if (q) params.set('q', q);
+  return apiFetch<Paginated<AdminUser>>(`/admin/users?${params.toString()}`, {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** Ban/unban or change the role of one account. */
+export async function updateUser(id: string, input: UpdateUserInput): Promise<AdminUser> {
+  const token = await getToken();
+  return apiFetch<AdminUser>(`/admin/users/${id}`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    body: JSON.stringify(input),
     cache: 'no-store',
   });
 }

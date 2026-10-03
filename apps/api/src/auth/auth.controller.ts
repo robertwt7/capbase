@@ -30,6 +30,7 @@ import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { TurnstileGuard } from './guards/turnstile.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -39,6 +40,7 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
+  @UseGuards(TurnstileGuard)
   @Post('register')
   register(@Body() dto: RegisterDto): Promise<AuthResponse> {
     return this.auth.register(dto);

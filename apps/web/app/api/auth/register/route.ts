@@ -3,11 +3,12 @@ import type { AuthResponse } from '@repo/api';
 
 import { API_URL } from '../../../../lib/api';
 import { TOKEN_COOKIE } from '../../../../lib/auth';
+import { turnstileHeaders } from '../../../../lib/turnstile';
 
 // Proxies /auth/register on the API, then signs the new user straight in by
 // storing the returned JWT in the httpOnly cookie.
 export async function POST(req: Request) {
-  let body: { email?: string; name?: string; password?: string };
+  let body: { email?: string; name?: string; password?: string; turnstileToken?: string | null };
   try {
     body = await req.json();
   } catch {
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
 
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...turnstileHeaders(body.turnstileToken) },
     body: JSON.stringify({ email: body.email, name: body.name, password: body.password }),
     cache: 'no-store',
   });

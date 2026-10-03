@@ -37,6 +37,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             >
               Merges{pendingMerges > 0 ? ` (${pendingMerges})` : ''}
             </Link>
+            <Link
+              href="/admin/users"
+              className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase transition-colors hover:text-ink"
+            >
+              Users
+            </Link>
             <span className={styles.sessionWho}>{session.email}</span>
             <form action={logoutAction}>
               <Button variant="ghost" size="sm" type="submit">

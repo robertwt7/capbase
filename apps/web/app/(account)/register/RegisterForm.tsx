@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
-import { Button, Card, Form, FormError, TextField } from '@/components/ui';
+import { Button, Card, Form, FormError, TextField, TurnstileField } from '@/components/ui';
 import {
   registerFormDefaults,
   registerFormSchema,
@@ -14,9 +14,18 @@ import {
   type RegisterFormValues,
 } from '@/lib/validation/auth';
 
-export function RegisterForm({ next }: { next?: string }) {
+export function RegisterForm({
+  next,
+  turnstileSiteKey,
+}: {
+  next?: string;
+  turnstileSiteKey?: string;
+}) {
   const router = useRouter();
   const [formError, setFormError] = useState<string>();
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every attempt: a Turnstile token is single-use.
+  const [challenge, setChallenge] = useState(0);
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerFormSchema),
     defaultValues: registerFormDefaults,
@@ -32,8 +41,10 @@ export function RegisterForm({ next }: { next?: string }) {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(toRegisterInput(values)),
+      body: JSON.stringify({ ...toRegisterInput(values), turnstileToken }),
     });
+    setTurnstileToken(null);
+    setChallenge((n) => n + 1);
     if (res.ok) {
       router.replace(next || '/');
       router.refresh();
@@ -81,6 +92,12 @@ export function RegisterForm({ next }: { next?: string }) {
               label="Confirm password"
               type="password"
               autoComplete="new-password"
+            />
+
+            <TurnstileField
+              key={challenge}
+              siteKey={turnstileSiteKey}
+              onToken={setTurnstileToken}
             />
 
             {formError ? <FormError>{formError}</FormError> : null}

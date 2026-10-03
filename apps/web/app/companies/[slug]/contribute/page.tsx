@@ -5,6 +5,7 @@ import type { ComponentType } from 'react';
 import { PageContainer, SectionHeader } from '@/components/ui';
 import { requireUser } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
+import { turnstileSiteKey } from '@/lib/turnstile';
 import { cn } from '@/lib/utils';
 
 import { EditCompanyForm } from './EditCompanyForm';
@@ -57,6 +58,7 @@ export default async function ContributeToCompanyPage({
   // 'edit' is the whole-company proposal form (needs the live company); the
   // rest are the child-entity contribution forms.
   const ActiveForm = type === 'edit' ? null : FORMS[type];
+  const siteKey = turnstileSiteKey();
 
   return (
     <PageContainer as="main" className="pt-8 pb-20">
@@ -104,9 +106,18 @@ export default async function ContributeToCompanyPage({
 
         <div className="mt-7">
           {ActiveForm ? (
-            <ActiveForm slug={company.slug} companyName={company.name} />
+            <ActiveForm
+              slug={company.slug}
+              companyName={company.name}
+              turnstileSiteKey={siteKey}
+            />
           ) : (
-            <EditCompanyForm slug={company.slug} companyName={company.name} company={company} />
+            <EditCompanyForm
+              slug={company.slug}
+              companyName={company.name}
+              company={company}
+              turnstileSiteKey={siteKey}
+            />
           )}
         </div>
       </div>

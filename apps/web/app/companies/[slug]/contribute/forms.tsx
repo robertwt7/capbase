@@ -15,6 +15,7 @@ import {
   SourceUrlField,
   TextareaField,
   TextField,
+  TurnstileField,
 } from '@/components/ui';
 import {
   acquisitionFormDefaults,
@@ -49,7 +50,12 @@ import {
   addRoundAction,
 } from './actions';
 
-export type ContributionFormProps = { slug: string; companyName: string };
+export type ContributionFormProps = {
+  slug: string;
+  companyName: string;
+  /** Cloudflare Turnstile site key; unset → no challenge. */
+  turnstileSiteKey?: string;
+};
 
 /** Shared chrome for every contribution form: submit plumbing, form-level
     errors, and the post-submit success panel with an "Add another" reset.
@@ -63,12 +69,14 @@ export function ContributionShell<T extends FieldValues>({
   successTitle = 'Submitted for review',
   successBody = 'Thanks for contributing — it will appear on the profile once an admin approves it.',
   resetLabel = 'Add another',
+  turnstileSiteKey,
   children,
 }: {
   form: UseFormReturn<T>;
-  action: (values: T) => Promise<ActionResult>;
+  action: (values: T, turnstileToken: string | null) => Promise<ActionResult>;
   slug: string;
   companyName: string;
+  turnstileSiteKey?: string;
   submitLabel: string;
   successTitle?: string;
   successBody?: string;
@@ -77,10 +85,15 @@ export function ContributionShell<T extends FieldValues>({
 }) {
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string>();
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every attempt: a Turnstile token is single-use.
+  const [challenge, setChallenge] = useState(0);
 
   const onSubmit = form.handleSubmit(async (values) => {
     setFormError(undefined);
-    const result = await action(values);
+    const result = await action(values, turnstileToken);
+    setTurnstileToken(null);
+    setChallenge((n) => n + 1);
     if (result.ok) {
       setSubmitted(true);
       return;
@@ -119,6 +132,8 @@ export function ContributionShell<T extends FieldValues>({
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
           {children}
 
+          <TurnstileField key={challenge} siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+
           {formError ? <FormError>{formError}</FormError> : null}
 
           <div>
@@ -137,7 +152,7 @@ export function ContributionShell<T extends FieldValues>({
   );
 }
 
-export function RoundForm({ slug, companyName }: ContributionFormProps) {
+export function RoundForm({ slug, companyName, turnstileSiteKey }: ContributionFormProps) {
   const form = useForm<RoundFormValues>({
     resolver: zodResolver(roundFormSchema),
     defaultValues: roundFormDefaults,
@@ -147,7 +162,8 @@ export function RoundForm({ slug, companyName }: ContributionFormProps) {
   return (
     <ContributionShell
       form={form}
-      action={(values) => addRoundAction(slug, values)}
+      action={(values, token) => addRoundAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Submit round"
@@ -181,7 +197,7 @@ export function RoundForm({ slug, companyName }: ContributionFormProps) {
   );
 }
 
-export function InvestorForm({ slug, companyName }: ContributionFormProps) {
+export function InvestorForm({ slug, companyName, turnstileSiteKey }: ContributionFormProps) {
   const form = useForm<InvestorFormValues>({
     resolver: zodResolver(investorFormSchema),
     defaultValues: investorFormDefaults,
@@ -191,7 +207,8 @@ export function InvestorForm({ slug, companyName }: ContributionFormProps) {
   return (
     <ContributionShell
       form={form}
-      action={(values) => addInvestorAction(slug, values)}
+      action={(values, token) => addInvestorAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Submit investor"
@@ -244,7 +261,7 @@ export function InvestorForm({ slug, companyName }: ContributionFormProps) {
   );
 }
 
-export function PersonForm({ slug, companyName }: ContributionFormProps) {
+export function PersonForm({ slug, companyName, turnstileSiteKey }: ContributionFormProps) {
   const form = useForm<PersonFormValues>({
     resolver: zodResolver(personFormSchema),
     defaultValues: personFormDefaults,
@@ -254,7 +271,8 @@ export function PersonForm({ slug, companyName }: ContributionFormProps) {
   return (
     <ContributionShell
       form={form}
-      action={(values) => addPersonAction(slug, values)}
+      action={(values, token) => addPersonAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Submit team member"
@@ -297,7 +315,7 @@ export function PersonForm({ slug, companyName }: ContributionFormProps) {
   );
 }
 
-export function AcquisitionForm({ slug, companyName }: ContributionFormProps) {
+export function AcquisitionForm({ slug, companyName, turnstileSiteKey }: ContributionFormProps) {
   const form = useForm<AcquisitionFormValues>({
     resolver: zodResolver(acquisitionFormSchema),
     defaultValues: acquisitionFormDefaults,
@@ -307,7 +325,8 @@ export function AcquisitionForm({ slug, companyName }: ContributionFormProps) {
   return (
     <ContributionShell
       form={form}
-      action={(values) => addAcquisitionAction(slug, values)}
+      action={(values, token) => addAcquisitionAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Submit acquisition"
@@ -334,7 +353,7 @@ export function AcquisitionForm({ slug, companyName }: ContributionFormProps) {
   );
 }
 
-export function ExitForm({ slug, companyName }: ContributionFormProps) {
+export function ExitForm({ slug, companyName, turnstileSiteKey }: ContributionFormProps) {
   const form = useForm<ExitFormValues>({
     resolver: zodResolver(exitFormSchema),
     defaultValues: exitFormDefaults,
@@ -344,7 +363,8 @@ export function ExitForm({ slug, companyName }: ContributionFormProps) {
   return (
     <ContributionShell
       form={form}
-      action={(values) => addExitAction(slug, values)}
+      action={(values, token) => addExitAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Submit exit"
@@ -377,7 +397,7 @@ export function ExitForm({ slug, companyName }: ContributionFormProps) {
   );
 }
 
-export function DiversityForm({ slug, companyName }: ContributionFormProps) {
+export function DiversityForm({ slug, companyName, turnstileSiteKey }: ContributionFormProps) {
   const form = useForm<DiversityFormValues>({
     resolver: zodResolver(diversityFormSchema),
     defaultValues: diversityFormDefaults,
@@ -387,7 +407,8 @@ export function DiversityForm({ slug, companyName }: ContributionFormProps) {
   return (
     <ContributionShell
       form={form}
-      action={(values) => addDiversityAction(slug, values)}
+      action={(values, token) => addDiversityAction(slug, values, token)}
+      turnstileSiteKey={turnstileSiteKey}
       slug={slug}
       companyName={companyName}
       submitLabel="Submit diversity data"
