@@ -9304,6 +9304,7 @@ __metadata:
     "@repo/typescript-config": "npm:*"
     "@sentry/nestjs": "npm:^11.4.0"
     "@types/node": "npm:^22.19.3"
+    "@types/pg": "npm:^8.20.0"
     eslint: "npm:^9.39.2"
     fast-xml-parser: "npm:^4.5.0"
     fflate: "npm:^0.8.3"

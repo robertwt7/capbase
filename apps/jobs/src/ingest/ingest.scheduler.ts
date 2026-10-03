@@ -4,6 +4,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import * as Sentry from '@sentry/nestjs';
 import { CronJob } from 'cron';
 
+import { IngestLock } from './ingest-lock';
 import { IngestService } from './ingest.service';
 
 /**
@@ -17,6 +18,7 @@ export class IngestScheduler implements OnApplicationBootstrap {
 
   constructor(
     private readonly ingest: IngestService,
+    private readonly lock: IngestLock,
     private readonly config: ConfigService,
     private readonly registry: SchedulerRegistry,
   ) {}
@@ -50,7 +52,11 @@ export class IngestScheduler implements OnApplicationBootstrap {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      await this.ingest.run({ days, limit, sources });
+      // A manual backfill may be running in another container; if so, this
+      // tick is skipped rather than racing it (IngestLock logs the skip).
+      await this.lock.runExclusive('scheduled ingest', () =>
+        this.ingest.run({ days, limit, sources }),
+      );
     } catch (err) {
       this.logger.error(`Scheduled ingest failed: ${String(err)}`);
       // The cron swallows the error to stay alive, so report it explicitly.

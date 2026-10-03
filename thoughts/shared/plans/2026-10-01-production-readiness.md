@@ -204,10 +204,10 @@ Remove the fake-data leak and the gate loophole, add error pages, harden the API
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `yarn build`
-- [ ] `make lint`
-- [ ] `yarn workspace api test`, `yarn workspace jobs test`
-- [ ] api e2e suite passes, including the new give-to-get case
+- [x] `yarn build`
+- [x] `make lint`
+- [x] `yarn workspace api test`, `yarn workspace jobs test`
+- [x] api e2e suite passes, including the new give-to-get case
 - [ ] CI workflow green on a test PR
 
 #### Manual Verification:
@@ -273,10 +273,10 @@ Add account recovery, server-side session control, abuse protection, fast search
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `make db-migrate` applies cleanly; `make db-generate`
-- [ ] `yarn build`, `make lint`, `make test`
-- [ ] e2e: a reset invalidates the old JWT, a banned user gets 401, and a demoted admin gets 403 on `/admin/*` immediately
-- [ ] e2e: contribution beyond the pending cap returns 429
+- [x] `make db-migrate` applies cleanly; `make db-generate`
+- [x] `yarn build`, `make lint`, `make test`
+- [x] e2e: a reset invalidates the old JWT, a banned user gets 401, and a demoted admin gets 403 on `/admin/*` immediately
+- [x] e2e: contribution beyond the pending cap returns 429
 
 #### Manual Verification:
 - [ ] Forgot → email link (logged when Resend is a no-op) → reset → log in with the new password
@@ -317,14 +317,43 @@ Deviations from the plan:
 - **CSP fetch allowlist is Report-Only** until checked on prod. Next's inline bootstrap needs `'unsafe-inline'` without nonces.
 - **Bug found and fixed:** on `/register` (and the new reset form), fixing a "passwords do not match" error left the message up until blur, so the first submit click missed the shifting button. Both forms now use `mode: 'onTouched'`.
 
-Remaining:
-- 2.2 (Turnstile, pending cap, ban/role admin page)
-- 2.3 (trigram)
-- 2.4 (mobile nav, a11y)
-- 1.8 (consent)
-- 1.9 (GlitchTip)
-- 1.10 (off-site backups)
-- 2.5 (ops polish)
+## Progress & deviations (2026-10-03)
+
+The rest of the plan is done and committed, one commit per section:
+- **2.2 abuse controls**:
+  - `TurnstileGuard` on register and every contribution, keyed off `x-turnstile-token`. It is a no-op without `TURNSTILE_SECRET` and fails closed if Cloudflare is down.
+  - `PendingCapGuard` caps a user at 30 PENDING rows, then returns 429. Admins are exempt.
+  - Both guards sit behind a `@Contribution()` decorator.
+  - `GET/PATCH /admin/users` plus a `/admin/users` page. A ban bumps `tokenVersion` and REJECTs the user's pending queue. An admin can't ban or demote themselves.
+  - Web: `<TurnstileField>`. The site key is read server-side per request as `TURNSTILE_SITE_KEY`, not `NEXT_PUBLIC_`.
+  - Tested with Cloudflare's always-pass and always-fail test keys in a headless browser.
+- **2.3 trigram**: migration `trigram_search`. The indexes are declared in the schema (`type: Gin`, `ops: raw("gin_trgm_ops")`), so a follow-up `migrate dev` produced an empty migration (no drift). EXPLAIN shows Bitmap Index Scans.
+- **2.4 + 1.8**:
+  - Sheet drawer with `aria-current` on the active link, a skip link and one `<main id="content">`. People was added to the nav.
+  - The consent banner gates GA. A footer "Cookie preferences" control reopens it. The privacy page is updated.
+  - Verified at 375px in headless Chrome: Esc closes the drawer and focus returns to the trigger, the drawer opens with Enter, Tab focuses the skip link first, and no GA request goes out until "Accept".
+- **1.9 GlitchTip**:
+  - GlitchTip 6.2 runs in **all-in-one** mode (one container instead of web + worker), plus Valkey.
+  - Uses the shared cert via `CERT_DOMAINS`. The nginx upstream goes through a resolver variable, so nginx boots without GlitchTip.
+  - The SDKs report to GlitchTip: api 5xx (not 4xx), jobs ingest failures, and web server, client and boundary errors.
+  - All of this was checked end to end against a local GlitchTip.
+- **1.10 backups**:
+  - rclone upload with a size check.
+  - A failure alert through GlitchTip's store API and/or a Resend email.
+  - `deploy-all` = build → predeploy backup → up.
+  - Fixed a latent bug: `db-backup.sh` never loaded `infra/env/all.env`, so `BACKUP_*` settings there were ignored.
+  - Backup, upload and restore drill verified with a local rclone remote.
+- **2.5 ops**:
+  - Web `/api/health` (deep check); healthchecks for web, jobs and nginx (`/nginx-health`).
+  - `USER node` in all three images; certbot pinned to `v5.8.0`.
+  - Advisory-lock ingest mutex. Verified: a backfill exits 75 while the lock is held.
+  - SHA-tagged images, `deploy-rollback`, `deploy-releases`.
+
+Deviations:
+- **Turnstile site key is runtime, not `NEXT_PUBLIC_*`** — same reasoning as GA: one image for every environment.
+- **Web Sentry DSN reaches the browser as a layout prop**, and the browser SDK is dynamically imported. That means no build arg and no bundle cost when it's off.
+- **GlitchTip is all-in-one**, not separate web + worker. GlitchTip 6 recommends it, and it idles at ~170 MB.
+- **A backfill that finds the lock held exits 75**, not 0, so `make ingest-all` stops instead of skipping a step that later steps depend on.
 
 ## References
 - Audits run 2026-10-01: security/auth, ops/infra/CI, product completeness

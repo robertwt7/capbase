@@ -74,6 +74,13 @@ services:
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - '3001:3001'
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
     depends_on:
       api:
         condition: service_healthy
@@ -94,6 +101,13 @@ services:
       INGEST_LIMIT: ${INGEST_LIMIT:-50}
     ports:
       - '3002:3002'
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://localhost:3002/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy

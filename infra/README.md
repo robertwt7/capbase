@@ -415,6 +415,35 @@ git pull && make deploy-all   # redeploy
 On a single VPS these all cover **the whole stack** — the Makefile detects the
 topology from whether `infra/env/app.env` exists.
 
+Every app container runs as the unprivileged `node` user, and every service has a
+healthcheck (`make deploy-ps` should show all of them `healthy`): api and web are
+deep checks that touch Postgres, jobs answers on `/`, nginx on a loopback-only
+`/nginx-health`.
+
+### Rollback
+
+`make deploy-all` tags the app images with the commit it built
+(`capbase-api:<sha>` …), points `:latest` at the live one, and keeps the newest
+five releases on disk (`RELEASES_KEEP`). To go back:
+
+```sh
+make deploy-releases              # what's on disk, plus current/previous
+make deploy-rollback SHA=<sha>    # re-run api/web/jobs on those images — no rebuild
+```
+
+**Code rolls back; the database does not.** If the release you are leaving ran a
+migration the older code can't live with, restore the snapshot `deploy-all` took
+just before it — the newest `capbase-predeploy-*.dump.age` — as in the
+[restore drill](#restore-drill-monthly), then roll back.
+
+### Ingest lock
+
+The cron and manual backfills (`make ingest-prod`, `ingest-all`, …) share a
+Postgres advisory lock, so they can't race each other's upserts. A cron tick that
+finds a backfill running logs `Ingest lock held by another process` and skips; a
+backfill that finds the cron running exits **75** and asks you to retry. The lock
+lives on a database session, so a crashed run can never leave it stuck.
+
 TLS does not need re-running: certbot renews on a 12h check cycle and nginx
 reloads every 6h.
 
@@ -524,7 +553,7 @@ the box you SSH into; in a split they target the DB VPS.
 - **Postgres TLS** — `sslmode=require` + server certs. Moot on a single box where
   the connection never leaves the Docker network.
 - **CI image builds** — build/push in CI and pull on the VPS instead of building
-  on-box.
+  on-box (the SHA tags `deploy-all` already uses would carry over).
 - **`postgres:16` → `17`** — the tag is a pinned major on purpose; a bump is its
   own maintenance task because the data directory is not forward-compatible. The
   sequence is: `make deploy-backup`, `make deploy-down`, remove the

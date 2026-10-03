@@ -15,6 +15,7 @@ import { S1Client } from '../sources/sec-s1/s1.client';
 import { SecS1Source } from '../sources/sec-s1/sec-s1.source';
 import { WikidataClient } from '../sources/wikidata/wikidata.client';
 import { WikidataSource } from '../sources/wikidata/wikidata.source';
+import { IngestLock } from './ingest-lock';
 import { IngestScheduler } from './ingest.scheduler';
 import { IngestService } from './ingest.service';
 
@@ -35,6 +36,7 @@ import { IngestService } from './ingest.service';
     S1Client,
     SecS1Source,
     IngestService,
+    IngestLock,
     IngestScheduler,
     // Pluggable list of sources — add OpenCorporates etc. here later.
     {
@@ -59,6 +61,6 @@ import { IngestService } from './ingest.service';
       ],
     },
   ],
-  exports: [IngestService],
+  exports: [IngestService, IngestLock],
 })
 export class IngestModule {}
