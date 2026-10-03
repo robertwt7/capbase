@@ -1,6 +1,6 @@
 import { PageContainer } from '@/components/ui';
 
-// Shared prose shell for the legal pages (/terms, /privacy). Pages render plain
+// Shared prose shell for the legal pages (/terms, /privacy, /data). Pages render plain
 // semantic HTML; the descendant variants below carry the typography so neither
 // page repeats styling. The "Last updated" line is a <div> (not <p>) so it can
 // carry its own mono styling without fighting the [&_p] selectors.
@@ -14,6 +14,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           [&_p]:mt-3 [&_p]:text-[15px] [&_p]:leading-[1.7] [&_p]:text-graphite-900
           [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:text-[15px] [&_ul]:leading-[1.7] [&_ul]:text-graphite-900
           [&_li]:mt-1
+          [&_code]:font-mono [&_code]:text-[13px]
           [&_a]:underline [&_a]:underline-offset-[3px]"
       >
         {children}

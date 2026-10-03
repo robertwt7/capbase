@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 import { PageContainer } from '@/components/ui';
-import { SUPPORT_EMAIL } from '@/lib/site';
+import { SOURCE_URL, SUPPORT_EMAIL } from '@/lib/site';
 import { CookiePreferencesButton } from './ConsentBanner';
 import { LogoMark } from './Logo';
 
@@ -23,6 +23,7 @@ const COLUMNS: { label: string; links: { label: string; href: string }[] }[] = [
     links: [
       { label: 'About', href: '/about' },
       { label: 'FAQ', href: '/faq' },
+      { label: 'Data & sources', href: '/data' },
       { label: 'Contribute', href: '/contribute' },
     ],
   },
@@ -73,7 +74,16 @@ export function SiteFooter({ showCookiePreferences }: { showCookiePreferences: b
             <LogoMark className="h-3 text-ink" />
             © {new Date().getFullYear()} Capbase
           </span>
-          <span>Data from SEC EDGAR, Wikidata, and community contributions</span>
+          <span>
+            <Link href="/data" className="transition-colors hover:text-ink">
+              Data
+            </Link>{' '}
+            CC BY-NC 4.0 ·{' '}
+            <a href={SOURCE_URL} className="transition-colors hover:text-ink">
+              Code
+            </a>{' '}
+            AGPL-3.0
+          </span>
           {showCookiePreferences ? (
             <CookiePreferencesButton className="cursor-pointer transition-colors hover:text-ink" />
           ) : null}

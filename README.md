@@ -1,8 +1,9 @@
 # Capbase
 
 An open-source alternative to Crunchbase / Pitchbook: **crowdsourced** company and
-funding data with **admin moderation**, plus automated ingestion of public **SEC EDGAR
-Form D** filings. TurboRepo monorepo, TypeScript end to end.
+funding data with **admin moderation**, plus automated ingestion of public records
+(**SEC EDGAR** Form D / C / S-1 / ADV, **SBIR.gov**, **Wikidata**). TurboRepo monorepo,
+TypeScript end to end.
 
 > Figures in the seed dataset are illustrative demo data, not verified financials.
 > Ingested SEC Form D records are real public filings.
@@ -108,3 +109,17 @@ Turbo tasks can also be run directly: `yarn dev`, `yarn build`, `yarn test`, `ya
 - Postgres is exposed on host port **5433** (to avoid clashing with a local 5432).
 - SEC requires a descriptive `SEC_USER_AGENT` with a contact email and ≤10 req/s — the
   ingestion client honors both.
+
+## Licence
+
+- **Code** — [GNU AGPL-3.0](LICENSE) (`AGPL-3.0-only`). If you run a modified Capbase as a
+  network service, you must offer its users your source. The shared tooling packages
+  (`eslint-config`, `jest-config`, `typescript-config`) are MIT.
+- **Data** — the published Capbase database (the compilation and the community-contributed
+  records) is [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). Facts from SEC
+  filings and SBIR.gov are public-domain US government records and Wikidata is CC0, so those
+  stay free to use from their original source. Every source, its terms and how to cite Capbase
+  are on [capbase.fyi/data](https://capbase.fyi/data).
+- **Contributions** — code: see [CONTRIBUTING.md](CONTRIBUTING.md). Data submitted through the
+  site is licensed to Capbase under the contributor grant in the
+  [Terms of Service](https://capbase.fyi/terms).

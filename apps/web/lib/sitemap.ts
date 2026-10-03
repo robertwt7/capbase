@@ -33,6 +33,7 @@ const STATIC_PATHS = [
   '/markets',
   '/about',
   '/faq',
+  '/data',
   '/alternatives/crunchbase',
   '/alternatives/pitchbook',
   '/terms',

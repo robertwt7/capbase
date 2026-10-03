@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 import { JsonLd } from '@/components/JsonLd';
 import { PageContainer, SectionHeader } from '@/components/ui';
@@ -11,8 +12,9 @@ export const metadata: Metadata = {
 };
 
 // Single source for the visible page AND the FAQPage JSON-LD — answers stay
-// plain strings so the structured data needs no JSX stripping.
-const FAQS: { q: string; a: string }[] = [
+// plain strings so the structured data needs no JSX stripping. An optional
+// `link` renders after the visible answer only.
+const FAQS: { q: string; a: string; link?: { href: string; label: string } }[] = [
   {
     q: 'What is Capbase?',
     a: 'Capbase is a free, open-source database of private companies: funding rounds, investors, people, acquisitions, and exits. It is a crowdsourced alternative to closed deal databases like Crunchbase and PitchBook, built on public sources and community contributions.',
@@ -27,7 +29,8 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Where does the data come from?',
-    a: 'Three places: automated ingestion of SEC EDGAR Form D filings (the official US disclosure for private placements), enrichment from Wikidata for notable companies, and community contributions. Every crowdsourced submission is reviewed by a moderator before it appears.',
+    a: 'Three places: automated ingestion of public US government records (SEC EDGAR Form D, Form C, Form S-1 and Form ADV filings, and SBIR.gov research awards), enrichment from Wikidata for notable companies, and community contributions. Every crowdsourced submission is reviewed by a moderator before it appears, and every published fact links to its source.',
+    link: { href: '/data', label: 'Every source and its terms' },
   },
   {
     q: 'How accurate is the data?',
@@ -47,7 +50,8 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Can I use Capbase data in my own project?',
-    a: 'The project is open source and the data comes from public sources and moderated community contributions. You are welcome to reference it with attribution — just do not scrape at abusive rates. The Terms of Service have the details.',
+    a: 'Yes, for non-commercial use. The Capbase database is licensed under Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0): credit "Capbase (capbase.fyi)", link to the licence, and say if you changed anything. Facts taken directly from SEC filings and SBIR.gov are public domain, and Wikidata is CC0, so those are yours to use from the original source. For commercial use of the database, email support@capbase.fyi. The code is open source under the AGPL-3.0. Please do not scrape at abusive rates.',
+    link: { href: '/data', label: 'Data licence and how to cite' },
   },
   {
     q: 'Do you have an API?',
@@ -82,6 +86,14 @@ export default function FaqPage() {
               {faq.q}
             </h2>
             <p className="mt-2 text-sm leading-[1.65] text-graphite-700">{faq.a}</p>
+            {faq.link ? (
+              <Link
+                href={faq.link.href}
+                className="mt-3 inline-block font-mono text-xs text-graphite-500 underline underline-offset-[3px] transition-colors hover:text-ink"
+              >
+                {faq.link.label} →
+              </Link>
+            ) : null}
           </section>
         ))}
       </div>

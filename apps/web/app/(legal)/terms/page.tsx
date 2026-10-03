@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
-import { SUPPORT_EMAIL } from '@/lib/site';
+import { DATA_LICENSE_URL, SOURCE_URL, SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Terms of Service',
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/terms' },
 };
 
-const LAST_UPDATED = '19 July 2026';
+const LAST_UPDATED = '3 October 2026';
 
 export default function TermsPage() {
   return (
@@ -42,20 +43,63 @@ export default function TermsPage() {
         to abuse the Service, submit false data, or breach these terms.
       </p>
 
-      <h2>4. User contributions</h2>
+      <h2>4. Your contributions</h2>
       <p>
-        When you submit content to Capbase — a company, a funding round, a person, a correction, or
-        anything else — you grant us a perpetual, worldwide, royalty-free licence to host, display,
-        adapt, and redistribute that contribution as part of the database. You warrant that you
-        have the right to submit the information and that it does not, to your knowledge, infringe
-        anyone else&apos;s rights or any confidentiality obligation.
+        When you submit content to Capbase — a company, a funding round, a person, a correction, a
+        source link, or anything else — you keep whatever rights you have in it, and you grant us a{' '}
+        <strong>
+          perpetual, irrevocable, worldwide, non-exclusive, royalty-free, sublicensable and
+          transferable licence
+        </strong>{' '}
+        to use, host, store, reproduce, adapt, publish, distribute and otherwise exploit that
+        contribution, in any form and for any purpose, <strong>including commercial purposes</strong>.
+        This licence is wider than the public data licence in section 5, and it survives the
+        closure of your account.
       </p>
+      <p>You are responsible for what you submit. By submitting, you confirm that:</p>
+      <ul>
+        <li>you have the right to share it, and it is accurate to the best of your knowledge;</li>
+        <li>
+          it is <strong>not</strong> copied from a database, subscription service or other source
+          whose terms or your contract with it forbid you from sharing it — for example, an export
+          from a proprietary company or deal database;
+        </li>
+        <li>
+          it does not breach anyone&apos;s confidentiality, privacy, intellectual property or other
+          rights.
+        </li>
+      </ul>
       <p>
         All contributions pass through moderation. We may edit, reject, or remove any contribution
-        at any time, for any reason, without notice.
+        at any time, for any reason, without notice. If you believe something on Capbase was
+        submitted in breach of these terms, write to{' '}
+        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will review it.
       </p>
 
-      <h2>5. Acceptable use</h2>
+      <h2>5. Licence to Capbase data</h2>
+      <p>
+        The Capbase database — the compilation, and the community-contributed records in it — is
+        made available under the{' '}
+        <a href={DATA_LICENSE_URL} rel="license">
+          Creative Commons Attribution-NonCommercial 4.0 International licence
+        </a>{' '}
+        (CC BY-NC 4.0). You may copy, share and adapt it for non-commercial purposes, provided you
+        give attribution: credit &ldquo;Capbase (capbase.fyi)&rdquo;, link to the licence, and
+        indicate if you made changes. Where practical, link to the page you took the data from.
+      </p>
+      <p>
+        Many individual facts on Capbase come from public-domain government records (SEC EDGAR,
+        SBIR.gov) or from Wikidata, which is dedicated to the public domain under CC0. Our licence
+        does not restrict your use of those facts taken from their original source. For commercial
+        use of the Capbase database itself, contact us. See{' '}
+        <Link href="/data">Data &amp; sources</Link> for every source and its terms.
+      </p>
+      <p>
+        The Capbase software is separate: its source code is licensed under the{' '}
+        <a href={SOURCE_URL}>GNU Affero General Public License v3.0</a>.
+      </p>
+
+      <h2>6. Acceptable use</h2>
       <p>You agree not to:</p>
       <ul>
         <li>scrape or bulk-download the Service at rates that degrade it for others;</li>
@@ -64,7 +108,7 @@ export default function TermsPage() {
         <li>use the Service for any unlawful purpose or in breach of any applicable law.</li>
       </ul>
 
-      <h2>6. Data disclaimer</h2>
+      <h2>7. Data disclaimer</h2>
       <p>
         Information on Capbase is aggregated from public sources (including SEC EDGAR filings and
         Wikidata) and community submissions, and is provided &ldquo;as is&rdquo; for general
@@ -74,20 +118,22 @@ export default function TermsPage() {
         <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
       </p>
 
-      <h2>7. Third-party content and links</h2>
+      <h2>8. Third-party content and links</h2>
       <p>
-        The Service links out to third-party websites and displays company logos served by
-        third-party providers (such as Clearbit) and attributions to original data sources. We do
-        not control and are not responsible for third-party sites or content.
+        The Service links out to third-party websites and displays company logos fetched from a
+        third-party icon service (DuckDuckGo) and attributions to original data sources. Company
+        names and logos are trademarks of their respective owners and are shown only to identify
+        the company; their use implies no affiliation or endorsement. We do not control and are not
+        responsible for third-party sites or content.
       </p>
 
-      <h2>8. Availability and changes</h2>
+      <h2>9. Availability and changes</h2>
       <p>
         We aim to keep the Service available but give no uptime guarantee. Features may change,
         be suspended, or be withdrawn at any time.
       </p>
 
-      <h2>9. Liability</h2>
+      <h2>10. Liability</h2>
       <p>
         To the maximum extent permitted by law, we exclude all liability for any loss or damage
         arising from your use of, or inability to use, the Service or its data. Nothing in these
@@ -97,7 +143,7 @@ export default function TermsPage() {
         our option, to resupplying the Service or paying the cost of having it resupplied.
       </p>
 
-      <h2>10. Termination, changes to these terms, severability</h2>
+      <h2>11. Termination, changes to these terms, severability</h2>
       <p>
         We may suspend or terminate your access for breach of these terms. We may update these
         terms from time to time; the current version is always published on this page with its
@@ -105,13 +151,13 @@ export default function TermsPage() {
         If any provision is found unenforceable, the remainder continues in force.
       </p>
 
-      <h2>11. Governing law</h2>
+      <h2>12. Governing law</h2>
       <p>
         These terms are governed by the laws of Australia, and you submit to the non-exclusive
         jurisdiction of the courts of Australia.
       </p>
 
-      <h2>12. Contact</h2>
+      <h2>13. Contact</h2>
       <p>
         Questions about these terms: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
       </p>
