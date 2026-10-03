@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form';
 import { COMPANY_STATUSES, SECTORS, STAGES } from '@repo/api';
 
 import {
+  AttestationField,
   Button,
   Card,
   Eyebrow,
@@ -189,6 +190,7 @@ export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string })
           />
 
           <SourceUrlField control={form.control} />
+          <AttestationField control={form.control} />
 
           <TurnstileField key={challenge} siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
 

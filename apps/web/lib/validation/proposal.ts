@@ -61,6 +61,8 @@ export function editDefaultsFromCompany(company: Company): EditFormValues {
     // The source is about *this* edit, so it never pre-fills from the company.
     sourceUrl: '',
     note: '',
+    // Re-attested on every edit; never carried over.
+    attested: false,
   };
 }
 
@@ -138,5 +140,7 @@ export function toProposalInput(
     changes,
     ...(note ? { note } : {}),
     ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+    // On the payload, not in `changes`: it is not a company field.
+    attested: v.attested,
   };
 }

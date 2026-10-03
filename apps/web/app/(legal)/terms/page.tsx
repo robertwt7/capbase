@@ -72,8 +72,10 @@ export default function TermsPage() {
       <p>
         All contributions pass through moderation. We may edit, reject, or remove any contribution
         at any time, for any reason, without notice. If you believe something on Capbase was
-        submitted in breach of these terms, write to{' '}
-        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will review it.
+        submitted in breach of these terms, use the &ldquo;Report an issue&rdquo; link on its
+        profile or write to <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will
+        review it. Our <Link href="/takedown">takedown &amp; removal policy</Link> explains what we
+        remove and how quickly.
       </p>
 
       <h2>5. Licence to Capbase data</h2>

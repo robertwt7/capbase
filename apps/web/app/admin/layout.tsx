@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 import { Logo } from '../../components/Logo';
 import { Button, Eyebrow } from '../../components/ui';
-import { getMergeQueue } from '../../lib/admin';
+import { getMergeQueue, getReports } from '../../lib/admin';
 import { getSession } from '../../lib/auth';
 import { logoutAction } from './actions';
 
@@ -22,7 +22,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   // Signed-out visitors get no count — the queue is admin-only, and a failed
   // fetch must not take the login screen down with it.
-  const pendingMerges = session ? await pendingMergeCount() : 0;
+  const [pendingMerges, openReports] = session
+    ? await Promise.all([pendingMergeCount(), openReportCount()])
+    : [0, 0];
 
   return (
     <div className={styles.shell}>
@@ -33,6 +35,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         </Link>
         {session ? (
           <div className={styles.session}>
+            <Link
+              href="/admin/reports"
+              className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase transition-colors hover:text-ink"
+            >
+              Reports{openReports > 0 ? ` (${openReports})` : ''}
+            </Link>
             <Link
               href="/admin/merges"
               className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase transition-colors hover:text-ink"
@@ -69,6 +77,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 async function pendingMergeCount(): Promise<number> {
   try {
     return (await getMergeQueue('PENDING')).total;
+  } catch {
+    return 0;
+  }
+}
+
+/** Open reports, for the nav badge — the only signal a report arrived (there
+ *  is no email). Never throws, for the same reason as pendingMergeCount. */
+async function openReportCount(): Promise<number> {
+  try {
+    return (await getReports('OPEN')).total;
   } catch {
     return 0;
   }

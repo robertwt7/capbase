@@ -72,6 +72,7 @@ model User {
   funds          Fund[]
   mergeDecisions MergeCandidate[]
   merges         MergeRecord[]
+  reportsResolved Report[]
 }
 
 /// A primary document a fact came from. Deduplicated by URL, so many citations
@@ -685,4 +686,34 @@ model MergeRecord {
 
   @@index([entityType, survivorId])
   @@index([losingId])
+}
+
+/// A visitor's report about one public profile. Anonymous by design (Turnstile +
+/// nginx rate limit, no account) so a person asking for removal never needs to
+/// sign up. Never public; resolving it is bookkeeping — only a person report can
+/// change the site, and only through an admin's explicit "Suppress & resolve".
+model Report {
+  id         String  @id @default(cuid())
+  /// One of REPORTABLE_TYPES. 'person' means the Person row (the human).
+  entityType String
+  /// Company.id | Investor.id | Person.id — resolved from the slug at submission.
+  entityId   String
+  /// One of REPORT_REASONS.
+  reason     String
+  message    String
+  /// Optional reporter contact — personal data (Privacy §2).
+  email      String?
+
+  /// One of REPORT_STATUSES.
+  status         String    @default("OPEN")
+  resolutionNote String?
+  resolutionUrl  String?
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolvedBy     User?     @relation(fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([entityType, entityId])
 }

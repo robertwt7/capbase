@@ -56,6 +56,41 @@ describe('Submissions & moderation (e2e)', () => {
       .expect(400);
   });
 
+  it('rejects a contribution without the attestation with 400', async () => {
+    const company = {
+      name: `E2E Unattested ${Date.now()}`,
+      domain: 'unattested.example',
+      oneLiner: 'x',
+      description: 'x',
+      hq: 'Nowhere',
+      founded: 2020,
+      headcount: 1,
+      industry: ['Software'],
+      status: 'Private',
+      stage: 'Seed',
+      totalRaisedUsd: 0,
+    };
+    const round = {
+      name: 'Unattested Round',
+      date: '2025-12-01',
+      amountUsd: 1_000_000,
+      investors: [],
+    };
+    for (const attested of [undefined, false]) {
+      const res = await request(app.getHttpServer())
+        .post('/companies')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ ...company, attested })
+        .expect(400);
+      expect(JSON.stringify(res.body.message)).toContain('right to share');
+      await request(app.getHttpServer())
+        .post('/companies/helia/rounds')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ ...round, attested })
+        .expect(400);
+    }
+  });
+
   it('blocks non-admins from the moderation queue with 403', async () => {
     await request(app.getHttpServer())
       .get('/admin/submissions')
@@ -75,6 +110,7 @@ describe('Submissions & moderation (e2e)', () => {
         postMoneyUsd: 50_000_000_000,
         lead: 'E2E Capital',
         investors: [{ name: 'E2E Capital', lead: true }],
+        attested: true,
       })
       .expect(201);
     expect(submit.body.moderationStatus).toBe('PENDING');
@@ -141,7 +177,7 @@ describe('Submissions & moderation (e2e)', () => {
     await request(app.getHttpServer())
       .post('/companies/helia/proposals')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ changes: { hq: before.body.company.hq } })
+      .send({ changes: { hq: before.body.company.hq }, attested: true })
       .expect(400);
 
     // Submit a real proposal (PENDING).
@@ -151,6 +187,7 @@ describe('Submissions & moderation (e2e)', () => {
       .send({
         changes: { hq: newHq, headcount: newHeadcount },
         note: 'e2e correction',
+        attested: true,
       })
       .expect(201);
     expect(submit.body.moderationStatus).toBe('PENDING');
@@ -192,7 +229,7 @@ describe('Submissions & moderation (e2e)', () => {
     const submit = await request(app.getHttpServer())
       .post('/companies/helia/proposals')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ changes: { oneLiner: 'Rejected e2e one-liner' } })
+      .send({ changes: { oneLiner: 'Rejected e2e one-liner' }, attested: true })
       .expect(201);
 
     await request(app.getHttpServer())

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 import { SUPPORT_EMAIL } from '@/lib/site';
 
@@ -37,6 +38,10 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Watchlist</strong> — companies you save to your profile.
+        </li>
+        <li>
+          <strong>Reports</strong> — if you use &ldquo;Report an issue&rdquo;, what you write and,
+          only if you choose to give it, a contact email, used solely to follow up on that report.
         </li>
         <li>
           <strong>Server logs</strong> — IP address, user agent, and request metadata, kept for
@@ -107,8 +112,12 @@ export default function PrivacyPage() {
       <p>
         Capbase profiles describe companies and people in their public, professional capacity —
         founders, executives, investors — using public sources such as regulatory filings and
-        Wikidata. If a profile describes you and you want it corrected or removed, email{' '}
-        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will review the request.
+        Wikidata. If a profile describes you and you want it corrected or removed, use the
+        &ldquo;Report an issue&rdquo; link on that profile (no account needed) or email{' '}
+        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>, and we will review the request. A
+        removed person profile is hidden from the Service. See our{' '}
+        <Link href="/takedown">takedown &amp; removal policy</Link> for what we remove and how
+        quickly.
       </p>
 
       <h2>7. Storage and overseas disclosure</h2>
@@ -122,7 +131,10 @@ export default function PrivacyPage() {
       <p>
         We keep personal information only as long as needed for the purposes above. You can request
         access to, correction of, or deletion of your personal information by emailing{' '}
-        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. Deleting your account removes your
+        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>, or — for a profile that describes
+        you — through its &ldquo;Report an issue&rdquo; link. We action these requests within 30
+        days (see the <Link href="/takedown">takedown &amp; removal policy</Link>). Deleting your
+        account removes your
         personal data; contributions already merged into the database may persist in de-identified
         form.
       </p>

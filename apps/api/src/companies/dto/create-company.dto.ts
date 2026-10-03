@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
+  Equals,
   IsArray,
   IsIn,
   IsInt,
@@ -142,4 +143,9 @@ export class CreateCompanyDto implements CreateCompanyInput {
   @IsUrl()
   @MaxLength(2048)
   sourceUrl?: string | null;
+
+  /** Contribution attestation (Terms §4). Required — and decorated, because the
+   *  global ValidationPipe silently strips undecorated fields. */
+  @Equals(true, { message: 'You must confirm you have the right to share this contribution' })
+  attested!: boolean;
 }

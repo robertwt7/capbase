@@ -428,6 +428,10 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           className="underline underline-offset-[3px] transition-colors hover:text-ink"
         >
           Propose a change
+        </Link>{' '}
+        or{' '}
+        <Link href={`/report/company/${company.slug}`} className="underline underline-offset-[3px] transition-colors hover:text-ink">
+          report an issue
         </Link>
         .
       </footer>

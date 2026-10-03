@@ -12,6 +12,7 @@ import { InvestorsModule } from './investors/investors.module';
 import { MarketModule } from './market/market.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ReportsModule } from './reports/reports.module';
 import { UsersModule } from './users/users.module';
 
 import { AppService } from './app.service';
@@ -31,6 +32,7 @@ import { HealthController } from './health.controller';
     FundsModule,
     MarketModule,
     AdminModule,
+    ReportsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

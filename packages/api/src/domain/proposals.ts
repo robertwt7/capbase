@@ -34,6 +34,8 @@ export interface CreateChangeProposalInput {
       citation earns its name. Deliberately NOT part of `CompanyEditFields`:
       that is the editable-column whitelist and must not grow. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 /** Payload the admin queue carries for a proposal: the diff + live current values. */

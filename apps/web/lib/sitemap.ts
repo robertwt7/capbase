@@ -38,6 +38,7 @@ const STATIC_PATHS = [
   '/alternatives/pitchbook',
   '/terms',
   '/privacy',
+  '/takedown',
 ];
 
 export interface SitemapEntry {

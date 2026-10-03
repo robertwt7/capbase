@@ -1,7 +1,7 @@
 import { EXIT_TYPES, type CreateExitInput } from '@repo/api';
 import { z } from 'zod';
 
-import { urlOrEmpty } from './utils';
+import { attestation, urlOrEmpty } from './utils';
 
 export const exitFormSchema = z.object({
   type: z.enum(EXIT_TYPES as readonly [string, ...string[]], {
@@ -11,6 +11,7 @@ export const exitFormSchema = z.object({
   valueUsd: z.string().trim().regex(/^\d*$/, 'Enter a whole number.'),
   detail: z.string().trim().min(1, 'A short description is required.'),
   sourceUrl: urlOrEmpty,
+  attested: attestation,
 });
 
 export type ExitFormValues = z.infer<typeof exitFormSchema>;
@@ -21,6 +22,7 @@ export const exitFormDefaults: ExitFormValues = {
   valueUsd: '',
   detail: '',
   sourceUrl: '',
+  attested: false,
 };
 
 export function toExitInput(v: ExitFormValues): CreateExitInput {
@@ -30,5 +32,6 @@ export function toExitInput(v: ExitFormValues): CreateExitInput {
     detail: v.detail,
     ...(v.valueUsd ? { valueUsd: Number(v.valueUsd) } : {}),
     ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+    attested: v.attested,
   };
 }

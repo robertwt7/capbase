@@ -13,6 +13,7 @@ import {
 } from '@repo/api';
 
 import {
+  AttestationField,
   SelectField,
   SelectItem,
   SourceUrlField,
@@ -194,6 +195,7 @@ export function EditCompanyForm({ slug, companyName, company, turnstileSiteKey }
         rows={2}
         placeholder="One line on why this change is right."
       />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }

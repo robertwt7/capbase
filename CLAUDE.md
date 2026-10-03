@@ -65,7 +65,7 @@ anymore).
 
 #### Components (`components/ui/`)
 
-`Button`, `Card`, `Badge`, `Input`, `Textarea`, `Select`, `Label`, `Separator`, `Form`, `Sheet` are
+`Button`, `Card`, `Badge`, `Input`, `Textarea`, `Select`, `Checkbox`, `Label`, `Separator`, `Form`, `Sheet` are
 **real shadcn/ui components** (CLI-generated, then re-themed monochrome onto the existing CSS
 variables — no accent, no red destructive). Files are lowercase (`button.tsx`, `card.tsx`,
 `badge.tsx`, …) per shadcn convention; the barrel `index.ts` re-exports the capitalised
@@ -125,6 +125,13 @@ Forms use **react-hook-form** with **zod** validation (shadcn `Form` pattern):
   `applyProposal` materialises **one citation per changed field** on approval.
   `<Citation>` (`components/Citation.tsx`) renders the marker — a mono bracketed
   publisher tag, or a muted em dash when a fact is uncited, so the two never look alike.
+- …and then an **`<AttestationField>`** (`components/ui/`, a Radix `Checkbox`): the required
+  "I have the right to share this…" box (Terms §4). Its `attested` value is **the one boolean
+  in a form schema** — the shared `attestation` zod rule in `lib/validation/utils.ts` (must be
+  `true`), `attested: false` in every `*FormDefaults`, passed through by every `to*Input`
+  (`toProposalInput` puts it on the payload, never in `changes`). Every contribution DTO
+  requires it with `@Equals(true)`; it is not persisted. A new contribution form must add all
+  three pieces or the API answers 400.
 - Server stays authoritative: the server action re-runs `schema.safeParse` (never trust
   the client), maps with `to*Input`, and returns an `ActionResult`
   (`{ ok } | { ok:false, formError?, fieldErrors? }`, see `lib/validation/utils.ts`).
@@ -173,6 +180,41 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `app/api/admin/login` which stores the JWT in an httpOnly `capbase_token` cookie.
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
   (server actions) approve/reject. Keep it strictly monochrome (`admin.module.css`).
+  The admin nav is hand-written `<Link>`s in `app/admin/layout.tsx` (Merges shows a pending
+  count); the queue itself has no nav link, only the brand link. Only the queue page uses
+  `admin.module.css` — `/admin/merges` and `/admin/users` are Tailwind + `components/ui`, so
+  copy **`merges/page.tsx`** (header, `FilterLink` pills, `Card` rows, one `<form
+  action={fn.bind(null, …)}>` per button) for any new admin page. The web layer does no
+  per-action auth; the API's `@Roles('ADMIN')` on `AdminController` is the gate.
+  `POST /admin/people/:id/suppress|unsuppress` exists in the API; its only web UI is
+  Suppress & resolve on a person report (below).
+- `/admin/reports` — the "Report an issue" queue, OPEN/RESOLVED/DISMISSED pills, an
+  `OPEN (n)` count in the admin nav (the only signal — no email). Each OPEN card is **one**
+  `<form>` (note + link inputs) whose buttons pick the server action via `formAction`:
+  Resolve, Dismiss, and on an unsuppressed person Suppress & resolve. Resolving is
+  bookkeeping only — companies/investors are never hidden by a report.
+- `/report/[type]/[slug]` — the public report form for a company/investor/person profile
+  (linked from each profile's footer). Anonymous even when signed in: `lib/reports.ts` sends
+  **no** authorization header, only the Turnstile token. Robots-disallowed, `noindex`.
+- `/terms`, `/privacy`, `/data`, `/takedown` — the `(legal)` route group: one prose layout
+  (`(legal)/layout.tsx`) styles bare `h1/h2/p/ul/a` via descendant selectors, so a page is
+  plain semantic HTML plus `metadata` and a `LAST_UPDATED` line. Site-wide constants
+  (`SUPPORT_EMAIL`, `SOURCE_URL`, `DATA_LICENSE_URL`) are **hardcoded** in `lib/site.ts`,
+  not env. A new indexable static page must be added to `STATIC_PATHS` in `lib/sitemap.ts`
+  (the sitemap is route-handler based; there is no `app/sitemap.ts`); a new form route must be
+  added to `disallow` in `app/robots.ts`. Footer links live in `COLUMNS` in
+  `components/SiteFooter.tsx`.
+
+**Entity ids on the web side:** the `Company` and `Investor` domain types expose **no `id`,
+only `slug`** (a company's row id is recoverable only through its citations,
+`companyEntityId()`); `Person` and every child row (round, role, holding, deal, …) do expose
+`id`. Key new company/investor features by slug and resolve on the API.
+
+**Contribution forms:** the six child forms and `EditCompanyForm` share `ContributionShell`
+(`app/companies/[slug]/contribute/forms.tsx`) — Turnstile state, `FormError`, submit button,
+success panel; children render above the widget. `CompanyForm` duplicates that plumbing
+inline. Server actions → `lib/contribute.ts` `submit*` → API. `apps/web` has no test suite.
+`/takedown` carries a **TODO(manual)** placeholder for the DMCA designated agent.
 
 Run the web app with `yarn dev` (it serves on port 3001). It expects the API at
 `API_URL` (default `http://localhost:3000`).
@@ -183,7 +225,10 @@ NestJS 11 REST API on port 3000. Auth = JWT + roles (USER/ADMIN), bcrypt. Every
 crowdsourced row carries `moderationStatus` (PENDING/APPROVED/REJECTED); public reads
 return only APPROVED, `/admin/*` (RBAC) lists pending and flips status. Services map
 Prisma rows → shared `@repo/api` types (`src/companies/company.mapper.ts`). DTOs use
-`class-validator` and `implements` the shared `Create*Input` types. Config comes from
+`class-validator` and `implements` the shared `Create*Input` types. The global
+`ValidationPipe` is `{ whitelist: true, transform: true }` **without**
+`forbidNonWhitelisted`: an undecorated DTO property is silently stripped, not rejected — a
+new required field must carry a validator or it vanishes. Config comes from
 env (`apps/api/.env`, see `.env.example`). Registration sends a welcome email through
 `MailModule` (`src/mail/`, Resend) — a no-op that only logs when `RESEND_API_KEY` is unset.
 
@@ -191,7 +236,10 @@ Abuse controls: every contribution route uses the `@Contribution()` decorator
 (`JwtAuthGuard` + `PendingCapGuard` + `TurnstileGuard`). The cap is
 `MAX_PENDING_SUBMISSIONS` (30, `@repo/api`) PENDING rows per user → 429; admins are
 exempt. `TurnstileGuard` (also on `POST /auth/register`) is a no-op without
-`TURNSTILE_SECRET` and fails closed when Cloudflare is unreachable. The JWT is only
+`TURNSTILE_SECRET` and fails closed when Cloudflare is unreachable. `POST /reports` is the one
+other anonymous write: `@UseGuards(TurnstileGuard)` only, no pending cap, nginx `writes` in
+front (`src/reports/`; the admin side is a separate `AdminReportsController` on
+`admin/reports`). The JWT is only
 identity: `JwtStrategy` re-reads the user, so role, ban and `tokenVersion` come from the DB.
 
 Errors go to self-hosted GlitchTip via `@sentry/nestjs` (`src/instrument.ts`, imported
@@ -249,6 +297,17 @@ stays narrow.
 - The child domain types (`FundingRound`, `Person`, `InvestorHolding`, `AcquisitionDeal`,
   `ExitEvent`, `DiversitySignal`) expose `id` for exactly this reason — a citation must
   anchor to *this* round. `RoundInvestor` is excluded: no independent citable identity.
+
+### Reports
+
+**`Report`** holds visitor "Report an issue" submissions and is **never public**. Polymorphic
+like `Citation` (`entityType` + `entityId`, `REPORTABLE_TYPES` = `IdentifiableType`, so
+`'person'` is the human, not the role row); `entityId` is resolved from the slug **through the
+public filters** at submission, so a hidden/merged profile can't be reported. Status is
+`OPEN`/`RESOLVED`/`DISMISSED` (not PENDING — it is not a moderated row); reason, status and the
+vocabularies live in `@repo/api` `domain/reports.ts`. Resolving writes only the note/link/who/when
+— except `suppressPerson`, which sets `Person.suppressedAt` in the same transaction. `email` is
+optional reporter contact (personal data, Privacy §2).
 
 ### Controlled vocabularies & entity metadata
 
@@ -478,7 +537,11 @@ two-box topology still works but is an appendix. The runbook is **`infra/README.
 binds `127.0.0.1` only (remote psql via `make db-tunnel`), is tuned for 4 GB (plus swap) via env
 vars, and every container has a `mem_limit` + capped logs. nginx serves a **static**
 `infra/nginx/conf.d/capbase.conf` (the `${DOMAIN}` template is gone; the domain is
-hardcoded and `deploy-tls` enforces that it matches `DOMAIN`). Key targets:
+hardcoded and `deploy-tls` enforces that it matches `DOMAIN`). Rate limits are per-IP nginx
+zones returning 429 — `auth` 10 r/m on `^/api/(auth|admin)/`, `writes` 30 r/m keyed on
+**POST only** under `location /`, `general` 30 r/s. Server actions are POSTs to the page URL,
+so any new form under `location /` is covered by `writes` with no nginx change. The API is
+never public (web → api is container-to-container), and there is no app-level throttler. Key targets:
 `deploy-secrets` (generate all credentials), `backup-keygen` (age keypair, run on the
 laptop — the VPS only ever holds the public key), `deploy-backup` (dump → verify-restore
 → encrypt → prune → rclone upload to R2/B2 via `infra/backup/rclone.conf`; any failure

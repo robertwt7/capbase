@@ -1,7 +1,7 @@
 import { INVESTOR_TYPES, type CreateInvestorInput } from '@repo/api';
 import { z } from 'zod';
 
-import { urlOrEmpty } from './utils';
+import { attestation, urlOrEmpty } from './utils';
 
 export const investorFormSchema = z.object({
   name: z.string().trim().min(1, 'Investor name is required.'),
@@ -13,6 +13,7 @@ export const investorFormSchema = z.object({
   websiteUrl: urlOrEmpty,
   linkedinUrl: urlOrEmpty,
   sourceUrl: urlOrEmpty,
+  attested: attestation,
 });
 
 export type InvestorFormValues = z.infer<typeof investorFormSchema>;
@@ -25,6 +26,7 @@ export const investorFormDefaults: InvestorFormValues = {
   websiteUrl: '',
   linkedinUrl: '',
   sourceUrl: '',
+  attested: false,
 };
 
 export function toInvestorInput(v: InvestorFormValues): CreateInvestorInput {
@@ -36,5 +38,6 @@ export function toInvestorInput(v: InvestorFormValues): CreateInvestorInput {
     ...(v.websiteUrl ? { websiteUrl: v.websiteUrl } : {}),
     ...(v.linkedinUrl ? { linkedinUrl: v.linkedinUrl } : {}),
     ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+    attested: v.attested,
   };
 }

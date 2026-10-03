@@ -63,6 +63,7 @@ export {
   SelectValue,
 } from './select';
 export { Label } from './label';
+export { Checkbox } from './checkbox';
 
 // react-hook-form integration.
 export {
@@ -77,4 +78,5 @@ export {
 } from './form';
 export { TextField, TextareaField, SelectField } from './fields';
 export { SourceUrlField } from './SourceUrlField';
+export { AttestationField, ATTESTATION_TEXT } from './AttestationField';
 export { TurnstileField } from './TurnstileField';

@@ -59,7 +59,7 @@ describe('Abuse controls (e2e)', () => {
     const { accessToken, user } = await register('capped');
     await fillQueue(user.id, MAX_PENDING_SUBMISSIONS - 1);
 
-    const diversity = { label: 'E2E', value: 'yes', note: 'abuse e2e' };
+    const diversity = { label: 'E2E', value: 'yes', note: 'abuse e2e', attested: true };
     await request(app.getHttpServer())
       .post('/companies/helia/diversity')
       .set('Authorization', `Bearer ${accessToken}`)

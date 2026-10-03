@@ -1,7 +1,7 @@
 import type { CreateAcquisitionInput } from '@repo/api';
 import { z } from 'zod';
 
-import { urlOrEmpty } from './utils';
+import { attestation, urlOrEmpty } from './utils';
 
 export const acquisitionFormSchema = z.object({
   target: z.string().trim().min(1, 'Target company is required.'),
@@ -9,6 +9,7 @@ export const acquisitionFormSchema = z.object({
   amountUsd: z.string().trim().regex(/^\d*$/, 'Enter a whole number.'),
   rationale: z.string().trim().min(1, 'A rationale is required.'),
   sourceUrl: urlOrEmpty,
+  attested: attestation,
 });
 
 export type AcquisitionFormValues = z.infer<typeof acquisitionFormSchema>;
@@ -19,6 +20,7 @@ export const acquisitionFormDefaults: AcquisitionFormValues = {
   amountUsd: '',
   rationale: '',
   sourceUrl: '',
+  attested: false,
 };
 
 export function toAcquisitionInput(v: AcquisitionFormValues): CreateAcquisitionInput {
@@ -28,5 +30,6 @@ export function toAcquisitionInput(v: AcquisitionFormValues): CreateAcquisitionI
     rationale: v.rationale,
     ...(v.amountUsd ? { amountUsd: Number(v.amountUsd) } : {}),
     ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+    attested: v.attested,
   };
 }

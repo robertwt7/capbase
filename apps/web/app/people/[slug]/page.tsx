@@ -176,6 +176,14 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
           ))}
         </ul>
       </section>
+
+      <footer className="mt-6 border-t border-line pt-7 pb-16 font-mono text-xs text-graphite-500">
+        Is this about you, or is something wrong?{' '}
+        <Link href={`/report/person/${person.slug}`} className="underline underline-offset-[3px] transition-colors hover:text-ink">
+          Report an issue
+        </Link>
+        — including removal requests.
+      </footer>
     </div>
   );
 }

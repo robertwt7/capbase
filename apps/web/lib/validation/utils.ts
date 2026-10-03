@@ -7,6 +7,12 @@ export const urlOrEmpty = z
   .trim()
   .refine((v) => v === '' || /^https?:\/\/\S+\.\S+/.test(v), 'Enter a full URL (https://…).');
 
+/** The contribution attestation checkbox (Terms §4) — the only boolean in a
+    form schema. Must be ticked; the API enforces the same with @Equals(true). */
+export const attestation = z.boolean().refine((v) => v, {
+  message: 'Please confirm you have the right to share this.',
+});
+
 /** Collapse a ZodError into a flat { field: firstMessage } map, keyed by the
     dotted field path. Used by server actions to report validation failures in
     the same shape the client form already understands. */

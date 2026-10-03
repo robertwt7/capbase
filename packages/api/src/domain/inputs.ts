@@ -41,6 +41,8 @@ export interface CreateCompanyInput {
   primarySector?: Sector | null;
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 export interface CreateFundingRoundInput {
@@ -52,6 +54,8 @@ export interface CreateFundingRoundInput {
   investors: RoundInvestor[];
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 export interface CreatePersonInput {
@@ -63,6 +67,8 @@ export interface CreatePersonInput {
   title?: string | null;
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 export interface CreateInvestorInput {
@@ -74,6 +80,8 @@ export interface CreateInvestorInput {
   linkedinUrl?: string | null;
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 export interface CreateAcquisitionInput {
@@ -83,6 +91,8 @@ export interface CreateAcquisitionInput {
   rationale: string;
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 export interface CreateExitInput {
@@ -92,6 +102,8 @@ export interface CreateExitInput {
   detail: string;
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }
 
 export interface CreateDiversityInput {
@@ -100,4 +112,6 @@ export interface CreateDiversityInput {
   note: string;
   /** Primary document backing this contribution. */
   sourceUrl?: string | null;
+  /** The contribution attestation (Terms §4). Must be true; the API rejects anything else. */
+  attested: boolean;
 }

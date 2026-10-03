@@ -258,6 +258,14 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           </EmptyState>
         )}
       </section>
+
+      <footer className="mt-6 border-t border-line pt-7 pb-16 font-mono text-xs text-graphite-500">
+        Something wrong here?{' '}
+        <Link href={`/report/investor/${investor.slug}`} className="underline underline-offset-[3px] transition-colors hover:text-ink">
+          Report an issue
+        </Link>
+        .
+      </footer>
     </div>
   );
 }

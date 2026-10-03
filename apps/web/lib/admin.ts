@@ -6,6 +6,9 @@ import type {
   Paginated,
   PendingSubmissionsResponse,
   ReviewableType,
+  ReportQueueResponse,
+  ReportStatus,
+  ResolveReportInput,
   ReviewStatus,
   UpdateUserInput,
 } from '@repo/api';
@@ -99,6 +102,40 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Ad
   const token = await getToken();
   return apiFetch<AdminUser>(`/admin/users/${id}`, {
     method: 'PATCH',
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    body: JSON.stringify(input),
+    cache: 'no-store',
+  });
+}
+
+// --- Reports ----------------------------------------------------------------
+
+/** The "Report an issue" queue for one status (admin-only, always fresh). */
+export async function getReports(status: ReportStatus = 'OPEN'): Promise<ReportQueueResponse> {
+  const token = await getToken();
+  return apiFetch<ReportQueueResponse>(`/admin/reports?status=${status}`, {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** Close a report without acting on it. */
+export async function dismissReport(id: string, note?: string): Promise<void> {
+  const token = await getToken();
+  await apiFetch(`/admin/reports/${id}/dismiss`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    body: JSON.stringify({ note }),
+    cache: 'no-store',
+  });
+}
+
+/** Close a report with a note and optional link; `suppressPerson` also hides
+ *  the person it is about (person reports only). */
+export async function resolveReport(id: string, input: ResolveReportInput): Promise<void> {
+  const token = await getToken();
+  await apiFetch(`/admin/reports/${id}/resolve`, {
+    method: 'POST',
     headers: { authorization: `Bearer ${token ?? ''}` },
     body: JSON.stringify(input),
     cache: 'no-store',

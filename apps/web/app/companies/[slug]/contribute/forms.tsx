@@ -6,6 +6,7 @@ import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form';
 import { EXIT_TYPES, INVESTOR_TYPES } from '@repo/api';
 
 import {
+  AttestationField,
   Button,
   Card,
   Form,
@@ -193,6 +194,7 @@ export function RoundForm({ slug, companyName, turnstileSiteKey }: ContributionF
         placeholder="Sequoia Capital"
       />
       <SourceUrlField control={form.control} />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }
@@ -257,6 +259,7 @@ export function InvestorForm({ slug, companyName, turnstileSiteKey }: Contributi
         />
       </div>
       <SourceUrlField control={form.control} />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }
@@ -311,6 +314,7 @@ export function PersonForm({ slug, companyName, turnstileSiteKey }: Contribution
         />
       </div>
       <SourceUrlField control={form.control} />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }
@@ -349,6 +353,7 @@ export function AcquisitionForm({ slug, companyName, turnstileSiteKey }: Contrib
         placeholder="Why the deal happened — one or two sentences."
       />
       <SourceUrlField control={form.control} />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }
@@ -393,6 +398,7 @@ export function ExitForm({ slug, companyName, turnstileSiteKey }: ContributionFo
         placeholder="What happened — exchange, acquirer, terms."
       />
       <SourceUrlField control={form.control} />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }
@@ -430,6 +436,7 @@ export function DiversityForm({ slug, companyName, turnstileSiteKey }: Contribut
         placeholder="One line of context — as-of date, methodology."
       />
       <SourceUrlField control={form.control} />
+      <AttestationField control={form.control} />
     </ContributionShell>
   );
 }

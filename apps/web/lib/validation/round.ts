@@ -1,7 +1,7 @@
 import type { CreateFundingRoundInput } from '@repo/api';
 import { z } from 'zod';
 
-import { urlOrEmpty } from './utils';
+import { attestation, urlOrEmpty } from './utils';
 
 export const roundFormSchema = z.object({
   name: z.string().trim().min(1, 'Round name is required.'),
@@ -10,6 +10,7 @@ export const roundFormSchema = z.object({
   postMoneyUsd: z.string().trim().regex(/^\d*$/, 'Enter a whole number.'),
   lead: z.string().trim(),
   sourceUrl: urlOrEmpty,
+  attested: attestation,
 });
 
 export type RoundFormValues = z.infer<typeof roundFormSchema>;
@@ -21,6 +22,7 @@ export const roundFormDefaults: RoundFormValues = {
   postMoneyUsd: '',
   lead: '',
   sourceUrl: '',
+  attested: false,
 };
 
 export function toRoundInput(v: RoundFormValues): CreateFundingRoundInput {
@@ -33,5 +35,6 @@ export function toRoundInput(v: RoundFormValues): CreateFundingRoundInput {
     ...(lead ? { lead } : {}),
     investors: lead ? [{ name: lead, lead: true }] : [],
     ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+    attested: v.attested,
   };
 }

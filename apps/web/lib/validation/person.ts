@@ -1,7 +1,7 @@
 import type { CreatePersonInput } from '@repo/api';
 import { z } from 'zod';
 
-import { urlOrEmpty } from './utils';
+import { attestation, urlOrEmpty } from './utils';
 
 const NEXT_YEAR = new Date().getFullYear() + 1;
 
@@ -17,6 +17,7 @@ export const personFormSchema = z.object({
   prior: z.string().trim(),
   linkedinUrl: urlOrEmpty,
   sourceUrl: urlOrEmpty,
+  attested: attestation,
 });
 
 export type PersonFormValues = z.infer<typeof personFormSchema>;
@@ -29,6 +30,7 @@ export const personFormDefaults: PersonFormValues = {
   prior: '',
   linkedinUrl: '',
   sourceUrl: '',
+  attested: false,
 };
 
 export function toPersonInput(v: PersonFormValues): CreatePersonInput {
@@ -40,5 +42,6 @@ export function toPersonInput(v: PersonFormValues): CreatePersonInput {
     ...(v.prior ? { prior: v.prior } : {}),
     ...(v.linkedinUrl ? { linkedinUrl: v.linkedinUrl } : {}),
     ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+    attested: v.attested,
   };
 }
