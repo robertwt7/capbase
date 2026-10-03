@@ -54,7 +54,7 @@ and `certbot/conf|www` state are gitignored.
 
 ## Prerequisites
 
-- A VPS (these defaults are tuned for **8 GB RAM**) with Docker Engine + the
+- A VPS (these defaults are tuned for **4 GB RAM**, plus 2–4 GB of swap — see [Tuning](#tuning)) with Docker Engine + the
   compose plugin (`docker compose version`).
 - This repo cloned on it (`git clone`, later `git pull` to update) — the box
   builds its own images.
@@ -382,8 +382,8 @@ read-only, not a rendered template. The domain is hardcoded in it.
 
 ## Tuning
 
-Postgres runs with explicit settings (`shared_buffers=2GB`,
-`effective_cache_size=4GB`, `max_connections=50`, SSD-appropriate
+Postgres runs with explicit settings (`shared_buffers=1GB`,
+`effective_cache_size=2GB`, `max_connections=50`, SSD-appropriate
 `random_page_cost`, …) instead of the stock 128 MB defaults, and every container
 has a `mem_limit` and a capped `json-file` log (10 MB × 3).
 
@@ -392,21 +392,34 @@ adapter-based, so `?connection_limit=` is a no-op and the real ceiling is
 `pg.Pool`'s default of **10 per process** — api + jobs + an occasional backfill
 ≈ 30. No PgBouncer needed at this scale.
 
-**All of it is env vars with 8 GB defaults**, so a resize is an edit to
+**All of it is env vars with 4 GB defaults**, so a resize is an edit to
 `infra/env/all.env`, never a compose edit:
 
 | Knob | Default | Rule after a resize |
 | --- | --- | --- |
-| `PG_SHARED_BUFFERS` | `2GB` | ≈ 25% of RAM |
-| `PG_EFFECTIVE_CACHE_SIZE` | `4GB` | ≈ 50% of RAM |
-| `PG_MEM_LIMIT` | `3g` | comfortably above `shared_buffers` |
-| `API_MEM_LIMIT` / `WEB_MEM_LIMIT` | `768m` | — |
-| `JOBS_MEM_LIMIT` | `1536m` | highest: ADV unzips multi-MB bulk files |
+| `PG_SHARED_BUFFERS` | `1GB` | ≈ 25% of RAM |
+| `PG_EFFECTIVE_CACHE_SIZE` | `2GB` | ≈ 50% of RAM |
+| `PG_MEM_LIMIT` | `1536m` | comfortably above `shared_buffers` |
+| `API_MEM_LIMIT` / `WEB_MEM_LIMIT` | `512m` | — |
+| `JOBS_MEM_LIMIT` | `1g` | highest: ADV unzips multi-MB bulk files |
 | `GLITCHTIP_MEM_LIMIT` | `640m` | only if you run GlitchTip (+128 MB Valkey) |
 
-Ceilings total ≈ 6.3 GB on an 8 GB box — these are limits, not reservations, and
-steady state sits far below. If an on-box `next build` gets OOM-killed during a
-deploy, add 2–4 GB of swap rather than lowering the Postgres limit.
+Ceilings total ≈ 3.8 GB on a 4 GB box — these are limits, not reservations, and
+steady state sits far below. GlitchTip (+≈ 0.8 GB with Valkey) does not fit
+alongside them at full ceiling on 4 GB: run it only with swap, or on a bigger box.
+**Add swap before the first `make deploy-all`** — an on-box `next build` can use
+1.5–2 GB on its own, and Vultr images ship with none:
+
+```sh
+fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf && sysctl --system
+```
+
+Prefer swap over lowering the Postgres limit. On an 8 GB box, restore the old
+defaults: `PG_SHARED_BUFFERS=2GB`, `PG_EFFECTIVE_CACHE_SIZE=4GB`,
+`PG_MAINTENANCE_WORK_MEM=512MB`, `PG_WORK_MEM=16MB`, `PG_MEM_LIMIT=3g`,
+`API_MEM_LIMIT`/`WEB_MEM_LIMIT=768m`, `JOBS_MEM_LIMIT=1536m`.
 
 ## Day-2 operations
 

@@ -23,19 +23,19 @@ services:
       - '${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - capbase-pgdata:/var/lib/postgresql/data
-    # Sized for an 8 GB box; override in the env file after a resize.
+    # Sized for a 4 GB box; override in the env file after a resize.
     shm_size: ${PG_SHM_SIZE:-256mb}
-    mem_limit: ${PG_MEM_LIMIT:-3g}
+    mem_limit: ${PG_MEM_LIMIT:-1536m}
     command:
       - postgres
       - -c
-      - shared_buffers=${PG_SHARED_BUFFERS:-2GB} # ~25% RAM
+      - shared_buffers=${PG_SHARED_BUFFERS:-1GB} # ~25% RAM
       - -c
-      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-4GB} # ~50% RAM
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-2GB} # ~50% RAM
       - -c
-      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-512MB}
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}
       - -c
-      - work_mem=${PG_WORK_MEM:-16MB}
+      - work_mem=${PG_WORK_MEM:-8MB}
       # 50 not 100: pg.Pool defaults to max=10/process and we run at most
       # api + jobs + one backfill ≈ 30.
       - -c

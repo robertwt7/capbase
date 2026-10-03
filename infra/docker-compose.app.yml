@@ -5,7 +5,7 @@
 # ⚠️ DATABASE_URL must point at the DB VPS BEFORE `make deploy-app` — see README.
 #
 # Every service caps its json-file logs (unbounded logs are how a single VPS
-# fills its disk) and carries a mem_limit ceiling sized for an 8 GB box.
+# fills its disk) and carries a mem_limit ceiling sized for a 4 GB box.
 x-logging: &default-logging
   driver: json-file
   options:
@@ -23,7 +23,7 @@ services:
     container_name: capbase-api
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${API_MEM_LIMIT:-768m}
+    mem_limit: ${API_MEM_LIMIT:-512m}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your env file}
@@ -56,7 +56,7 @@ services:
     container_name: capbase-web
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${WEB_MEM_LIMIT:-768m}
+    mem_limit: ${WEB_MEM_LIMIT:-512m}
     environment:
       API_URL: http://api:3000
       # Canonical origin for metadata/sitemap/robots/JSON-LD; defaults to the
@@ -93,7 +93,7 @@ services:
     logging: *default-logging
     # The highest ceiling: the ADV ingest unzips + parses multi-MB bulk files
     # and the Wikidata sweep buffers large SPARQL results.
-    mem_limit: ${JOBS_MEM_LIMIT:-1536m}
+    mem_limit: ${JOBS_MEM_LIMIT:-1g}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-capbase-ingest (contact@example.com)}

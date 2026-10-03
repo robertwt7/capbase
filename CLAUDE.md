@@ -473,7 +473,7 @@ demo data. Use the `Makefile`: `make up` (prod stack), `make dev` (local dev ser
 two-box topology still works but is an appendix. The runbook is **`infra/README.md`**;
 `make` detects the topology from whether `infra/env/app.env` exists, so `deploy-ps` /
 `deploy-logs` / `deploy-down` / `deploy-seed` cover Postgres too on one box. Postgres
-binds `127.0.0.1` only (remote psql via `make db-tunnel`), is tuned for 8 GB via env
+binds `127.0.0.1` only (remote psql via `make db-tunnel`), is tuned for 4 GB (plus swap) via env
 vars, and every container has a `mem_limit` + capped logs. nginx serves a **static**
 `infra/nginx/conf.d/capbase.conf` (the `${DOMAIN}` template is gone; the domain is
 hardcoded and `deploy-tls` enforces that it matches `DOMAIN`). Key targets:

@@ -426,7 +426,7 @@ SELECT count(*) FILTER (WHERE "vintageYear" IS NOT NULL), count(*) FROM "Fund";
   pole is the 124,000 round upserts, not the download.
 - **The SBIR file is never buffered.** It is ~91 MB, 55 of its records span more
   than one physical line (so a line split is wrong), and `JOBS_MEM_LIMIT` defaults
-  to `1536m`. `util/csv.ts`'s `createCsvParser` streams it and the source
+  to `1g`. `util/csv.ts`'s `createCsvParser` streams it and the source
   aggregates per firm as rows arrive; a full run completes under
   `--max-old-space-size=512`.
 
