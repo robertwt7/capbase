@@ -9,7 +9,7 @@
 # script writes the new secret into the env file first, then runs it.
 #
 # After a `make deploy-restore` the production admin is whatever your LOCAL
-# admin was (e.g. admin@capbase.dev) — pass ADMIN_EMAIL to match. If it's wrong,
+# admin was — pass ADMIN_EMAIL if it isn't admin@capbase.fyi. If it's wrong,
 # the rotation lists the ADMIN emails it actually found.
 set -euo pipefail
 

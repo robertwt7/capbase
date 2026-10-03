@@ -107,9 +107,15 @@ don't exist yet — expected; `deploy-tls` fixes it.)
 **2. Back on your laptop — ship the data:**
 
 ```sh
-make db-dump                        # → backups/capbase-<utc-stamp>.dump (~2.5 MB)
-make deploy-restore FILE=backups/capbase-….dump VPS=user@host CONFIRM=yes
+make db-dump-prod                   # → backups/capbase-prod-<utc-stamp>.dump
+make deploy-restore FILE=backups/capbase-prod-….dump VPS=user@host CONFIRM=yes
 ```
+
+`db-dump-prod`, not `db-dump`: your local database also holds the demo seed
+companies (`helia`, `gridpoint`, …), e2e test accounts and whatever the e2e suite
+approved onto them. It copies the database into a scratch DB, strips those
+(`scripts/sql/prod-cleanup.sql`), prints before/after counts and the accounts
+that will ship, and dumps the copy. Your local DB is never modified.
 
 The dump is streamed over SSH into the VPS's own Postgres container, so the
 loopback binding is not in the way and no port needs opening. It is
@@ -118,18 +124,18 @@ loopback binding is not in the way and no port needs opening. It is
 **3. Rotate the admin password — MANDATORY, not hygiene:**
 
 ```sh
-make rotate-admin-password VPS=user@host ADMIN_EMAIL=admin@capbase.dev
+make rotate-admin-password VPS=user@host
 ```
 
 **Why this is not optional:** the restore replaced the `User` table with *your
 local users*, including your local admin's password hash. Until you rotate,
 production's admin login is whatever your dev box used.
 
-**Why `ADMIN_EMAIL=` matters:** the admin that came across is
-`admin@capbase.dev` (your local one), **not** the `admin@capbase.fyi` default.
-Running the rotation without it fails on a missing record. If you get the email
-wrong, the script lists the `ADMIN` emails it actually found — `deploy-restore`
-also prints the full user table for exactly this reason.
+**Which account it rotates:** `ADMIN_EMAIL` from `infra/env/all.env` (default
+`admin@capbase.fyi`). The admin that came across is your *local* one, so keep
+the local admin on `admin@capbase.fyi` and the default just works. If they
+differ, pass `ADMIN_EMAIL=`; on a miss the script lists the `ADMIN` emails it
+actually found, and `deploy-restore` prints the full user table too.
 
 **4. Turn on backups:**
 
@@ -458,7 +464,7 @@ reloads every 6h.
 - **`make deploy-seed` refuses to run** — `ADMIN_PASSWORD` is unset, still
   `admin12345`, or under 16 characters. Run `make deploy-secrets`.
 - **`rotate-admin-password` says "No user with email …"** — after a Flow A
-  restore the admin is your *local* one (`admin@capbase.dev`). The error lists
+  restore the admin is your *local* one, whatever its email was. The error lists
   every `ADMIN` email in the database; re-run with `ADMIN_EMAIL=` set to one.
 - **Cert issuance fails** (`deploy-tls`): the A record must point at this VPS and
   80/443 must be reachable *before* running it. Check `dig +short capbase.fyi`

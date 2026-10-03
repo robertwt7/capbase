@@ -17,7 +17,7 @@ async function main() {
     const target = await prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (!target) {
       // Restoring a local dump brings that machine's users across, so the admin
-      // email on production is whatever it was locally (e.g. admin@capbase.dev).
+      // email on production is whatever it was locally (not necessarily ADMIN_EMAIL's).
       const admins = await prisma.user.findMany({
         where: { role: 'ADMIN' },
         select: { email: true },

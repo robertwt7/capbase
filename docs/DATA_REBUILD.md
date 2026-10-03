@@ -323,12 +323,12 @@ about a minute instead of hours of throttled SEC requests, and it guarantees pro
 matches exactly what you have been looking at locally.
 
 ```bash
-make db-dump                                    # → backups/capbase-<utc-stamp>.dump (~2.5 MB)
+make db-dump-prod                               # demo + e2e data stripped, local DB untouched
 make deploy-restore \
-  FILE=backups/capbase-20260802-225820.dump \
+  FILE=backups/capbase-prod-20261003-032450.dump \
   VPS=user@host \
   CONFIRM=yes
-make rotate-admin-password VPS=user@host ADMIN_EMAIL=admin@capbase.dev   # ← NOT optional
+make rotate-admin-password VPS=user@host   # ← NOT optional
 ```
 
 `deploy-restore` streams the dump over SSH into the VPS's **own** Postgres
@@ -346,9 +346,10 @@ outside — which is also why `make db-restore-remote` (it connects to a
   accounts. It refuses to run without `CONFIRM=yes`.
 - **Rotating the admin password afterwards is mandatory.** The dump carries your
   local `User` rows, so production's admin login becomes whatever your dev box
-  used — and the admin is `admin@capbase.dev`, not the `admin@capbase.fyi`
-  default, so `ADMIN_EMAIL=` is required. `deploy-restore` prints the user table
-  it just installed to make this impossible to miss.
+  used. It rotates `ADMIN_EMAIL` (default `admin@capbase.fyi`), which is the
+  local admin's email too — pass `ADMIN_EMAIL=` only if yours differs.
+  `deploy-restore` prints the user table it just installed to make this
+  impossible to miss.
 - **No seeding is needed.** `SeedHistory` came across in the dump, so
   `make deploy-seed` would skip every phase anyway.
 - `DATA_ONLY=1 make db-dump` produces a rows-only dump (no schema, no migration
