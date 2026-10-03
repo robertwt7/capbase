@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 
 import { ConsentBanner } from '@/components/ConsentBanner';
+import { ErrorTracking } from '@/components/ErrorTracking';
 import { SiteFooter } from '@/components/SiteFooter';
 import { SiteHeader } from '@/components/SiteHeader';
 import { SITE_NAME, SITE_URL } from '@/lib/site';
@@ -70,6 +71,7 @@ export default function RootLayout({
         </main>
         <SiteFooter showCookiePreferences={Boolean(gaId)} />
         <ConsentBanner gaId={gaId} />
+        <ErrorTracking dsn={process.env.SENTRY_DSN} release={process.env.GIT_SHA} />
       </body>
     </html>
   );

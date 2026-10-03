@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+import { reportClientError } from '@/lib/sentry-client';
+
 import { Button, EmptyState, Eyebrow, PageContainer } from '@/components/ui';
 
 export default function RouteError({
@@ -13,6 +15,7 @@ export default function RouteError({
 }) {
   useEffect(() => {
     console.error(error);
+    reportClientError(error);
   }, [error]);
 
   return (

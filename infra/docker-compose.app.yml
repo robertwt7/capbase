@@ -32,6 +32,9 @@ services:
       SITE_URL: ${SITE_URL:-https://${DOMAIN:?set DOMAIN in your env file}}
       # Cloudflare Turnstile; empty skips the bot check on register/contribute.
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      # GlitchTip project DSN (errors.capbase.fyi); empty disables reporting.
+      SENTRY_DSN: ${API_SENTRY_DSN:-}
+      GIT_SHA: ${GIT_SHA:-}
     # Internal only — the browser never hits the API (API_URL is server-side).
     # Uncomment to expose on localhost for debugging:
     # ports: ['127.0.0.1:3000:3000']
@@ -61,6 +64,10 @@ services:
       NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
       # Turnstile site key — read server-side per request; empty hides the widget.
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      # GlitchTip project DSN, used server-side and handed to the browser SDK
+      # at runtime (a DSN is public by design); empty disables reporting.
+      SENTRY_DSN: ${WEB_SENTRY_DSN:-}
+      GIT_SHA: ${GIT_SHA:-}
     # No published port — nginx is the only public entrypoint.
     depends_on:
       api:
@@ -83,6 +90,9 @@ services:
       CRON_SCHEDULE: ${CRON_SCHEDULE:-0 6 * * *}
       INGEST_ON_BOOT: ${INGEST_ON_BOOT:-false}
       INGEST_LIMIT: ${INGEST_LIMIT:-50}
+      # Failed ingests (cron and manual backfills) are reported here.
+      SENTRY_DSN: ${JOBS_SENTRY_DSN:-}
+      GIT_SHA: ${GIT_SHA:-}
     depends_on:
       api:
         condition: service_healthy

@@ -20,6 +20,11 @@ export function validateEnv(env: Record<string, unknown>): Record<string, unknow
     errors.push('JWT_SECRET is still the .env.example placeholder');
   }
 
+  const dsn = str('SENTRY_DSN');
+  if (dsn && !/^https?:\/\/[^@\s]+@[^/\s]+\/\d+$/.test(dsn)) {
+    errors.push('SENTRY_DSN must look like https://<key>@<host>/<project-id>');
+  }
+
   const port = str('PORT');
   if (port && !/^\d+$/.test(port)) errors.push(`PORT must be a number, got "${port}"`);
 

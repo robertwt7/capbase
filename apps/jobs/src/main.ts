@@ -1,3 +1,6 @@
+// Must stay the first import — see instrument.ts.
+import './instrument';
+
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 

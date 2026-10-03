@@ -43,6 +43,8 @@ Files here:
 | `docker-compose.all.yml` | single-VPS override: api/jobs wait for the local postgres |
 | `env/*.env.example` | commented env templates — copy to `*.env` and fill in |
 | `nginx/conf.d/capbase.conf` | the vhost — **static**, domain hardcoded (no templating) |
+| `docker-compose.glitchtip.yml` | optional overlay: self-hosted GlitchTip error tracking |
+| `nginx/conf.d/glitchtip.conf` | the `errors.capbase.fyi` vhost (boots fine before GlitchTip runs) |
 | `certbot/init-letsencrypt.sh` | one-time TLS bootstrap (`make deploy-tls`) |
 | `backup/recipients.txt.example` | where the age **public** key goes on the VPS |
 
@@ -217,6 +219,72 @@ backup, so every run proves the dump restores before it is kept.
   safe the day you have one — uncomment a `BACKUP_UPLOAD_CMD` in
   `infra/env/all.env`. **Until then, a dead VPS takes its backups with it.**
 
+## Error tracking & uptime
+
+Two separate systems, on purpose: **GlitchTip** (self-hosted, Sentry protocol)
+collects errors from inside the apps, and an **external uptime monitor** notices
+when the box itself is gone — which GlitchTip, living on that box, never can.
+
+### GlitchTip (errors.capbase.fyi)
+
+The apps carry the Sentry SDKs (`@sentry/nestjs` in api + jobs, `@sentry/nextjs`
+in web). Each is a **no-op until its DSN is set**, so this whole section is
+optional and can be done after launch.
+
+What gets reported: api 5xx (never 4xx — a 404 is the API working), every
+server-side render/route/action error in web plus errors the browser hits, and
+every failed ingest (the cron *and* manual `ingest-prod` backfills).
+
+```sh
+# once — needs the main stack running
+make deploy-glitchtip-init
+```
+
+That script is idempotent. It writes `GLITCHTIP_DB_PASSWORD` /
+`GLITCHTIP_SECRET_KEY` (and `GLITCHTIP_EMAIL_URL` from `RESEND_API_KEY`, so alerts
+go out through Resend's SMTP relay) into `infra/env/all.env`, creates a
+`glitchtip` role + database on the existing Postgres, boots GlitchTip (it runs its
+own migrations), and prompts for the dashboard account. Sign-ups are disabled for
+everyone else. Then:
+
+1. **DNS + cert** — add an `errors` A record pointing at the VPS, and reissue the
+   cert with both names (one lineage, both vhosts use it):
+   ```sh
+   CERT_DOMAINS='capbase.fyi errors.capbase.fyi' FORCE=1 make deploy-tls
+   ```
+2. Sign in at `https://errors.capbase.fyi`, create an organisation and three
+   projects: **web**, **api**, **jobs**.
+3. Paste each project's DSN into `infra/env/all.env` as `WEB_SENTRY_DSN`,
+   `API_SENTRY_DSN`, `JOBS_SENTRY_DSN`, then `make deploy-all`.
+4. In each project, add an alert rule that emails you on a new issue.
+5. Prove it end to end (the plan's manual check): stop the API's database access
+   briefly or hit a broken page and watch the event land in each project.
+
+Day-2: `make deploy-glitchtip` after a pull or version bump,
+`make deploy-glitchtip-logs` to tail it. Footprint: one all-in-one container
+(web + worker, ~170 MB idle, capped at `GLITCHTIP_MEM_LIMIT=640m`) plus a 128 MB
+Valkey, and a handful of Postgres connections — well inside `max_connections=50`.
+Events are kept 30 days (`GLITCHTIP_RETENTION_DAYS`). Its database is **not** in
+the nightly dump; error events are disposable.
+
+The CSP's `connect-src` already allows `https://errors.capbase.fyi` for the
+browser SDK.
+
+### External uptime monitor
+
+Use any free external monitor — UptimeRobot or Better Stack both work — with two
+HTTP checks, every 5 minutes, alerting by email (and push, if you like):
+
+| Check | URL | Healthy when |
+| --- | --- | --- |
+| Site | `https://capbase.fyi/` | HTTP 200 |
+| Web + API + DB | `https://capbase.fyi/api/health` | HTTP 200 and body contains `"ok":true` |
+
+`/api/health` is a route on the web container that calls the API's DB-backed
+`/health` — so one check covers nginx, web, api and Postgres together. Stop the
+api container once (`docker stop capbase-api`) to watch the alert fire, then
+start it again.
+
 ## Credentials
 
 Two different secrets, often confused:
@@ -282,6 +350,7 @@ adapter-based, so `?connection_limit=` is a no-op and the real ceiling is
 | `PG_MEM_LIMIT` | `3g` | comfortably above `shared_buffers` |
 | `API_MEM_LIMIT` / `WEB_MEM_LIMIT` | `768m` | — |
 | `JOBS_MEM_LIMIT` | `1536m` | highest: ADV unzips multi-MB bulk files |
+| `GLITCHTIP_MEM_LIMIT` | `640m` | only if you run GlitchTip (+128 MB Valkey) |
 
 Ceilings total ≈ 6.3 GB on an 8 GB box — these are limits, not reservations, and
 steady state sits far below. If an on-box `next build` gets OOM-killed during a

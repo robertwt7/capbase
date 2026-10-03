@@ -1,0 +1,69 @@
+# GlitchTip — self-hosted error tracking (Sentry protocol) at errors.capbase.fyi.
+# An overlay on the deployed stack, same compose project (`-p capbase`), so it
+# shares the network: nginx reaches `glitchtip`, GlitchTip reaches `postgres`.
+#
+#   make deploy-glitchtip-init   # once: database, user, secrets, first boot
+#   make deploy-glitchtip        # (re)start after a pull / version bump
+#
+# Its database lives on the main Postgres (a `glitchtip` db + user created by
+# the init target), so the nightly dump does NOT include it — error events are
+# disposable, and 30 days of them is all we keep anyway.
+#
+# Single VPS only: on the split topology there is no `postgres` service on the
+# app box; point GLITCHTIP_DATABASE_URL at the DB VPS instead.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  glitchtip:
+    # Pinned minor: GlitchTip majors change the schema; read their blog first.
+    image: glitchtip/glitchtip:6.2
+    container_name: capbase-glitchtip
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: ${GLITCHTIP_MEM_LIMIT:-640m}
+    environment:
+      # all_in_one = web + background worker in one process; runs migrations on boot.
+      SERVER_ROLE: all_in_one
+      DATABASE_URL: ${GLITCHTIP_DATABASE_URL:-postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:?run make deploy-glitchtip-init}@postgres:5432/glitchtip}
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:?run make deploy-glitchtip-init}
+      VALKEY_URL: redis://glitchtip-valkey:6379
+      GLITCHTIP_DOMAIN: https://${GLITCHTIP_HOST:-errors.capbase.fyi}
+      # Alert emails go out through Resend's SMTP relay (user is literally
+      # `resend`, password is the API key). Empty key → printed to the log.
+      EMAIL_URL: ${GLITCHTIP_EMAIL_URL:-consolemail://}
+      DEFAULT_FROM_EMAIL: ${GLITCHTIP_FROM_EMAIL:-errors@capbase.fyi}
+      # The first account is created with `createsuperuser` by the init target;
+      # nobody else gets to sign up.
+      ENABLE_USER_REGISTRATION: 'False'
+      ENABLE_ADMIN: 'False'
+      GLITCHTIP_RETENTION_DAYS: ${GLITCHTIP_RETENTION_DAYS:-30}
+      # We only want errors. Uptime is an EXTERNAL monitor on purpose (a box
+      # can't report its own outage), and log ingestion would just cost RAM.
+      GLITCHTIP_ENABLE_UPTIME: 'False'
+      GLITCHTIP_ENABLE_LOGS: 'False'
+    depends_on:
+      - glitchtip-valkey
+    volumes:
+      - glitchtip-uploads:/code/uploads
+    healthcheck:
+      test: ['CMD-SHELL', 'python -c "import urllib.request;urllib.request.urlopen(\"http://localhost:8000/_health/\")"']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  glitchtip-valkey:
+    image: valkey/valkey:8-alpine
+    container_name: capbase-glitchtip-valkey
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 128m
+    # A cache and task queue, nothing durable: no persistence, bounded memory.
+    command: ['valkey-server', '--save', '', '--appendonly', 'no', '--maxmemory', '96mb', '--maxmemory-policy', 'allkeys-lru']
+
+volumes:
+  glitchtip-uploads:

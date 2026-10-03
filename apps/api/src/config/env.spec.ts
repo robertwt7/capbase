@@ -27,4 +27,10 @@ describe('validateEnv', () => {
   it('rejects a non-numeric PORT', () => {
     expect(() => validateEnv({ ...base, PORT: 'abc' })).toThrow(/PORT must be a number/);
   });
+
+  it('accepts a well-formed SENTRY_DSN and rejects a malformed one', () => {
+    const ok = { ...base, SENTRY_DSN: 'https://abc123@errors.capbase.fyi/2' };
+    expect(validateEnv(ok)).toBe(ok);
+    expect(() => validateEnv({ ...base, SENTRY_DSN: 'errors.capbase.fyi' })).toThrow(/SENTRY_DSN/);
+  });
 });

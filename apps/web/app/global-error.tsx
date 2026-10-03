@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+import { reportClientError } from '@/lib/sentry-client';
+
 import './globals.css';
 
 // Replaces the root layout when the layout itself throws, so it renders its
@@ -15,6 +17,7 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error(error);
+    reportClientError(error);
   }, [error]);
 
   return (

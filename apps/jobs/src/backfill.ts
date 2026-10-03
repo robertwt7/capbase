@@ -1,5 +1,9 @@
+// Must stay the first import — see instrument.ts.
+import './instrument';
+
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import * as Sentry from '@sentry/nestjs';
 
 import { AppModule } from './app.module';
 import { IngestService } from './ingest/ingest.service';
@@ -29,4 +33,13 @@ async function main() {
   }
 }
 
-void main().then(() => process.exit(0));
+main().then(
+  () => process.exit(0),
+  async (err: unknown) => {
+    // A failed manual backfill is as worth knowing about as a failed cron run.
+    new Logger('Backfill').error(`Backfill failed: ${String(err)}`);
+    Sentry.captureException(err, { tags: { ingest: 'backfill' } });
+    await Sentry.flush(5000);
+    process.exit(1);
+  },
+);

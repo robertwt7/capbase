@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import * as Sentry from '@sentry/nestjs';
 import { CronJob } from 'cron';
 
 import { IngestService } from './ingest.service';
@@ -52,6 +53,8 @@ export class IngestScheduler implements OnApplicationBootstrap {
       await this.ingest.run({ days, limit, sources });
     } catch (err) {
       this.logger.error(`Scheduled ingest failed: ${String(err)}`);
+      // The cron swallows the error to stay alive, so report it explicitly.
+      Sentry.captureException(err, { tags: { ingest: 'scheduled' } });
     } finally {
       this.running = false;
     }

@@ -344,6 +344,25 @@ deploy-doctor: ## [VPS] Report disk, volume size, log sizes, container health, b
 	@scripts/deploy-doctor.sh
 
 # ---------------------------------------------------------------------------
+# Error tracking: self-hosted GlitchTip at errors.capbase.fyi (single VPS).
+# An overlay on the same compose project, so `deploy-all` leaves it running.
+# ---------------------------------------------------------------------------
+
+COMPOSE_GLITCHTIP := $(COMPOSE_ALL) -f infra/docker-compose.glitchtip.yml
+
+.PHONY: deploy-glitchtip-init
+deploy-glitchtip-init: ## [1 VPS] One-time GlitchTip setup: secrets, database, first boot, admin account
+	@ENVF=infra/env/all.env scripts/glitchtip-init.sh
+
+.PHONY: deploy-glitchtip
+deploy-glitchtip: ## [1 VPS] (Re)start GlitchTip after a pull or version bump
+	$(COMPOSE_GLITCHTIP) up -d glitchtip glitchtip-valkey
+
+.PHONY: deploy-glitchtip-logs
+deploy-glitchtip-logs: ## [1 VPS] Tail GlitchTip logs
+	$(COMPOSE_GLITCHTIP) logs -f glitchtip
+
+# ---------------------------------------------------------------------------
 # Backups (age public-key encryption; the identity never touches the VPS)
 # ---------------------------------------------------------------------------
 
