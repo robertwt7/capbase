@@ -39,7 +39,9 @@ services:
     logging: *default-logging
     environment:
       <<: *db-url
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      # The image runs NODE_ENV=production, so the api's env check demands 32+
+      # chars. This default is for THIS local stack only — prod uses deploy-secrets.
+      JWT_SECRET: ${JWT_SECRET:-local-docker-stack-jwt-secret-not-for-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}

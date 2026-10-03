@@ -88,6 +88,10 @@ db-verify-fresh: ## Prove a prod-style rebuild works: migrate + seed a throwaway
 db-dump: ## Dump the local DB to backups/ (DATA_ONLY=1 for rows without schema)
 	@scripts/db-dump.sh
 
+.PHONY: db-dump-prod
+db-dump-prod: ## Dump a PRODUCTION-READY copy of the local DB: demo + e2e test data stripped (local DB untouched)
+	@scripts/db-dump-prod.sh
+
 .PHONY: db-restore
 db-restore: ## DESTRUCTIVE: recreate the LOCAL db from a dump (FILE=backups/….dump)
 	@scripts/db-restore.sh
