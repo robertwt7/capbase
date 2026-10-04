@@ -5,11 +5,13 @@ plain-text body. The API reads them at boot (`../templates.ts`), fills the place
 both bodies through Resend. **These files are the source of truth** — there are no Resend hosted
 templates and nothing to copy into the Resend dashboard.
 
-| Template         | Sent when                                                  | Placeholders          |
-| ---------------- | ---------------------------------------------------------- | --------------------- |
-| `verify-email`   | on register, on resend, and after an email change          | `NAME`, `LINK`        |
-| `password-reset` | on forgot-password                                         | `NAME`, `LINK`        |
-| `welcome`        | once, when an account first verifies its email             | `NAME`, `SITE_URL`    |
+| Template              | Sent when                                                  | Placeholders                        |
+| --------------------- | ---------------------------------------------------------- | ----------------------------------- |
+| `verify-email`        | on register, on resend, and after an email change          | `NAME`, `LINK`                      |
+| `password-reset`      | on forgot-password                                         | `NAME`, `LINK`                      |
+| `welcome`             | once, when an account first verifies its email             | `NAME`, `SITE_URL`                  |
+| `submission-approved` | a moderator publishes a contribution                       | `NAME`, `SUMMARY`, `LINK`           |
+| `submission-rejected` | a moderator turns one down (`REASON` = note or stock line) | `NAME`, `SUMMARY`, `REASON`, `LINK` |
 
 Subjects live in the `TEMPLATES` registry in `../templates.ts`, not in the files.
 

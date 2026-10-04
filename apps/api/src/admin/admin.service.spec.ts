@@ -1,7 +1,9 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
 import { AdminService } from './admin.service';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { DEFAULT_REJECTION_REASON } from './submission-notice';
 
 /** The Company row applyProposal reads for its before-state. */
 function dbCompany(overrides: Record<string, unknown> = {}) {
@@ -61,7 +63,16 @@ function makePrisma(
   };
   const prisma = {
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
-    changeProposal: { update: jest.fn(async () => ({})) },
+    changeProposal: {
+      update: jest.fn(async () => ({})),
+      // The pre-decision read the contributor email is built from.
+      findUnique: jest.fn(async (): Promise<Record<string, unknown> | null> => ({
+        moderationStatus: 'PENDING',
+        changes,
+        company: { slug: 'helia', name: 'Helia' },
+        submittedBy: null,
+      })),
+    },
     company: { update: jest.fn(async () => ({})) },
   };
   return { prisma, tx };
@@ -76,7 +87,10 @@ function makePrisma(
 function makeRowPrisma(
   row: Record<string, unknown>,
   existingPerson: Record<string, unknown> | null = null,
+  /** What the pre-decision read returns for the contributor email; null = no email. */
+  lookup: Record<string, unknown> | null = null,
 ) {
+  const findUnique = jest.fn(async (): Promise<Record<string, unknown> | null> => lookup);
   const tx = {
     company: { update: jest.fn(async () => row) },
     fundingRound: { update: jest.fn(async () => row) },
@@ -101,8 +115,26 @@ function makeRowPrisma(
   };
   const prisma = {
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    company: { findUnique },
+    fundingRound: { findUnique },
+    personRole: { findUnique },
+    investorHolding: { findUnique },
+    acquisitionDeal: { findUnique },
+    exitEvent: { findUnique },
+    diversitySignal: { findUnique },
   };
   return { prisma, tx };
+}
+
+function makeMail() {
+  return {
+    sendSubmissionApprovedEmail: jest.fn(async () => undefined),
+    sendSubmissionRejectedEmail: jest.fn(async () => undefined),
+  };
+}
+
+function newService(prisma: unknown, mail = makeMail()) {
+  return new AdminService(prisma as PrismaService, mail as unknown as MailService);
 }
 
 function revisionData(call: unknown): Record<string, unknown> {
@@ -116,7 +148,7 @@ describe('AdminService.moderate (proposal)', () => {
       totalRaisedUsd: 5000,
       lastValuationUsd: null,
     });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     const result = await service.moderate('proposal', 'p1', 'APPROVED', 'admin1');
 
@@ -138,7 +170,7 @@ describe('AdminService.moderate (proposal)', () => {
 
   it('records one revision per changed field, with the pre-change value', async () => {
     const { prisma, tx } = makePrisma({ hq: 'Berlin', headcount: 42 });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('proposal', 'p1', 'APPROVED', 'admin1');
 
@@ -169,7 +201,7 @@ describe('AdminService.moderate (proposal)', () => {
       totalRaisedUsd: 5000,
       lastValuationUsd: null,
     });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('proposal', 'p1', 'APPROVED', 'admin1');
 
@@ -190,7 +222,7 @@ describe('AdminService.moderate (proposal)', () => {
 
   it('rejecting only flips the proposal and never touches the company or timeline', async () => {
     const { prisma, tx } = makePrisma({ hq: 'Berlin' });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('proposal', 'p1', 'REJECTED', 'admin1');
 
@@ -217,7 +249,7 @@ describe('AdminService.moderate (contributed rows)', () => {
       lead: 'Sequoia Capital',
       investors: [],
     });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('round', 'r1', 'APPROVED', 'admin1');
 
@@ -246,7 +278,7 @@ describe('AdminService.moderate (contributed rows)', () => {
 
   it('anchors an approved company to its own id', async () => {
     const { prisma, tx } = makeRowPrisma(dbCompany());
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('company', 'c1', 'APPROVED', 'admin1');
 
@@ -270,7 +302,7 @@ describe('AdminService.moderate (contributed rows)', () => {
       linkedinUrl: null,
       investor: { slug: 'sequoia-capital', moderationStatus: 'APPROVED' },
     });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('investor', 'h1', 'APPROVED', 'admin1');
 
@@ -288,7 +320,7 @@ describe('AdminService.moderate (contributed rows)', () => {
     // The same thing approving a holding does for its firm: the contribution
     // becomes reachable from the entity directory, not just the company page.
     const { prisma, tx } = makeRowPrisma({ id: 'x1', companyId: 'c1', name: 'Jane Q. Smith' });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('person', 'x1', 'APPROVED', 'admin1');
 
@@ -306,7 +338,7 @@ describe('AdminService.moderate (contributed rows)', () => {
       { id: 'x1', companyId: 'c1', name: 'JANE  SMITH' },
       { id: 'h-known', suppressedAt: null, mergedIntoId: null },
     );
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('person', 'x1', 'APPROVED', 'admin1');
 
@@ -322,7 +354,7 @@ describe('AdminService.moderate (contributed rows)', () => {
       { id: 'x1', companyId: 'c1', name: 'Jane Smith' },
       { id: 'h-lost', suppressedAt: null, mergedIntoId: 'h-live' },
     );
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('person', 'x1', 'APPROVED', 'admin1');
 
@@ -339,7 +371,7 @@ describe('AdminService.moderate (contributed rows)', () => {
       { id: 'x1', companyId: 'c1', name: 'Jane Smith' },
       { id: 'h-gone', suppressedAt: new Date(), mergedIntoId: null },
     );
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('person', 'x1', 'APPROVED', 'admin1');
 
@@ -356,7 +388,7 @@ describe('AdminService.moderate (contributed rows)', () => {
         companyId: 'c1',
         investorId: 'i1',
       });
-      const service = new AdminService(prisma as unknown as PrismaService);
+      const service = newService(prisma);
 
       await service.moderate(type, 'x1', 'REJECTED', 'admin1');
 
@@ -372,7 +404,7 @@ describe('AdminService.applyProposal (citations)', () => {
       { hq: 'Berlin', headcount: 42 },
       { sourceUrl: 'https://example.com/annual-report' },
     );
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('proposal', 'p1', 'APPROVED', 'admin1');
 
@@ -405,11 +437,161 @@ describe('AdminService.applyProposal (citations)', () => {
 
   it('writes no citation when the proposal cited nothing', async () => {
     const { prisma, tx } = makePrisma({ hq: 'Berlin' });
-    const service = new AdminService(prisma as unknown as PrismaService);
+    const service = newService(prisma);
 
     await service.moderate('proposal', 'p1', 'APPROVED', 'admin1');
 
     expect(tx.source.upsert).not.toHaveBeenCalled();
     expect(tx.citation.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminService.moderate (contributor email)', () => {
+  const contributor = {
+    email: 'ada@example.com',
+    name: 'Ada',
+    role: 'USER',
+    bannedAt: null,
+    emailVerifiedAt: new Date('2026-01-01'),
+  };
+  const round = { id: 'r1', companyId: 'c1', name: 'Series B', date: new Date(), amountUsd: 1n, investors: [] };
+  const pendingRound = (submittedBy: Record<string, unknown> | null = contributor) => ({
+    moderationStatus: 'PENDING',
+    name: 'Series B',
+    company: { slug: 'helia', name: 'Helia' },
+    submittedBy,
+  });
+
+  it('emails the contributor once when their round is approved, after the commit', async () => {
+    const { prisma } = makeRowPrisma(round, null, pendingRound());
+    const mail = makeMail();
+    mail.sendSubmissionApprovedEmail.mockImplementation(async () => {
+      // The decision has already committed by the time mail is attempted.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    await newService(prisma, mail).moderate('round', 'r1', 'APPROVED', 'admin1');
+
+    expect(mail.sendSubmissionApprovedEmail).toHaveBeenCalledTimes(1);
+    expect(mail.sendSubmissionApprovedEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      'Ada',
+      'the Series B round for Helia',
+      '/companies/helia',
+    );
+    expect(mail.sendSubmissionRejectedEmail).not.toHaveBeenCalled();
+  });
+
+  it("quotes the moderator's note in a rejection and links back to the form", async () => {
+    const { prisma } = makeRowPrisma(round, null, pendingRound());
+    const mail = makeMail();
+
+    await newService(prisma, mail).moderate('round', 'r1', 'REJECTED', 'admin1', '  No source.  ');
+
+    expect(mail.sendSubmissionRejectedEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      'Ada',
+      'the Series B round for Helia',
+      'No source.',
+      '/companies/helia/contribute',
+    );
+  });
+
+  it('falls back to a stock reason, and sends a rejected company back to /contribute', async () => {
+    const { prisma } = makeRowPrisma(dbCompany(), null, {
+      moderationStatus: 'PENDING',
+      slug: 'helia',
+      name: 'Helia',
+      submittedBy: contributor,
+    });
+    const mail = makeMail();
+
+    await newService(prisma, mail).moderate('company', 'c1', 'REJECTED', 'admin1', '   ');
+
+    expect(mail.sendSubmissionRejectedEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      'Ada',
+      'a new profile for Helia',
+      DEFAULT_REJECTION_REASON,
+      '/contribute',
+    );
+  });
+
+  it('sends one email for an edit proposal, however many fields it changes', async () => {
+    const { prisma } = makePrisma({ hq: 'Berlin', headcount: 42, totalRaisedUsd: 5000 });
+    prisma.changeProposal.findUnique.mockResolvedValue({
+      moderationStatus: 'PENDING',
+      changes: { hq: 'Berlin', headcount: 42, totalRaisedUsd: 5000 },
+      company: { slug: 'helia', name: 'Helia' },
+      submittedBy: contributor,
+    });
+    const mail = makeMail();
+
+    await newService(prisma, mail).moderate('proposal', 'p1', 'APPROVED', 'admin1');
+
+    expect(mail.sendSubmissionApprovedEmail).toHaveBeenCalledTimes(1);
+    expect(mail.sendSubmissionApprovedEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      'Ada',
+      'an edit to Helia (headquarters, headcount, total raised)',
+      '/companies/helia',
+    );
+  });
+
+  it.each([
+    ['an ingested row (no submitter)', null],
+    ['an admin', { ...contributor, role: 'ADMIN' }],
+    ['a banned user', { ...contributor, bannedAt: new Date() }],
+    ['an unconfirmed address', { ...contributor, emailVerifiedAt: null }],
+  ])('sends nothing for %s', async (_label, submittedBy) => {
+    const { prisma } = makeRowPrisma(round, null, pendingRound(submittedBy));
+    const mail = makeMail();
+
+    await newService(prisma, mail).moderate('round', 'r1', 'APPROVED', 'admin1');
+
+    expect(mail.sendSubmissionApprovedEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing when the decision repeats the current status', async () => {
+    const { prisma } = makeRowPrisma(round, null, {
+      ...pendingRound(),
+      moderationStatus: 'APPROVED',
+    });
+    const mail = makeMail();
+
+    await newService(prisma, mail).moderate('round', 'r1', 'APPROVED', 'admin1');
+
+    expect(mail.sendSubmissionApprovedEmail).not.toHaveBeenCalled();
+  });
+
+  it('still moderates when mail fails, synchronously or asynchronously', async () => {
+    for (const fail of [
+      () => {
+        throw new Error('boom');
+      },
+      () => Promise.reject(new Error('down')),
+    ]) {
+      const { prisma, tx } = makeRowPrisma(round, null, pendingRound());
+      const mail = makeMail();
+      mail.sendSubmissionApprovedEmail.mockImplementation(fail as () => Promise<undefined>);
+
+      await expect(
+        newService(prisma, mail).moderate('round', 'r1', 'APPROVED', 'admin1'),
+      ).resolves.toEqual({ id: 'r1', type: 'round', moderationStatus: 'APPROVED' });
+      expect(tx.fundingRound.update).toHaveBeenCalled();
+    }
+    // Let the rejected promise's catch handler run before the test ends.
+    await new Promise((r) => setImmediate(r));
+  });
+
+  it('sends nothing when the decision fails', async () => {
+    const { prisma, tx } = makeRowPrisma(round, null, pendingRound());
+    tx.fundingRound.update.mockRejectedValue(new Error('gone'));
+    const mail = makeMail();
+
+    await expect(
+      newService(prisma, mail).moderate('round', 'r1', 'APPROVED', 'admin1'),
+    ).rejects.toThrow('not found');
+    expect(mail.sendSubmissionApprovedEmail).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   normalizePersonName,
   type ChangeProposalReview,
@@ -10,6 +10,7 @@ import {
 } from '@repo/api';
 import type { Company as DbCompany, Prisma } from '@repo/db';
 
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   toAcquisition,
@@ -22,6 +23,12 @@ import {
   toPerson,
 } from '../companies/company.mapper';
 import { createRevision, toJsonValue, type RevisableType } from '../provenance/revision.util';
+import {
+  DEFAULT_REJECTION_REASON,
+  loadSubmissionNotice,
+  shouldNotify,
+  type SubmissionNotice,
+} from './submission-notice';
 
 const submittedBy = { select: { id: true, name: true, email: true } } as const;
 
@@ -201,7 +208,12 @@ function kebab(name: string): string {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+  ) {}
 
   async listSubmissions(status: ReviewStatus): Promise<PendingSubmissionsResponse> {
     const where = { moderationStatus: status };
@@ -296,8 +308,14 @@ export class AdminService {
     id: string,
     status: 'APPROVED' | 'REJECTED',
     adminUserId: string,
+    /** The moderator's reason, quoted in a rejection email. Not stored. */
+    note?: string | null,
   ) {
+    let notice: SubmissionNotice | null;
     try {
+      // Read before deciding: the email describes the row, and the prior status
+      // is what tells a real decision from a repeat click.
+      notice = await loadSubmissionNotice(this.prisma, type, id);
       if (type === 'proposal') {
         if (status === 'APPROVED') {
           await this.applyProposal(id, adminUserId);
@@ -313,7 +331,44 @@ export class AdminService {
     } catch {
       throw new NotFoundException(`${type} "${id}" not found`);
     }
+    // Only once the decision has committed — and never awaited, so mail being
+    // slow or down can't hold up, fail or roll back the moderation.
+    if (shouldNotify(notice, status)) this.notifySubmitter(notice, status, note);
     return { id, type, moderationStatus: status };
+  }
+
+  /** Email the contributor about a decision. Never throws; failures are logged
+      (and reported to GlitchTip by MailService). */
+  private notifySubmitter(
+    notice: SubmissionNotice & { submitter: NonNullable<SubmissionNotice['submitter']> },
+    status: 'APPROVED' | 'REJECTED',
+    note: string | null | undefined,
+  ): void {
+    const { email, name } = notice.submitter;
+    const slug = encodeURIComponent(notice.companySlug);
+    try {
+      const sent =
+        status === 'APPROVED'
+          ? this.mail.sendSubmissionApprovedEmail(email, name, notice.summary, `/companies/${slug}`)
+          : this.mail.sendSubmissionRejectedEmail(
+              email,
+              name,
+              notice.summary,
+              note?.trim() || DEFAULT_REJECTION_REASON,
+              // A rejected profile has no page; offer the form it came from.
+              notice.isCompany ? '/contribute' : `/companies/${slug}/contribute`,
+            );
+      sent.catch((err: unknown) => this.logNotifyFailure(err));
+    } catch (err) {
+      this.logNotifyFailure(err);
+    }
+  }
+
+  private logNotifyFailure(err: unknown): void {
+    this.logger.error(
+      'Failed to email a contributor about a moderation decision',
+      err instanceof Error ? err.stack : String(err),
+    );
   }
 
   /** Flip a contributed row's moderation status. An APPROVED row has just

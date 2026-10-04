@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import type { ReviewableType, ReviewStatus } from '@repo/api';
+import { MODERATION_NOTE_MAX, type ReviewableType, type ReviewStatus } from '@repo/api';
 
-import { Badge, Button } from '../../components/ui';
+import { Badge, Button, Textarea } from '../../components/ui';
 import { getSubmissions } from '../../lib/admin';
 import { requireAdmin } from '../../lib/auth';
 import { formatDate } from '../../lib/format';
@@ -154,6 +154,27 @@ export default async function AdminQueue({
               </summary>
               <div className={styles.detailPanel}>
                 <SubmissionDetail item={item} />
+                {item.moderationStatus !== 'REJECTED' ? (
+                  // The row's Reject button sends no reason; this one quotes the
+                  // note in the contributor's email. The note is not stored.
+                  <form
+                    action={moderateAction.bind(null, item.type, item.id, 'REJECTED')}
+                    className="mt-4 flex max-w-xl flex-col gap-2.5 border-t border-line pt-4"
+                  >
+                    <Textarea
+                      name="note"
+                      rows={2}
+                      maxLength={MODERATION_NOTE_MAX}
+                      aria-label="Reason for rejecting"
+                      placeholder="Reason (optional) — emailed to the contributor"
+                    />
+                    <div>
+                      <Button variant="outline" shape="box" size="sm" type="submit">
+                        Reject with reason
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
               </div>
             </details>
           ))}

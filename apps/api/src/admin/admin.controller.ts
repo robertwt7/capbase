@@ -76,8 +76,9 @@ export class AdminController {
     if (!REVIEWABLE_TYPES.includes(type as ReviewableType)) {
       throw new BadRequestException(`Invalid submission type "${type}"`);
     }
-    // The acting admin is recorded on every revision this decision writes.
-    return this.admin.moderate(type as ReviewableType, id, dto.status, user.id);
+    // The acting admin is recorded on every revision this decision writes; the
+    // note only travels in the contributor's rejection email.
+    return this.admin.moderate(type as ReviewableType, id, dto.status, user.id, dto.note);
   }
 
   // --- Merge queue ---------------------------------------------------------

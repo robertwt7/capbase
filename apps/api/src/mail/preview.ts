@@ -15,6 +15,17 @@ const SAMPLES: { [T in TemplateName]: TemplateVars<T> } = {
   'verify-email': { NAME, LINK: `${SITE_URL}/verify-email?token=preview-token` },
   'password-reset': { NAME, LINK: `${SITE_URL}/reset-password?token=preview-token` },
   welcome: { NAME, SITE_URL },
+  'submission-approved': {
+    NAME,
+    SUMMARY: 'the Series B round for Helia',
+    LINK: `${SITE_URL}/companies/helia`,
+  },
+  'submission-rejected': {
+    NAME,
+    SUMMARY: 'an edit to Helia (headquarters, headcount)',
+    REASON: "The linked article doesn't mention the new headquarters.\nA press release or filing would do.",
+    LINK: `${SITE_URL}/companies/helia/contribute`,
+  },
 };
 
 const outDir = resolve(__dirname, '../../.mail-preview');

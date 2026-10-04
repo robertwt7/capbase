@@ -53,7 +53,7 @@ export const EMAIL_UNVERIFIED = 'EMAIL_UNVERIFIED';
 
 /** Most PENDING submissions one account may have in the queue at once. Above
  *  it, contributions answer 429 until a moderator catches up. */
-export const MAX_PENDING_SUBMISSIONS = 30;
+export const MAX_PENDING_SUBMISSIONS = 15;
 
 /** Header carrying a Cloudflare Turnstile token from the web to the API. */
 export const TURNSTILE_HEADER = 'x-turnstile-token';

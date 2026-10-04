@@ -1,0 +1,16 @@
+Hi {{{NAME}}},
+
+Thanks for contributing. A moderator reviewed {{{SUMMARY}}} and decided not to
+publish it.
+
+Moderator's note:
+{{{REASON}}}
+
+You're welcome to submit it again with a source that backs it up:
+
+{{{LINK}}}
+
+You get this email because you contributed to Capbase. Each submission gets one
+email, when a moderator decides on it.
+
+— The Capbase team

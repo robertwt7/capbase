@@ -9,13 +9,22 @@ import { moderateSubmission } from '../../lib/admin';
 import { TOKEN_COOKIE } from '../../lib/auth';
 
 // Server action invoked from the moderation queue's Approve/Reject forms.
-// Bound with (type, id, status) per row; no client JS required.
+// Bound with (type, id, status) per row; no client JS required. The optional
+// `note` field comes from the "Reject with a reason" form in the detail panel
+// and is quoted in the contributor's rejection email.
 export async function moderateAction(
   type: ReviewableType,
   id: string,
   status: 'APPROVED' | 'REJECTED',
+  formData?: FormData,
 ): Promise<void> {
-  await moderateSubmission(type, id, status);
+  const note = formData?.get('note');
+  await moderateSubmission(
+    type,
+    id,
+    status,
+    typeof note === 'string' && note.trim() ? note.trim() : undefined,
+  );
   revalidatePath('/admin');
 }
 

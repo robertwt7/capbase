@@ -19,7 +19,9 @@ describe('email templates', () => {
       expect(out.subject).toBe(TEMPLATES[name].subject);
       expect(out.html).not.toContain('{{{');
       expect(out.text).not.toContain('{{{');
-      expect(out.html).toContain(`<title>${TEMPLATES[name].subject}</title>`);
+      // The subject is escaped like any value (an apostrophe becomes &#39;).
+      const title = fill('{{{S}}}', { S: TEMPLATES[name].subject }, true);
+      expect(out.html).toContain(`<title>${title}</title>`);
     });
   });
 

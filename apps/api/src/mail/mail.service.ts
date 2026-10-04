@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/nestjs';
 import { Resend } from 'resend';
 
 import {
@@ -41,6 +42,33 @@ export class MailService {
     return this.deliver('welcome', to, { NAME: name, SITE_URL: this.siteUrl });
   }
 
+  /** A moderator published a contribution. `path` is site-relative (`/companies/helia`).
+   *  Never throws — mail failure must not undo a moderation decision. */
+  sendSubmissionApprovedEmail(to: string, name: string, summary: string, path: string): Promise<void> {
+    return this.deliver('submission-approved', to, {
+      NAME: name,
+      SUMMARY: summary,
+      LINK: `${this.siteUrl}${path}`,
+    });
+  }
+
+  /** A moderator turned a contribution down. `reason` is the moderator's note, or a
+   *  stock line when they left none. Never throws, like the approval email. */
+  sendSubmissionRejectedEmail(
+    to: string,
+    name: string,
+    summary: string,
+    reason: string,
+    path: string,
+  ): Promise<void> {
+    return this.deliver('submission-rejected', to, {
+      NAME: name,
+      SUMMARY: summary,
+      REASON: reason,
+      LINK: `${this.siteUrl}${path}`,
+    });
+  }
+
   /** Render and send one template. Never throws — mail failure must not fail the request. */
   private async deliver<T extends TemplateName>(
     name: T,
@@ -61,6 +89,11 @@ export class MailService {
       const { error } = await this.resend.emails.send({ from: this.from, to, subject, html, text });
       if (error) {
         this.logger.error(`Resend rejected ${name} email to ${to}: ${error.name} — ${error.message}`);
+        // No recipient in the report: GlitchTip is not where addresses belong.
+        Sentry.captureMessage(`Resend rejected ${name} email: ${error.name} — ${error.message}`, {
+          level: 'error',
+          tags: { mail: name },
+        });
         return;
       }
       this.logger.log(`${name} email sent to ${to}`);
@@ -69,6 +102,7 @@ export class MailService {
         `Failed to send ${name} email to ${to}`,
         err instanceof Error ? err.stack : String(err),
       );
+      Sentry.captureException(err, { tags: { mail: name } });
     }
   }
 }

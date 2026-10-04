@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { MODERATION_NOTE_MAX } from '@repo/api';
 import request from 'supertest';
 
 import { AppModule } from './../src/app.module';
@@ -251,5 +252,33 @@ describe('Submissions & moderation (e2e)', () => {
       .set('Authorization', `Bearer ${userToken}`)
       .expect(200);
     expect(after.body.company.oneLiner).toBe(before.body.company.oneLiner);
+  });
+
+  it('takes an optional rejection reason, capped in length', async () => {
+    const submit = await request(app.getHttpServer())
+      .post('/companies/helia/proposals')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ changes: { oneLiner: 'Rejected-with-reason e2e one-liner' }, attested: true })
+      .expect(201);
+    const path = `/admin/submissions/proposal/${submit.body.id}`;
+
+    await request(app.getHttpServer())
+      .patch(path)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'REJECTED', note: 'x'.repeat(MODERATION_NOTE_MAX + 1) })
+      .expect(400);
+    expect(
+      (await prisma.changeProposal.findUniqueOrThrow({ where: { id: submit.body.id } }))
+        .moderationStatus,
+    ).toBe('PENDING');
+
+    // Mail is off in e2e (no RESEND_API_KEY) or may fail: either way the
+    // decision stands — the contributor email never blocks it.
+    const res = await request(app.getHttpServer())
+      .patch(path)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'REJECTED', note: 'The source does not mention this.' })
+      .expect(200);
+    expect(res.body.moderationStatus).toBe('REJECTED');
   });
 });

@@ -27,17 +27,19 @@ export async function getSubmissions(
   });
 }
 
-/** Approve/reject a single submission. */
+/** Approve/reject a single submission. `note` is a rejection reason, emailed to
+ *  the contributor (never stored). */
 export async function moderateSubmission(
   type: ReviewableType,
   id: string,
   status: 'APPROVED' | 'REJECTED',
+  note?: string,
 ): Promise<void> {
   const token = await getToken();
   await apiFetch(`/admin/submissions/${type}/${id}`, {
     method: 'PATCH',
     headers: { authorization: `Bearer ${token ?? ''}` },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, note }),
     cache: 'no-store',
   });
 }

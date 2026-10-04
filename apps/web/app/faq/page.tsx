@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { MAX_PENDING_SUBMISSIONS } from '@repo/api';
 
 import { JsonLd } from '@/components/JsonLd';
 import { PageContainer, SectionHeader } from '@/components/ui';
@@ -38,7 +39,7 @@ const FAQS: { q: string; a: string; link?: { href: string; label: string } }[] =
   },
   {
     q: 'How can I contribute or fix data?',
-    a: 'Create a free account, then use Contribute to add a company, or the propose-change menu on any profile to correct fields or add rounds, people, and investors. Submissions land in a moderation queue and appear once approved.',
+    a: `Create a free account, then use Contribute to add a company, or the propose-change menu on any profile to correct fields or add rounds, people, and investors. Submissions land in a moderation queue and appear once approved; we email you when a moderator approves or declines one. You can have up to ${MAX_PENDING_SUBMISSIONS} awaiting review at a time.`,
   },
   {
     q: 'What does "contribute to unlock" mean?',

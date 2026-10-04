@@ -1,0 +1,13 @@
+Hi {{{NAME}}},
+
+Thanks. A moderator reviewed your contribution — {{{SUMMARY}}} — and published it.
+Every approved contribution also unlocks full Capbase profiles for 30 days.
+
+See it on Capbase:
+
+{{{LINK}}}
+
+You get this email because you contributed to Capbase. Each submission gets one
+email, when a moderator decides on it.
+
+— The Capbase team

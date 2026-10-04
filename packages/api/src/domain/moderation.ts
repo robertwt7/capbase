@@ -41,7 +41,13 @@ export interface PendingSubmissionsResponse {
 
 export interface ModerationDecisionInput {
   status: Extract<ReviewStatus, 'APPROVED' | 'REJECTED'>;
+  /** Optional reason for a rejection, quoted in the email to the contributor.
+   *  Not stored, and ignored on an approval. */
+  note?: string | null;
 }
+
+/** Longest moderator note a rejection may carry. */
+export const MODERATION_NOTE_MAX = 1000;
 
 // --- Merge queue -----------------------------------------------------------
 // Two rows that describe the same entity, and what an admin does about it. A

@@ -10,6 +10,14 @@ export const TEMPLATES = {
   'verify-email': { subject: 'Confirm your email for Capbase', vars: ['NAME', 'LINK'] },
   'password-reset': { subject: 'Reset your Capbase password', vars: ['NAME', 'LINK'] },
   welcome: { subject: 'Welcome to Capbase', vars: ['NAME', 'SITE_URL'] },
+  'submission-approved': {
+    subject: 'Your contribution is live on Capbase',
+    vars: ['NAME', 'SUMMARY', 'LINK'],
+  },
+  'submission-rejected': {
+    subject: "Your Capbase contribution wasn't published",
+    vars: ['NAME', 'SUMMARY', 'REASON', 'LINK'],
+  },
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;
