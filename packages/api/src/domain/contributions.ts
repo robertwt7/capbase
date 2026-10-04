@@ -29,6 +29,15 @@ export interface CompanyAccess {
   };
 }
 
+/** The signed-in viewer's access state on its own — what `/auth/me/access`
+    returns, so a page can tailor its gate without loading the contribution list. */
+export interface ViewerAccess {
+  /** True if the viewer is an admin or has an approved contribution within the window. */
+  unlocked: boolean;
+  /** ISO timestamp full access expires (latest contribution + window), or null. */
+  unlockedUntil: string | null;
+}
+
 export interface CompanyDetailResponse {
   /** Sections are already truncated to previewLimit when access is locked. */
   company: Company;

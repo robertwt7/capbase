@@ -13,6 +13,7 @@ import { permanentRedirect } from 'next/navigation';
 import { cache } from 'react';
 
 import {
+  DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   type AcquisitionDeal,
@@ -533,6 +534,20 @@ export async function getCompanies(query: CompanyListQuery = {}): Promise<Pagina
   }
 }
 
+
+/**
+ * A random sample of popular companies for the landing page. The API caches the
+ * scored pool and shuffles per call, so this is fetched uncached: each visit
+ * gets a different handful rather than one list frozen for the ISR window.
+ */
+export async function getFeaturedCompanies(limit = DEFAULT_FEATURED_LIMIT): Promise<Company[]> {
+  try {
+    return await apiFetch<Company[]>(`/companies/featured?limit=${limit}`, { cache: 'no-store' });
+  } catch (err) {
+    allowMockFallback('getFeaturedCompanies', err);
+    return paginateFallbackCompanies({ pageSize: limit, sort: 'raised' }).items;
+  }
+}
 
 /**
  * Turn the API's "this row was merged away" response into a real browser

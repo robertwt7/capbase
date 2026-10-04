@@ -21,7 +21,7 @@ import {
   CreatePersonDto,
 } from './dto/contributions.dto';
 import { CreateChangeProposalDto } from './dto/create-proposal.dto';
-import { ListCompaniesDto } from './dto/list-companies.dto';
+import { FeaturedCompaniesDto, ListCompaniesDto } from './dto/list-companies.dto';
 import { CompanyHistoryDto } from './dto/company-history.dto';
 
 @Controller('companies')
@@ -33,6 +33,12 @@ export class CompaniesController {
   @Get()
   findAll(@Query() query: ListCompaniesDto): Promise<Paginated<Company>> {
     return this.companies.findAllApproved(query);
+  }
+
+  // Declared before @Get(':slug') so the literal path wins over the param route.
+  @Get('featured')
+  featured(@Query() query: FeaturedCompaniesDto): Promise<Company[]> {
+    return this.companies.findFeatured(query.limit);
   }
 
   // Declared before @Get(':slug') so the literal path wins over the param route.

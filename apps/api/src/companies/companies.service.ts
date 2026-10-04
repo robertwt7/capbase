@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   CONTRIBUTION_WINDOW_DAYS,
+  DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   type CitableType,
@@ -85,12 +86,95 @@ const sameValue = (a: unknown, b: unknown): boolean =>
 
 const WINDOW_MS = CONTRIBUTION_WINDOW_DAYS * 86_400_000;
 
+/** How many top-scored companies the landing page samples from. Large enough that
+    consecutive visits see different faces, small enough that every face is notable. */
+const FEATURED_POOL = 120;
+/** The pool is a full-table aggregate; recompute it at most this often. */
+const FEATURED_POOL_TTL_MS = 15 * 60_000;
+
+/** Fisher–Yates; returns a new array. */
+const shuffled = <T>(items: readonly T[], random = Math.random): T[] => {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+};
+
 @Injectable()
 export class CompaniesService {
+  private featuredPool: { ids: string[]; expiresAt: number } | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
   ) {}
+
+  /**
+   * A random sample of popular, well-documented companies for the landing page.
+   *
+   * There is no page-view tracking, so "popular" is read from what the data
+   * already says about a company: people saving it (the one direct interest
+   * signal), named investors (notable companies are the ones whose cap tables
+   * are public — Wikidata P1951, S-1 tables), recent priced rounds, and a known
+   * valuation. The top `FEATURED_POOL` by that score are cached, then each call
+   * draws a fresh shuffle, so the window rotates without ever showing an
+   * obscure shell filer. A domain is required so every row carries a logo.
+   */
+  async findFeatured(limit = DEFAULT_FEATURED_LIMIT): Promise<Company[]> {
+    const pick = shuffled(await this.loadFeaturedPool()).slice(0, limit);
+    if (pick.length === 0) return [];
+    const rows = await this.prisma.company.findMany({
+      where: { id: { in: pick }, ...PUBLIC_COMPANY },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return pick.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [toCompany(row)] : [];
+    });
+  }
+
+  private async loadFeaturedPool(): Promise<string[]> {
+    if (this.featuredPool && this.featuredPool.expiresAt > Date.now()) {
+      return this.featuredPool.ids;
+    }
+    // Each signal is capped so one firehose company (hundreds of Form D
+    // amendments, a 40-firm cap table) can't drown the rest of the score.
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      WITH saves AS (
+        SELECT "companyId", COUNT(*)::int AS n FROM "SavedCompany" GROUP BY "companyId"
+      ),
+      holders AS (
+        SELECT "companyId", COUNT(*)::int AS n FROM "InvestorHolding"
+        WHERE "moderationStatus" = 'APPROVED' GROUP BY "companyId"
+      ),
+      rounds AS (
+        SELECT "companyId", COUNT(*)::int AS n, MAX(date) AS latest FROM "FundingRound"
+        WHERE "moderationStatus" = 'APPROVED' AND "kind" <> 'Grant' GROUP BY "companyId"
+      )
+      SELECT c.id
+      FROM "Company" c
+      LEFT JOIN saves s   ON s."companyId" = c.id
+      LEFT JOIN holders h ON h."companyId" = c.id
+      LEFT JOIN rounds r  ON r."companyId" = c.id
+      WHERE c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL
+        AND c.domain <> ''
+      ORDER BY
+        LEAST(COALESCE(s.n, 0), 20) * 5
+          + LEAST(COALESCE(h.n, 0), 10) * 3
+          + LEAST(COALESCE(r.n, 0), 5)
+          + CASE WHEN r.latest >= NOW() - INTERVAL '18 months' THEN 4 ELSE 0 END
+          + CASE WHEN c."lastValuationUsd" IS NOT NULL THEN 3 ELSE 0 END
+          DESC,
+        c."totalRaisedUsd" DESC,
+        c.id
+      LIMIT ${FEATURED_POOL}
+    `;
+    const ids = rows.map((r) => r.id);
+    this.featuredPool = { ids, expiresAt: Date.now() + FEATURED_POOL_TTL_MS };
+    return ids;
+  }
 
   /** One page of approved companies, filtered/sorted server-side. */
   async findAllApproved(query: CompanyListQuery = {}): Promise<Paginated<Company>> {

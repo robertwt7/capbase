@@ -3,6 +3,7 @@ import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import {
   COMPANY_SORTS,
   COMPANY_STATUSES,
+  MAX_FEATURED_LIMIT,
   MAX_PAGE_SIZE,
   SECTORS,
   STAGES,
@@ -51,4 +52,13 @@ export class ListCompaniesDto implements CompanyListQuery {
   @IsOptional()
   @IsString()
   slugs?: string;
+}
+
+export class FeaturedCompaniesDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_FEATURED_LIMIT)
+  limit?: number;
 }

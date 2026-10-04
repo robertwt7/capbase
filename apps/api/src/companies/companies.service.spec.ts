@@ -395,3 +395,54 @@ describe('CompaniesService.getCompanyHistory', () => {
     expect(items[0]!.actorName).toBe('Ada Admin');
   });
 });
+
+describe('CompaniesService.findFeatured (landing shop window)', () => {
+  let service: CompaniesService;
+  let queryRaw: jest.Mock;
+  let findMany: jest.Mock<(args: { where: { id: { in: string[] } } }) => Promise<unknown[]>>;
+  const POOL = ['a', 'b', 'c', 'd', 'e', 'f'];
+
+  beforeEach(() => {
+    queryRaw = jest.fn(async () => POOL.map((id) => ({ id })));
+    // Rows come back in arbitrary (here: reversed) order, as `IN (...)` does.
+    findMany = jest.fn(async (args) =>
+      [...args.where.id.in].reverse().map((id) => ({ ...dbCompany(), id, slug: id })),
+    );
+    const prisma = {
+      $queryRaw: queryRaw,
+      company: { findMany },
+    } as unknown as PrismaService;
+    service = new CompaniesService(prisma, {} as UsersService);
+  });
+
+  it('returns `limit` distinct companies drawn from the scored pool', async () => {
+    const companies = await service.findFeatured(4);
+
+    expect(companies).toHaveLength(4);
+    const slugs = companies.map((c) => c.slug);
+    expect(new Set(slugs).size).toBe(4);
+    slugs.forEach((slug) => expect(POOL).toContain(slug));
+  });
+
+  it('keeps the shuffled order rather than the database order', async () => {
+    const companies = await service.findFeatured(6);
+    const requested = findMany.mock.calls[0]![0].where.id.in;
+
+    expect(companies.map((c) => c.slug)).toEqual(requested);
+  });
+
+  it('computes the pool once and reuses it across calls', async () => {
+    await service.findFeatured(3);
+    await service.findFeatured(3);
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns nothing without querying rows when the pool is empty', async () => {
+    queryRaw.mockResolvedValue([] as never);
+
+    await expect(service.findFeatured(4)).resolves.toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+});

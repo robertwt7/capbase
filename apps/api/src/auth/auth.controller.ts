@@ -18,6 +18,7 @@ import type {
   MyContributionsResponse,
   SavedCompanyItem,
   SavedStatus,
+  ViewerAccess,
 } from '@repo/api';
 
 import { UsersService } from '../users/users.service';
@@ -114,6 +115,15 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ): Promise<AuthResponse> {
     return this.auth.changePassword(current.id, dto);
+  }
+
+  /** Just the gate state — admins count as unlocked, matching the profile gate. */
+  @UseGuards(JwtAuthGuard)
+  @Get('me/access')
+  async myAccess(@CurrentUser() current: RequestUser): Promise<ViewerAccess> {
+    const until = await this.users.unlockedUntil(current.id);
+    const unlocked = current.role === 'ADMIN' || (until !== null && new Date() < until);
+    return { unlocked, unlockedUntil: until ? until.toISOString() : null };
   }
 
   @UseGuards(JwtAuthGuard)

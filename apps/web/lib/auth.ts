@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import type { AuthUser, MyContributionsResponse } from '@repo/api';
+import type { AuthUser, MyContributionsResponse, ViewerAccess } from '@repo/api';
 
 import { apiFetch } from './api';
 
@@ -60,4 +60,23 @@ export async function getMyContributions(): Promise<MyContributionsResponse> {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
   });
+}
+
+/**
+ * Whether the viewer is signed in and, if so, whether the contribution gate is
+ * open for them. Never throws: a failed check reads as locked, which only costs
+ * an unlocked viewer a teaser they didn't need.
+ */
+export async function getViewerAccess(): Promise<{ signedIn: boolean } & ViewerAccess> {
+  const token = await getToken();
+  if (!token) return { signedIn: false, unlocked: false, unlockedUntil: null };
+  try {
+    const access = await apiFetch<ViewerAccess>('/auth/me/access', {
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    return { signedIn: true, ...access };
+  } catch {
+    return { signedIn: true, unlocked: false, unlockedUntil: null };
+  }
 }
