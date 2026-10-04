@@ -308,7 +308,12 @@ everyone else. Then:
    projects: **web**, **api**, **jobs**.
 3. Paste each project's DSN into `infra/env/all.env` as `WEB_SENTRY_DSN`,
    `API_SENTRY_DSN`, `JOBS_SENTRY_DSN`, then `make deploy-all`.
-4. In each project, add an alert rule that emails you on a new issue.
+4. In each project, add an alert rule that emails you on a new issue. For **jobs**
+   this is the failed-ingest alert: every failed cron run (tagged `ingest:
+   scheduled`) and every failed manual backfill lands there, so "1 event in 1
+   minute → email" is the right rule. The api project also receives mail failures
+   (tagged `mail:<template>`) and failed queue-email runs (`ops:queue-digest` /
+   `ops:queue-alert`).
 5. Prove it end to end (the plan's manual check): stop the API's database access
    briefly or hit a broken page and watch the event land in each project.
 
@@ -336,6 +341,47 @@ HTTP checks, every 5 minutes, alerting by email (and push, if you like):
 `/health` — so one check covers nginx, web, api and Postgres together. Stop the
 api container once (`docker stop capbase-api`) to watch the alert fire, then
 start it again.
+
+Don't use GlitchTip's own uptime monitors for these: it runs on the same VPS, so
+the outage you most need to hear about (the box, Docker or the disk) takes the
+monitor down with it.
+
+### Missed-ingest heartbeat
+
+A failed ingest reaches GlitchTip, but a cron that **never fires** — jobs
+container stopped, crash-looping, a run hanging forever — reports nothing. For
+that the jobs worker POSTs to `INGEST_HEARTBEAT_URL` after every scheduled run
+that succeeds, and an external dead man's switch alerts when the ping stops.
+
+1. Create a check at [healthchecks.io](https://healthchecks.io) (free tier) —
+   **period 1 day, grace 2 hours**, so a missed run alerts at 26 h. Add your email
+   (and the phone app, if you like) as the integration. Better Stack heartbeats
+   work the same way, if the uptime monitor already lives there.
+2. Put its ping URL in `infra/env/all.env` as `INGEST_HEARTBEAT_URL`, then
+   `make deploy-all`.
+3. Prove it: `INGEST_ON_BOOT=true` for one deploy (or wait for the 06:00 UTC run)
+   and watch the check turn green; `docker stop capbase-jobs` for a day turns it red.
+
+No ping is sent when a run fails (GlitchTip already has that one) or when a tick is
+skipped because a manual backfill holds the ingest lock — the data didn't refresh,
+so a backfill longer than the grace period alerting is the truth. The jobs worker
+logs a warning if the ping itself can't be delivered and carries on.
+
+### Moderation-queue emails
+
+The API emails **every ADMIN account** about the PENDING queue, through Resend —
+so the admin account's email must be a real inbox (change it under
+`/profile/settings` if the seed's `ADMIN_EMAIL` isn't):
+
+- a **daily digest** — counts by type plus the oldest item's age — only when
+  something is pending: `QUEUE_DIGEST_CRON` (default `0 8 * * *`) in
+  `QUEUE_DIGEST_TZ` (default `UTC`; an IANA zone such as `Australia/Sydney`);
+- an **immediate alert** when the queue reaches `QUEUE_ALERT_THRESHOLD`
+  (default 100, `0` turns it off), checked every 10 minutes. It fires once, then
+  re-arms when the queue drops back below the threshold. The armed state is in
+  memory, so a deploy while the queue is still over the line sends it once more.
+
+Without `RESEND_API_KEY` both are logged and skipped, like every other email.
 
 ## Credentials
 

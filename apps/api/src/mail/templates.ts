@@ -18,6 +18,14 @@ export const TEMPLATES = {
     subject: "Your Capbase contribution wasn't published",
     vars: ['NAME', 'SUMMARY', 'REASON', 'LINK'],
   },
+  'queue-digest': {
+    subject: 'Capbase moderation queue: daily digest',
+    vars: ['NAME', 'TOTAL', 'BREAKDOWN', 'OLDEST', 'LINK'],
+  },
+  'queue-alert': {
+    subject: 'Capbase moderation queue reached its alert threshold',
+    vars: ['NAME', 'TOTAL', 'THRESHOLD', 'BREAKDOWN', 'OLDEST', 'LINK'],
+  },
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;

@@ -248,6 +248,26 @@ the files into `dist/`; `templates.spec.ts` fails if a file and the registry dri
 `make mail-preview` renders them to `apps/api/.mail-preview/`. Conventions:
 `src/mail/templates/README.md`.
 
+**Moderation emails.** `AdminService.moderate` emails the contributor once per decision
+(`submission-approved` / `submission-rejected`, built in `src/admin/submission-notice.ts`).
+Every contribution is a single row (a round carries its investors, a proposal all its
+fields), so one decision is one email. It reads the row *before* deciding (for the summary
+and the prior status) and sends only *after* the transaction commits, **un-awaited** —
+mail can never slow, fail or roll back a decision; `MailService` logs and reports failures
+to GlitchTip (no recipient in the report). No email for ingested rows, admins, banned users,
+unverified addresses, or a decision that repeats the current status. The optional rejection
+`note` (`ModerationDecisionInput`, ≤ `MODERATION_NOTE_MAX`) is quoted in the email and **not
+stored**; the queue's detail panel has a "Reject with reason" form for it.
+
+**Queue emails to admins.** `QueueAlertsService` (`src/admin/queue-alerts.service.ts`, plain
+`cron` `CronJob`s, no `@nestjs/schedule` in the api) emails every unbanned ADMIN a
+`queue-digest` (counts by type + oldest age, only when non-empty; `QUEUE_DIGEST_CRON` in
+`QUEUE_DIGEST_TZ`) and a `queue-alert` when PENDING reaches `QUEUE_ALERT_THRESHOLD` (default
+100, `0` = off), checked every 10 min, fired once and re-armed only below the threshold
+(in-memory, so a restart may re-send). Counts come from one `aggregate` per table
+(`pendingQueueStats`), never `listSubmissions`. `validateEnv` rejects a bad cron/zone, which
+would otherwise crash bootstrap.
+
 **Email verification.** Registering sends a `verify-email` link (24h, single-use, only the
 sha256 stored — the same pattern as password reset); spending it at `POST /auth/verify-email`
 sets `User.emailVerifiedAt` and sends the `welcome` email, once. `POST
@@ -262,7 +282,7 @@ Abuse controls: every contribution route uses the `@Contribution()` decorator
 (`JwtAuthGuard` + `VerifiedEmailGuard` + `PendingCapGuard` + `TurnstileGuard`, cheapest
 first). An unverified non-admin gets `403 { code: 'EMAIL_UNVERIFIED' }` (`@repo/api`), which
 the web's `contributionErrorMessage` turns into a pointer at the banner. The cap is
-`MAX_PENDING_SUBMISSIONS` (30, `@repo/api`) PENDING rows per user → 429; admins are
+`MAX_PENDING_SUBMISSIONS` (15, `@repo/api`) PENDING rows per user → 429; admins are
 exempt from both. `TurnstileGuard` (also on `POST /auth/register`) is a no-op without
 `TURNSTILE_SECRET` and fails closed when Cloudflare is unreachable. `POST /reports` is the one
 other anonymous write: `@UseGuards(TurnstileGuard)` only, no pending cap, nginx `writes` in
@@ -510,7 +530,9 @@ The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
 SEC Form D only — every other source is a snapshot, run by hand). Cron and `backfill.ts`
 share a Postgres advisory lock (`ingest/ingest-lock.ts`, a dedicated `pg` client because
 advisory locks are per-session): a cron tick skips while a backfill runs, and a backfill
-exits 75 while the cron runs. Failed ingests are reported to GlitchTip. Backfills:
+exits 75 while the cron runs. Failed ingests are reported to GlitchTip; a cron run that
+**succeeds** POSTs `INGEST_HEARTBEAT_URL` (a dead man's switch, no-op if unset), so a cron
+that never fires alerts too. Failed and skipped runs send no ping. Backfills:
 `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
 (ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D) and `make ingest-all`

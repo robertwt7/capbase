@@ -1,0 +1,15 @@
+Hi {{{NAME}}},
+
+Moderation queue: {{{TOTAL}}} waiting for review. The oldest has been waiting
+{{{OLDEST}}}.
+
+{{{BREAKDOWN}}}
+
+Open the queue:
+
+{{{LINK}}}
+
+You get this email because you're a Capbase admin. It's sent once a day, and
+only when the queue isn't empty.
+
+— The Capbase team

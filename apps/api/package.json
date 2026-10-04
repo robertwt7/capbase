@@ -33,6 +33,7 @@
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "cron": "3.2.1",
     "escape-html": "^1.0.3",
     "helmet": "^8.3.0",
     "passport": "^0.7.0",

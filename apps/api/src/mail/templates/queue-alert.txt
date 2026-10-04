@@ -1,0 +1,18 @@
+Hi {{{NAME}}},
+
+The moderation queue has reached its alert threshold of {{{THRESHOLD}}}:
+{{{TOTAL}}} waiting for review. The oldest has been waiting {{{OLDEST}}}.
+
+{{{BREAKDOWN}}}
+
+A sudden jump can mean one account is flooding the queue — the queue shows who
+submitted each item, and banning an account rejects its whole pending queue.
+
+Open the queue:
+
+{{{LINK}}}
+
+You get this email because you're a Capbase admin. It's sent when the queue
+reaches the threshold, then not again until it has dropped back below it.
+
+— The Capbase team

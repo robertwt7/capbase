@@ -5,11 +5,12 @@ import { PeopleModule } from '../people/people.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { MergeService } from './merge/merge.service';
+import { QueueAlertsService } from './queue-alerts.service';
 import { AdminUsersService } from './users/admin-users.service';
 
 @Module({
   imports: [MailModule, PeopleModule],
   controllers: [AdminController],
-  providers: [AdminService, MergeService, AdminUsersService],
+  providers: [AdminService, MergeService, AdminUsersService, QueueAlertsService],
 })
 export class AdminModule {}

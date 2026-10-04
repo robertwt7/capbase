@@ -5689,6 +5689,7 @@ __metadata:
     bcrypt: "npm:^6.0.0"
     class-transformer: "npm:^0.5.1"
     class-validator: "npm:^0.15.1"
+    cron: "npm:3.2.1"
     escape-html: "npm:^1.0.3"
     eslint: "npm:^9.39.2"
     helmet: "npm:^8.3.0"
