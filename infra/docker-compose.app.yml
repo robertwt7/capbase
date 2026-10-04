@@ -36,6 +36,14 @@ services:
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
       # GlitchTip project DSN (errors.capbase.fyi); empty disables reporting.
       SENTRY_DSN: ${API_SENTRY_DSN:-}
+      # Moderation-queue emails to every admin: a daily digest (cron + IANA zone)
+      # and an alert when PENDING reaches the threshold (0 = alert off).
+      QUEUE_ALERT_THRESHOLD: ${QUEUE_ALERT_THRESHOLD:-100}
+      QUEUE_DIGEST_CRON: ${QUEUE_DIGEST_CRON:-0 8 * * *}
+      QUEUE_DIGEST_TZ: ${QUEUE_DIGEST_TZ:-UTC}
+      # Hops allowed to set X-Forwarded-For (the visitor IP the throttler keys
+      # on). Empty = private + loopback ranges, i.e. the web container. Never true.
+      TRUST_PROXY: ${TRUST_PROXY:-}
       GIT_SHA: ${GIT_SHA:-}
     # Internal only — the browser never hits the API (API_URL is server-side).
     # Uncomment to expose on localhost for debugging:
@@ -102,6 +110,8 @@ services:
       INGEST_LIMIT: ${INGEST_LIMIT:-50}
       # Failed ingests (cron and manual backfills) are reported here.
       SENTRY_DSN: ${JOBS_SENTRY_DSN:-}
+      # Dead man's switch, POSTed after every successful scheduled ingest; empty = off.
+      INGEST_HEARTBEAT_URL: ${INGEST_HEARTBEAT_URL:-}
       GIT_SHA: ${GIT_SHA:-}
     healthcheck:
       test:

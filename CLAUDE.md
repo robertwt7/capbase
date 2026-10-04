@@ -262,6 +262,26 @@ the files into `dist/`; `templates.spec.ts` fails if a file and the registry dri
 `make mail-preview` renders them to `apps/api/.mail-preview/`. Conventions:
 `src/mail/templates/README.md`.
 
+**Moderation emails.** `AdminService.moderate` emails the contributor once per decision
+(`submission-approved` / `submission-rejected`, built in `src/admin/submission-notice.ts`).
+Every contribution is a single row (a round carries its investors, a proposal all its
+fields), so one decision is one email. It reads the row *before* deciding (for the summary
+and the prior status) and sends only *after* the transaction commits, **un-awaited** —
+mail can never slow, fail or roll back a decision; `MailService` logs and reports failures
+to GlitchTip (no recipient in the report). No email for ingested rows, admins, banned users,
+unverified addresses, or a decision that repeats the current status. The optional rejection
+`note` (`ModerationDecisionInput`, ≤ `MODERATION_NOTE_MAX`) is quoted in the email and **not
+stored**; the queue's detail panel has a "Reject with reason" form for it.
+
+**Queue emails to admins.** `QueueAlertsService` (`src/admin/queue-alerts.service.ts`, plain
+`cron` `CronJob`s, no `@nestjs/schedule` in the api) emails every unbanned ADMIN a
+`queue-digest` (counts by type + oldest age, only when non-empty; `QUEUE_DIGEST_CRON` in
+`QUEUE_DIGEST_TZ`) and a `queue-alert` when PENDING reaches `QUEUE_ALERT_THRESHOLD` (default
+100, `0` = off), checked every 10 min, fired once and re-armed only below the threshold
+(in-memory, so a restart may re-send). Counts come from one `aggregate` per table
+(`pendingQueueStats`), never `listSubmissions`. `validateEnv` rejects a bad cron/zone, which
+would otherwise crash bootstrap.
+
 **Email verification.** Registering sends a `verify-email` link (24h, single-use, only the
 sha256 stored — the same pattern as password reset); spending it at `POST /auth/verify-email`
 sets `User.emailVerifiedAt` and sends the `welcome` email, once. `POST
@@ -276,7 +296,7 @@ Abuse controls: every contribution route uses the `@Contribution()` decorator
 (`JwtAuthGuard` + `VerifiedEmailGuard` + `PendingCapGuard` + `TurnstileGuard`, cheapest
 first). An unverified non-admin gets `403 { code: 'EMAIL_UNVERIFIED' }` (`@repo/api`), which
 the web's `contributionErrorMessage` turns into a pointer at the banner. The cap is
-`MAX_PENDING_SUBMISSIONS` (30, `@repo/api`) PENDING rows per user → 429; admins are
+`MAX_PENDING_SUBMISSIONS` (15, `@repo/api`) PENDING rows per user → 429; admins are
 exempt from both. `TurnstileGuard` (also on `POST /auth/register`) is a no-op without
 `TURNSTILE_SECRET` and fails closed when Cloudflare is unreachable. `POST /reports` is the one
 other anonymous write: `@UseGuards(TurnstileGuard)` only, no pending cap, nginx `writes` in
@@ -310,7 +330,28 @@ investor holdings ×3, non-grant rounds ×1 (each capped), +4 for a round in the
 +3 for a known valuation — with `domain <> ''` required so every row has a logo. The top
 `FEATURED_POOL` (120) ids are cached in-process for 15 min (`loadFeaturedPool`), and each call
 draws a fresh Fisher–Yates shuffle; the web fetches it `no-store` so every visit differs. Tune
-the weights there.
+the weights there. It carries only the default throttle and the web deliberately sends no
+`forwardedForHeaders()` (see Rate limiting below): one page view is one cheap call, already
+limited by nginx's `general` zone.
+
+**Rate limiting (`src/throttle/`).** `@nestjs/throttler` is a global guard
+(`ApiThrottlerGuard`, provided in `AuthModule` because it decodes the JWT), the backstop
+behind nginx. It is in-memory, so it assumes one API process. Limits live in
+`throttle.ts`: `DEFAULT_LIMIT` 300/min on every route, `@AuthThrottle()` 20/min on
+login/register/forgot/reset/verify-email, `@SearchThrottle()` 60/min on the four directory
+lists, and `@SkipThrottle()` on `/health`. The key is `user:<id>` for a valid JWT, otherwise
+`req.ip`. Admins (re-checked against the row) are exempt. `main.ts` sets Express
+`trust proxy` from `TRUST_PROXY`, which defaults to the private and loopback ranges, so
+`X-Forwarded-For` is believed only from the web container.
+
+The web forwards the visitor's IP (`X-Real-IP` from nginx → `X-Forwarded-For`,
+`apps/web/lib/client-ip.ts`) on **every non-GET `apiFetch`** and the login/register route
+handlers. It **never forwards it on cached reads**: the header would become part of Next's
+fetch-cache key. So the guard **skips a GET from a trusted proxy that carries no
+`X-Forwarded-For`**. Those reads are already limited by nginx. A new uncached read that
+should count passes `forwardedForHeaders()` itself, like `app/api/companies/search`.
+Client components import the 429 text from `lib/rate-limit.ts`, never from `lib/api.ts`,
+which is server-only.
 
 Errors go to self-hosted GlitchTip via `@sentry/nestjs` (`src/instrument.ts`, imported
 first in `main.ts`; `SentryGlobalFilter` reports 5xx, never 4xx). No-op without `SENTRY_DSN`.
@@ -552,7 +593,9 @@ The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
 SEC Form D only — every other source is a snapshot, run by hand). Cron and `backfill.ts`
 share a Postgres advisory lock (`ingest/ingest-lock.ts`, a dedicated `pg` client because
 advisory locks are per-session): a cron tick skips while a backfill runs, and a backfill
-exits 75 while the cron runs. Failed ingests are reported to GlitchTip. Backfills:
+exits 75 while the cron runs. Failed ingests are reported to GlitchTip; a cron run that
+**succeeds** POSTs `INGEST_HEARTBEAT_URL` (a dead man's switch, no-op if unset), so a cron
+that never fires alerts too. Failed and skipped runs send no ping. Backfills:
 `make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
 (ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D) and `make ingest-all`
@@ -616,7 +659,11 @@ hardcoded and `deploy-tls` enforces that it matches `DOMAIN`). Rate limits are p
 zones returning 429 — `auth` 10 r/m on `^/api/(auth|admin)/`, `writes` 30 r/m keyed on
 **POST only** under `location /`, `general` 30 r/s. Server actions are POSTs to the page URL,
 so any new form under `location /` is covered by `writes` with no nginx change. The API is
-never public (web → api is container-to-container), and there is no app-level throttler. Key targets:
+never public (web → api is container-to-container); its throttler is the per-user backstop
+(see Backend). **Cloudflare-ready**: `conf.d/cloudflare-realip.conf` (generated by
+`make nginx-cloudflare-ips`) takes `$remote_addr` from `CF-Connecting-IP`, but only for a
+peer inside a Cloudflare range. Otherwise every visitor behind one edge would share a
+rate-limit bucket. It is inert while the record isn't proxied. Key targets:
 `deploy-secrets` (generate all credentials), `backup-keygen` (age keypair, run on the
 laptop — the VPS only ever holds the public key), `deploy-backup` (dump → verify-restore
 → encrypt → prune → rclone upload to R2/B2 via `infra/backup/rclone.conf`; any failure

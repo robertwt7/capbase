@@ -2,6 +2,7 @@
 
 import { resetPassword } from '@/lib/account';
 import { ApiError } from '@/lib/api';
+import { RATE_LIMITED_MESSAGE } from '@/lib/rate-limit';
 import { resetPasswordFormSchema, toResetPasswordInput } from '@/lib/validation/auth';
 import { fieldErrorsFromZod, type ActionResult } from '@/lib/validation/utils';
 
@@ -13,6 +14,9 @@ export async function resetPasswordAction(token: string, values: unknown): Promi
   try {
     await resetPassword(toResetPasswordInput(token, parsed.data));
   } catch (error) {
+    if (error instanceof ApiError && error.status === 429) {
+      return { ok: false, formError: RATE_LIMITED_MESSAGE };
+    }
     if (error instanceof ApiError && error.status === 400) {
       return {
         ok: false,

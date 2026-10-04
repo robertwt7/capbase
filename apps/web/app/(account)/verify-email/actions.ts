@@ -4,12 +4,16 @@ import { revalidatePath } from 'next/cache';
 
 import { verifyEmail } from '@/lib/account';
 import { ApiError } from '@/lib/api';
+import { RATE_LIMITED_MESSAGE } from '@/lib/rate-limit';
 import type { ActionResult } from '@/lib/validation/utils';
 
 export async function verifyEmailAction(token: string): Promise<ActionResult> {
   try {
     await verifyEmail({ token });
   } catch (error) {
+    if (error instanceof ApiError && error.status === 429) {
+      return { ok: false, formError: RATE_LIMITED_MESSAGE };
+    }
     if (error instanceof ApiError && error.status === 400) {
       return {
         ok: false,

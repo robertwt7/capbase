@@ -74,3 +74,6 @@ infra/backup/rclone.conf
 # Local database dumps (make db-dump)
 backups/
 infra/.release
+
+# Rendered email previews (make mail-preview)
+apps/api/.mail-preview/

@@ -26,6 +26,21 @@ const SAMPLES: { [T in TemplateName]: TemplateVars<T> } = {
     REASON: "The linked article doesn't mention the new headquarters.\nA press release or filing would do.",
     LINK: `${SITE_URL}/companies/helia/contribute`,
   },
+  'queue-digest': {
+    NAME,
+    TOTAL: '23 submissions',
+    BREAKDOWN: 'Funding rounds   12\nPeople            4\nEdits             7',
+    OLDEST: '3 days',
+    LINK: `${SITE_URL}/admin`,
+  },
+  'queue-alert': {
+    NAME,
+    TOTAL: '104 submissions',
+    THRESHOLD: '100',
+    BREAKDOWN: 'New companies    13\nFunding rounds   61\nEdits            30',
+    OLDEST: '19 hours',
+    LINK: `${SITE_URL}/admin`,
+  },
 };
 
 const outDir = resolve(__dirname, '../../.mail-preview');

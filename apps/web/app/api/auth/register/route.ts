@@ -3,6 +3,7 @@ import type { AuthResponse } from '@repo/api';
 
 import { API_URL } from '../../../../lib/api';
 import { TOKEN_COOKIE } from '../../../../lib/auth';
+import { forwardedForHeaders } from '../../../../lib/client-ip';
 import { turnstileHeaders } from '../../../../lib/turnstile';
 
 // Proxies /auth/register on the API, then signs the new user straight in by
@@ -17,7 +18,11 @@ export async function POST(req: Request) {
 
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...turnstileHeaders(body.turnstileToken) },
+    headers: {
+      'content-type': 'application/json',
+      ...turnstileHeaders(body.turnstileToken),
+      ...(await forwardedForHeaders()),
+    },
     body: JSON.stringify({ email: body.email, name: body.name, password: body.password }),
     cache: 'no-store',
   });

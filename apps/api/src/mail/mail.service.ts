@@ -11,6 +11,16 @@ import {
   type TemplateVars,
 } from './templates';
 
+/** The queue facts both admin queue emails carry, already formatted. */
+export interface QueueEmailVars {
+  /** "23 submissions". */
+  TOTAL: string;
+  /** One `label  count` line per non-empty type. */
+  BREAKDOWN: string;
+  /** "3 days", "19 hours". */
+  OLDEST: string;
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -66,6 +76,26 @@ export class MailService {
       SUMMARY: summary,
       REASON: reason,
       LINK: `${this.siteUrl}${path}`,
+    });
+  }
+
+  /** The daily moderation-queue digest to one admin. Never throws. */
+  sendQueueDigestEmail(to: string, name: string, queue: QueueEmailVars): Promise<void> {
+    return this.deliver('queue-digest', to, { NAME: name, ...queue, LINK: `${this.siteUrl}/admin` });
+  }
+
+  /** The queue crossed QUEUE_ALERT_THRESHOLD. Never throws. */
+  sendQueueAlertEmail(
+    to: string,
+    name: string,
+    queue: QueueEmailVars,
+    threshold: number,
+  ): Promise<void> {
+    return this.deliver('queue-alert', to, {
+      NAME: name,
+      ...queue,
+      THRESHOLD: String(threshold),
+      LINK: `${this.siteUrl}/admin`,
     });
   }
 

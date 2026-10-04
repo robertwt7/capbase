@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 
 import { LogoMark } from '@/components/Logo';
 import { Button, Card, Form, FormError, TextField } from '@/components/ui';
+import { RATE_LIMITED_MESSAGE } from '@/lib/rate-limit';
 import {
   loginFormDefaults,
   loginFormSchema,
@@ -34,6 +35,10 @@ export function LoginForm({ next }: { next?: string }) {
     if (res.ok) {
       router.replace(next || '/');
       router.refresh();
+      return;
+    }
+    if (res.status === 429) {
+      setFormError(RATE_LIMITED_MESSAGE);
       return;
     }
     const data = (await res.json().catch(() => ({}))) as { message?: string };

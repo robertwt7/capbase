@@ -3,6 +3,8 @@ import type { AuthResponse } from '@repo/api';
 
 import { API_URL } from '../../../../lib/api';
 import { TOKEN_COOKIE } from '../../../../lib/auth';
+import { forwardedForHeaders } from '../../../../lib/client-ip';
+import { RATE_LIMITED_MESSAGE } from '../../../../lib/rate-limit';
 
 // Proxies /auth/login on the API, then stores the JWT in an httpOnly cookie so
 // admin server components can read it. Only ADMIN accounts are allowed through.
@@ -16,11 +18,14 @@ export async function POST(req: Request) {
 
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(await forwardedForHeaders()) },
     body: JSON.stringify({ email: body.email, password: body.password }),
     cache: 'no-store',
   });
 
+  if (res.status === 429) {
+    return NextResponse.json({ message: RATE_LIMITED_MESSAGE }, { status: 429 });
+  }
   if (!res.ok) {
     return NextResponse.json({ message: 'Invalid email or password' }, { status: 401 });
   }

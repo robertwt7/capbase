@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 
 import { AdminModule } from './admin/admin.module';
@@ -13,6 +14,7 @@ import { MarketModule } from './market/market.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReportsModule } from './reports/reports.module';
+import { DEFAULT_LIMIT, THROTTLE_MESSAGE } from './throttle/throttle';
 import { UsersModule } from './users/users.module';
 
 import { AppService } from './app.service';
@@ -23,6 +25,11 @@ import { HealthController } from './health.controller';
   imports: [
     SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // In-memory counters: one API process. The guard is ApiThrottlerGuard (AuthModule).
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'default', ...DEFAULT_LIMIT }],
+      errorMessage: THROTTLE_MESSAGE,
+    }),
     PrismaModule,
     UsersModule,
     AuthModule,

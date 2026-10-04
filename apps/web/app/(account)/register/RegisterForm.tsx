@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 
 import { LogoMark } from '@/components/Logo';
 import { Button, Card, Form, FormError, TextField, TurnstileField } from '@/components/ui';
+import { RATE_LIMITED_MESSAGE } from '@/lib/rate-limit';
 import {
   registerFormDefaults,
   registerFormSchema,
@@ -59,7 +60,12 @@ export function RegisterForm({
       });
       return;
     }
-    setFormError(data.message ?? 'Registration failed. Please try again.');
+    // nginx's 429 is an HTML page, so it has no message to show.
+    setFormError(
+      res.status === 429
+        ? RATE_LIMITED_MESSAGE
+        : (data.message ?? 'Registration failed. Please try again.'),
+    );
   });
 
   return (

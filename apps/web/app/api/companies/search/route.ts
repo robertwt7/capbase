@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { Company, Paginated } from '@repo/api';
 
 import { apiFetch } from '@/lib/api';
+import { forwardedForHeaders } from '@/lib/client-ip';
 
 /** Companies the search matched, trimmed to picker-sized facts. */
 export interface CompanySearchHit {
@@ -22,7 +23,8 @@ export async function GET(req: NextRequest): Promise<NextResponse<CompanySearchH
   try {
     const result = await apiFetch<Paginated<Company>>(
       `/companies?q=${encodeURIComponent(q)}&pageSize=${LIMIT}`,
-      { cache: 'no-store' },
+      // Uncached and typed into, so it counts against the visitor's search limit.
+      { cache: 'no-store', headers: await forwardedForHeaders() },
     );
     return NextResponse.json(
       result.items.map(({ slug, name, domain }) => ({ slug, name, domain })),

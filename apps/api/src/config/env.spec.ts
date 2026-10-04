@@ -33,4 +33,28 @@ describe('validateEnv', () => {
     expect(validateEnv(ok)).toBe(ok);
     expect(() => validateEnv({ ...base, SENTRY_DSN: 'errors.capbase.fyi' })).toThrow(/SENTRY_DSN/);
   });
+
+  it('rejects a non-numeric QUEUE_ALERT_THRESHOLD', () => {
+    expect(validateEnv({ ...base, QUEUE_ALERT_THRESHOLD: '0' })).toBeTruthy();
+    expect(() => validateEnv({ ...base, QUEUE_ALERT_THRESHOLD: 'lots' })).toThrow(
+      /QUEUE_ALERT_THRESHOLD/,
+    );
+  });
+
+  it('rejects a digest schedule or timezone the cron would choke on', () => {
+    const ok = { ...base, QUEUE_DIGEST_CRON: '30 7 * * 1-5', QUEUE_DIGEST_TZ: 'Australia/Sydney' };
+    expect(validateEnv(ok)).toBe(ok);
+    expect(() => validateEnv({ ...base, QUEUE_DIGEST_CRON: 'daily' })).toThrow(/QUEUE_DIGEST_CRON/);
+    expect(() => validateEnv({ ...base, QUEUE_DIGEST_TZ: 'Mars/Olympus' })).toThrow(
+      /QUEUE_DIGEST_TZ/,
+    );
+  });
+
+  it('accepts a TRUST_PROXY list and rejects one that would trust every hop', () => {
+    const ok = { ...base, TRUST_PROXY: 'loopback, 10.0.0.0/8, fd00::/8' };
+    expect(validateEnv(ok)).toBe(ok);
+    for (const bad of ['true', '1', 'everyone']) {
+      expect(() => validateEnv({ ...base, TRUST_PROXY: bad })).toThrow(/TRUST_PROXY/);
+    }
+  });
 });

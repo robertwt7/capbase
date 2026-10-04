@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { Button, Card, FormError, Input, Label } from '../../../components/ui';
+import { RATE_LIMITED_MESSAGE } from '../../../lib/rate-limit';
 
 import styles from '../admin.module.css';
 
@@ -32,7 +33,7 @@ export default function AdminLogin() {
       router.refresh();
     } else {
       const data = (await res.json().catch(() => ({}))) as { message?: string };
-      setError(data.message ?? 'Sign in failed');
+      setError(res.status === 429 ? RATE_LIMITED_MESSAGE : (data.message ?? 'Sign in failed'));
       setPending(false);
     }
   }

@@ -1,11 +1,14 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 
 import { PrismaService } from './prisma/prisma.service';
 
 /**
  * Liveness that proves the database answers — the compose healthcheck and the
  * external uptime monitor both hit this, not `GET /`, which never touches Postgres.
+ * Never throttled: a monitor polling it must never read a 429 as an outage.
  */
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}

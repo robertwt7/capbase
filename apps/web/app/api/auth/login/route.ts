@@ -3,6 +3,8 @@ import type { AuthResponse } from '@repo/api';
 
 import { API_URL } from '../../../../lib/api';
 import { TOKEN_COOKIE } from '../../../../lib/auth';
+import { forwardedForHeaders } from '../../../../lib/client-ip';
+import { RATE_LIMITED_MESSAGE } from '../../../../lib/rate-limit';
 
 // Proxies /auth/login on the API and stores the JWT in an httpOnly cookie so
 // server components can read the session. Unlike the admin route, any role is
@@ -17,13 +19,16 @@ export async function POST(req: Request) {
 
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(await forwardedForHeaders()) },
     body: JSON.stringify({ email: body.email, password: body.password }),
     cache: 'no-store',
   });
 
   if (res.status === 403) {
     return NextResponse.json({ message: 'This account has been suspended.' }, { status: 403 });
+  }
+  if (res.status === 429) {
+    return NextResponse.json({ message: RATE_LIMITED_MESSAGE }, { status: 429 });
   }
   if (!res.ok) {
     return NextResponse.json({ message: 'Invalid email or password' }, { status: 401 });
