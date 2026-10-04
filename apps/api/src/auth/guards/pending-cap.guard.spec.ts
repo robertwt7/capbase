@@ -17,7 +17,7 @@ function guardWith(pending: number) {
   return { guard: new PendingCapGuard({ countPending } as unknown as UsersService), countPending };
 }
 
-const user: RequestUser = { id: 'u1', email: 'u@test.dev', role: 'USER' };
+const user: RequestUser = { id: 'u1', email: 'u@test.dev', role: 'USER', emailVerified: true };
 
 describe('PendingCapGuard', () => {
   it('lets a user under the cap through', async () => {

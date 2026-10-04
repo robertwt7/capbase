@@ -52,6 +52,10 @@ test-e2e: ## Run end-to-end tests (needs Postgres up)
 lint: ## Lint all workspaces
 	yarn lint
 
+.PHONY: mail-preview
+mail-preview: ## Render every email template to apps/api/.mail-preview/ for a browser
+	yarn workspace api mail:preview
+
 # ---------------------------------------------------------------------------
 # Database (packages/db, @repo/db)
 # ---------------------------------------------------------------------------

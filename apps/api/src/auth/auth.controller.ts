@@ -21,7 +21,7 @@ import type {
 } from '@repo/api';
 
 import { UsersService } from '../users/users.service';
-import { AuthService } from './auth.service';
+import { AuthService, toAuthUser } from './auth.service';
 import { CurrentUser, type RequestUser } from './decorators/current-user.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -29,6 +29,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { TurnstileGuard } from './guards/turnstile.guard';
 
@@ -40,10 +41,15 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
+  /** Where emailed links point: the public web origin. */
+  private siteUrl(): string {
+    return this.config.get<string>('SITE_URL', 'http://localhost:3001');
+  }
+
   @UseGuards(TurnstileGuard)
   @Post('register')
   register(@Body() dto: RegisterDto): Promise<AuthResponse> {
-    return this.auth.register(dto);
+    return this.auth.register(dto, this.siteUrl());
   }
 
   @Post('login')
@@ -55,8 +61,7 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(200)
   async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<{ ok: true }> {
-    const siteUrl = this.config.get<string>('SITE_URL', 'http://localhost:3001');
-    await this.auth.requestPasswordReset(dto.email, siteUrl);
+    await this.auth.requestPasswordReset(dto.email, this.siteUrl());
     return { ok: true };
   }
 
@@ -67,12 +72,29 @@ export class AuthController {
     return { ok: true };
   }
 
+  /** Public: the token is the credential, and the link may be opened on another device. */
+  @Post('verify-email')
+  @HttpCode(200)
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ ok: true }> {
+    await this.auth.verifyEmail(dto.token);
+    return { ok: true };
+  }
+
+  /** 429 within a minute of the last link; a no-op once verified. */
+  @UseGuards(JwtAuthGuard)
+  @Post('resend-verification')
+  @HttpCode(200)
+  async resendVerification(@CurrentUser() current: RequestUser): Promise<{ ok: true }> {
+    await this.auth.resendVerification(current.id, this.siteUrl());
+    return { ok: true };
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async me(@CurrentUser() current: RequestUser): Promise<AuthUser> {
     const user = await this.users.findById(current.id);
     if (!user) throw new NotFoundException('User not found');
-    return { id: user.id, email: user.email, name: user.name, role: user.role };
+    return toAuthUser(user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -81,7 +103,7 @@ export class AuthController {
     @CurrentUser() current: RequestUser,
     @Body() dto: UpdateProfileDto,
   ): Promise<AuthUser> {
-    return this.auth.updateProfile(current.id, dto);
+    return this.auth.updateProfile(current.id, dto, this.siteUrl());
   }
 
   @UseGuards(JwtAuthGuard)

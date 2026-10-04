@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { SectionHeader } from '@/components/ui';
+import { VerifyEmailBanner } from '@/components/VerifyEmailBanner';
 import { requireUser } from '@/lib/auth';
 
 import { SettingsForms } from './SettingsForms';
@@ -24,6 +25,7 @@ export default async function SettingsPage() {
 
       <div className="mt-8">
         <SectionHeader as="h1" title="Account settings" note={user.email} />
+        <VerifyEmailBanner user={user} className="mt-7" />
         <div className="mt-7">
           <SettingsForms user={user} />
         </div>

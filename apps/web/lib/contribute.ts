@@ -1,12 +1,13 @@
-import type {
-  CreateAcquisitionInput,
-  CreateChangeProposalInput,
-  CreateCompanyInput,
-  CreateDiversityInput,
-  CreateExitInput,
-  CreateFundingRoundInput,
-  CreateInvestorInput,
-  CreatePersonInput,
+import {
+  EMAIL_UNVERIFIED,
+  type CreateAcquisitionInput,
+  type CreateChangeProposalInput,
+  type CreateCompanyInput,
+  type CreateDiversityInput,
+  type CreateExitInput,
+  type CreateFundingRoundInput,
+  type CreateInvestorInput,
+  type CreatePersonInput,
 } from '@repo/api';
 
 import { ApiError, apiFetch } from './api';
@@ -138,11 +139,18 @@ export function submitProposal(
 }
 
 /**
- * The form-level message for a failed contribution. The pending cap (429) and
- * the bot check (403) carry a message worth showing as-is; anything else is a
- * generic retry prompt, since the client already validated the fields.
+ * The form-level message for a failed contribution. An unverified email gets
+ * its own pointer to the banner; the pending cap (429) and the bot check (403)
+ * carry a message worth showing as-is; anything else is a generic retry
+ * prompt, since the client already validated the fields.
  */
 export function contributionErrorMessage(err: unknown): string {
+  if (
+    err instanceof ApiError &&
+    (err.body as { code?: unknown } | undefined)?.code === EMAIL_UNVERIFIED
+  ) {
+    return 'Confirm your email before contributing — use the link we emailed you, or resend it from the banner above.';
+  }
   if (err instanceof ApiError && (err.status === 429 || err.status === 403)) {
     const message = (err.body as { message?: unknown } | undefined)?.message;
     if (typeof message === 'string') return message;

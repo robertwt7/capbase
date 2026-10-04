@@ -5,6 +5,7 @@ import type {
   ForgotPasswordInput,
   ResetPasswordInput,
   UpdateProfileInput,
+  VerifyEmailInput,
 } from '@repo/api';
 
 import { apiFetch } from './api';
@@ -50,6 +51,27 @@ export async function resetPassword(input: ResetPasswordInput) {
   return apiFetch<{ ok: true }>('/auth/reset-password', {
     method: 'POST',
     body: JSON.stringify(input),
+    cache: 'no-store',
+  });
+}
+
+/** Spend an email-verification link. Unauthenticated: the token is the credential,
+ *  and the link may be opened in a browser that isn't signed in. 400 when it is
+ *  invalid, used, expired, or was sent to an address the account no longer has. */
+export async function verifyEmail(input: VerifyEmailInput) {
+  return apiFetch<{ ok: true }>('/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    cache: 'no-store',
+  });
+}
+
+/** Mail the signed-in user a fresh verification link. 429 within a minute of the last one. */
+export async function resendVerification() {
+  const token = await getToken();
+  return apiFetch<{ ok: true }>('/auth/resend-verification', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
   });
 }

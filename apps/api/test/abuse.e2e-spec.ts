@@ -21,7 +21,10 @@ describe('Abuse controls (e2e)', () => {
       .post('/auth/register')
       .send({ email: `${prefix}-${tag}@test.dev`, name: `Abuse ${tag}`, password: 'password123' })
       .expect(201);
-    return res.body as { accessToken: string; user: { id: string } };
+    const body = res.body as { accessToken: string; user: { id: string } };
+    // Pre-verified: this suite tests the cap and bans, not email verification.
+    await prisma.user.update({ where: { id: body.user.id }, data: { emailVerifiedAt: new Date() } });
+    return body;
   };
   const fillQueue = (userId: string, n: number) =>
     prisma.changeProposal.createMany({

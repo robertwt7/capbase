@@ -1,3 +1,4 @@
+import { VerifyEmailBanner } from '../../components/VerifyEmailBanner';
 import { requireUser } from '../../lib/auth';
 import { turnstileSiteKey } from '../../lib/turnstile';
 import { CompanyForm } from './CompanyForm';
@@ -8,6 +9,11 @@ export const metadata = {
 };
 
 export default async function ContributePage() {
-  await requireUser('/contribute');
-  return <CompanyForm turnstileSiteKey={turnstileSiteKey()} />;
+  const user = await requireUser('/contribute');
+  return (
+    <CompanyForm
+      turnstileSiteKey={turnstileSiteKey()}
+      notice={<VerifyEmailBanner user={user} className="mb-8" />}
+    />
+  );
 }

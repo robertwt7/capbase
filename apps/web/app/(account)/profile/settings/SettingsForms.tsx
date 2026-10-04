@@ -70,6 +70,7 @@ function AccountDetailsForm({ user }: { user: AuthUser }) {
             label="Email"
             type="email"
             autoComplete="email"
+            description="Changing your email means confirming the new address before you can contribute again."
           />
 
           {formError ? <FormError>{formError}</FormError> : null}

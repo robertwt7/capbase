@@ -16,7 +16,8 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --max-warnings 0",
     "db:generate": "yarn workspace @repo/db generate",
     "db:migrate": "yarn workspace @repo/db migrate",
-    "db:seed": "yarn workspace @repo/db seed"
+    "db:seed": "yarn workspace @repo/db seed",
+    "mail:preview": "ts-node src/mail/preview.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.11",

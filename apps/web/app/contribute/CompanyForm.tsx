@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { COMPANY_STATUSES, SECTORS, STAGES } from '@repo/api';
 
@@ -29,7 +29,14 @@ import { applyServerErrors } from '@/lib/validation/utils';
 
 import { createCompanyAction } from './actions';
 
-export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
+export function CompanyForm({
+  turnstileSiteKey,
+  notice,
+}: {
+  turnstileSiteKey?: string;
+  /** Rendered above the form, e.g. the unverified-email banner. */
+  notice?: ReactNode;
+}) {
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string>();
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
@@ -82,6 +89,7 @@ export function CompanyForm({ turnstileSiteKey }: { turnstileSiteKey?: string })
 
   return (
     <div className="mx-auto w-full max-w-2xl px-(--page-pad) pt-12 pb-20">
+      {notice}
       <header className="mb-8">
         <Eyebrow>Contribute</Eyebrow>
         <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">

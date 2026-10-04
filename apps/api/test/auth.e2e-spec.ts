@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { afterAll, beforeAll, describe, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import request from 'supertest';
 
 import { AppModule } from './../src/app.module';
@@ -136,5 +136,134 @@ describe('Session revocation (e2e)', () => {
       .get('/admin/submissions')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(403);
+  });
+});
+
+// Contributions need a confirmed email. Requires Postgres running and migrated,
+// and the seeded `helia` company.
+describe('Email verification (e2e)', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  const stamp = Date.now();
+  const prefix = `e2e-verify-${stamp}`;
+  const hash = (raw: string) => createHash('sha256').update(raw).digest('hex');
+
+  const register = async (tag: string) => {
+    const res = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: `${prefix}-${tag}@test.dev`, name: 'E2E Verify', password: 'password123' })
+      .expect(201);
+    return res.body as { accessToken: string; user: { id: string; email: string } };
+  };
+  const me = (token: string) =>
+    request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${token}`);
+  const contribute = (token: string) =>
+    request(app.getHttpServer())
+      .post('/companies/helia/diversity')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ label: 'E2E', value: 'yes', note: 'verify e2e', attested: true });
+  /** The raw token only ever travels by email, so mint a known one here. */
+  const mint = (userId: string, email: string, raw: string, expiresInMs = 60_000) =>
+    prisma.emailVerificationToken.create({
+      data: { userId, email, tokenHash: hash(raw), expiresAt: new Date(Date.now() + expiresInMs) },
+    });
+  const verify = (token: string) =>
+    request(app.getHttpServer()).post('/auth/verify-email').send({ token });
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app.init();
+    prisma = app.get(PrismaService);
+  });
+
+  afterAll(async () => {
+    const users = await prisma.user.findMany({
+      where: { email: { startsWith: prefix } },
+      select: { id: true },
+    });
+    const ids = users.map((u) => u.id);
+    await prisma.diversitySignal.deleteMany({ where: { submittedById: { in: ids } } });
+    await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    await app.close();
+  });
+
+  it('blocks contributions until the email is verified, then allows them', async () => {
+    const { accessToken, user } = await register('flow');
+    const issued = await prisma.emailVerificationToken.count({ where: { userId: user.id } });
+    expect(issued).toBe(1);
+
+    const refused = await contribute(accessToken).expect(403);
+    expect(refused.body.code).toBe('EMAIL_UNVERIFIED');
+    expect((await me(accessToken).expect(200)).body.emailVerified).toBe(false);
+
+    const raw = `${prefix}-flow`;
+    await mint(user.id, user.email, raw);
+    await verify(raw).expect(200, { ok: true });
+
+    expect((await me(accessToken).expect(200)).body.emailVerified).toBe(true);
+    await contribute(accessToken).expect(201);
+
+    // Spent: a replay is refused.
+    await verify(raw).expect(400);
+  });
+
+  it('refuses an expired token', async () => {
+    const { user } = await register('expired');
+    const raw = `${prefix}-expired`;
+    await mint(user.id, user.email, raw, -1000);
+    await verify(raw).expect(400);
+  });
+
+  it('refuses a token sent to an address that is no longer the account\'s', async () => {
+    const { user } = await register('moved');
+    const raw = `${prefix}-moved`;
+    await mint(user.id, `${prefix}-old@test.dev`, raw);
+    await verify(raw).expect(400);
+  });
+
+  it('changing the email clears verification', async () => {
+    const { accessToken, user } = await register('change');
+    await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+    expect((await me(accessToken).expect(200)).body.emailVerified).toBe(true);
+
+    await request(app.getHttpServer())
+      .patch('/auth/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'E2E Verify', email: `${prefix}-changed@test.dev` })
+      .expect(200);
+    expect((await me(accessToken).expect(200)).body.emailVerified).toBe(false);
+    await contribute(accessToken).expect(403);
+  });
+
+  it('resend is throttled to one link a minute', async () => {
+    const { accessToken } = await register('resend');
+    const resend = () =>
+      request(app.getHttpServer())
+        .post('/auth/resend-verification')
+        .set('Authorization', `Bearer ${accessToken}`);
+    // Register just issued a link, so the cooldown is already running.
+    await resend().expect(429);
+  });
+
+  it('resend issues a fresh link once the cooldown has passed', async () => {
+    const { accessToken, user } = await register('resend-ok');
+    await prisma.emailVerificationToken.updateMany({
+      where: { userId: user.id },
+      data: { createdAt: new Date(Date.now() - 120_000) },
+    });
+    await request(app.getHttpServer())
+      .post('/auth/resend-verification')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200, { ok: true });
+    // The older unused link was retired; only the new one exists.
+    expect(await prisma.emailVerificationToken.count({ where: { userId: user.id } })).toBe(1);
+    const newest = await prisma.emailVerificationToken.findFirstOrThrow({
+      where: { userId: user.id },
+    });
+    expect(newest.createdAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 });

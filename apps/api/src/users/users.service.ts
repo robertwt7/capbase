@@ -38,7 +38,10 @@ export class UsersService {
     return this.prisma.user.create({ data });
   }
 
-  update(id: string, data: { name?: string; email?: string; passwordHash?: string }) {
+  update(
+    id: string,
+    data: { name?: string; email?: string; passwordHash?: string; emailVerifiedAt?: Date | null },
+  ) {
     return this.prisma.user.update({ where: { id }, data });
   }
 
@@ -97,6 +100,72 @@ export class UsersService {
         data: { passwordHash, tokenVersion: { increment: 1 } },
       });
       return true;
+    });
+  }
+
+  /** When this user's newest verification link was issued, or null. */
+  async lastVerificationRequestAt(userId: string): Promise<Date | null> {
+    const row = await this.prisma.emailVerificationToken.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    return row?.createdAt ?? null;
+  }
+
+  /** Issue a verification link for `email`, retiring older unused ones so only the newest works. */
+  async createVerificationToken(
+    userId: string,
+    email: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.emailVerificationToken.deleteMany({
+        where: { userId, usedAt: null },
+      }),
+      this.prisma.emailVerificationToken.create({
+        data: { userId, email, tokenHash, expiresAt },
+      }),
+    ]);
+  }
+
+  /**
+   * Spend a verification token. Returns null when it is unknown, used, expired, its user
+   * banned, or it was sent to an address that is no longer the user's. Otherwise returns the
+   * user and whether this call is the one that verified them (the welcome email keys off it).
+   */
+  async consumeVerificationToken(
+    tokenHash: string,
+  ): Promise<{ email: string; name: string; newlyVerified: boolean } | null> {
+    const token = await this.prisma.emailVerificationToken.findUnique({
+      where: { tokenHash },
+      include: { user: { select: { email: true, name: true, bannedAt: true } } },
+    });
+    if (
+      !token ||
+      token.usedAt ||
+      token.expiresAt < new Date() ||
+      token.user.bannedAt ||
+      token.email !== token.user.email
+    ) {
+      return null;
+    }
+    const { email, name } = token.user;
+    // Same double-submit guard as consumeResetToken: only one request flips usedAt.
+    return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const spent = await tx.emailVerificationToken.updateMany({
+        where: { id: token.id, usedAt: null },
+        data: { usedAt: now },
+      });
+      if (spent.count === 0) return null;
+      // Re-check the address inside the write, so a concurrent email change can't be verified.
+      const verified = await tx.user.updateMany({
+        where: { id: token.userId, email: token.email, emailVerifiedAt: null },
+        data: { emailVerifiedAt: now },
+      });
+      return { email, name, newlyVerified: verified.count === 1 };
     });
   }
 

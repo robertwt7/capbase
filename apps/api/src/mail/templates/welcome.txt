@@ -1,0 +1,8 @@
+Hi {{{NAME}}},
+
+You're verified — welcome to Capbase, the open, crowdsourced company and funding
+database. Contribute a company, round, or person to unlock full profiles for 30 days:
+
+{{{SITE_URL}}}/contribute
+
+— The Capbase team

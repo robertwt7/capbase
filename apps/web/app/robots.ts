@@ -16,6 +16,7 @@ export default function robots(): MetadataRoute.Robots {
         '/contribute',
         '/companies/*/contribute',
         '/report/',
+        '/verify-email',
       ],
     },
     // The index; it points at the per-entity child sitemaps, which are paged

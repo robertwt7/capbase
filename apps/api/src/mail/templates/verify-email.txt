@@ -1,0 +1,10 @@
+Hi {{{NAME}}},
+
+Confirm this address to start adding companies, rounds and people to Capbase.
+The link works once and expires in 24 hours:
+
+{{{LINK}}}
+
+Didn't create a Capbase account? Ignore this email and nothing happens.
+
+— The Capbase team

@@ -193,6 +193,11 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `<form>` (note + link inputs) whose buttons pick the server action via `formAction`:
   Resolve, Dismiss, and on an unsuppressed person Suppress & resolve. Resolving is
   bookkeeping only — companies/investors are never hidden by a report.
+- `/verify-email?token=` — spends a verification link on a **button press, never on load**
+  (mail scanners open every link and would burn the token). Signed-in, unverified, non-admin
+  users see `components/VerifyEmailBanner.tsx` (with a "Resend link" button) on `/profile`,
+  `/profile/settings`, `/contribute` and `/companies/[slug]/contribute`. Robots-disallowed,
+  `noindex`, `no-referrer`.
 - `/report/[type]/[slug]` — the public report form for a company/investor/person profile
   (linked from each profile's footer). Anonymous even when signed in: `lib/reports.ts` sends
   **no** authorization header, only the Turnstile token. Robots-disallowed, `noindex`.
@@ -229,13 +234,36 @@ Prisma rows → shared `@repo/api` types (`src/companies/company.mapper.ts`). DT
 `ValidationPipe` is `{ whitelist: true, transform: true }` **without**
 `forbidNonWhitelisted`: an undecorated DTO property is silently stripped, not rejected — a
 new required field must carry a validator or it vanishes. Config comes from
-env (`apps/api/.env`, see `.env.example`). Registration sends a welcome email through
-`MailModule` (`src/mail/`, Resend) — a no-op that only logs when `RESEND_API_KEY` is unset.
+env (`apps/api/.env`, see `.env.example`).
+
+Mail goes through `MailModule` (`src/mail/`, Resend) — a no-op that only logs (with the
+link, outside production) when `RESEND_API_KEY` is unset. **Every email is a template
+checked into the repo**: `src/mail/templates/<name>.{html,txt}` (standalone, table-based,
+inline-styled HTML plus a plain-text twin), registered with its subject and
+`{{{UPPER_SNAKE}}}` placeholders in `src/mail/templates.ts`. The API fills them (values
+HTML-escaped in the html body; a missing value throws) and sends both bodies — there are no
+Resend hosted templates. Emails **hardcode the ledger hex values**, the one exception to the
+no-hex rule, because email clients have no CSS variables. `nest-cli.json` `assets` copies
+the files into `dist/`; `templates.spec.ts` fails if a file and the registry drift;
+`make mail-preview` renders them to `apps/api/.mail-preview/`. Conventions:
+`src/mail/templates/README.md`.
+
+**Email verification.** Registering sends a `verify-email` link (24h, single-use, only the
+sha256 stored — the same pattern as password reset); spending it at `POST /auth/verify-email`
+sets `User.emailVerifiedAt` and sends the `welcome` email, once. `POST
+/auth/resend-verification` (JWT) is limited to one link per account per minute → 429; that
+cooldown, not nginx, is the throttle (the web's resend button is a server action, so it
+lands in nginx's `writes` zone). Changing the email clears verification and mails the new
+address; each `EmailVerificationToken` is bound to the address it was sent to, so an old
+link can't verify a new one. `AuthUser.emailVerified` / `RequestUser.emailVerified` carry
+the flag (`JwtStrategy` reads it from the row, like role).
 
 Abuse controls: every contribution route uses the `@Contribution()` decorator
-(`JwtAuthGuard` + `PendingCapGuard` + `TurnstileGuard`). The cap is
+(`JwtAuthGuard` + `VerifiedEmailGuard` + `PendingCapGuard` + `TurnstileGuard`, cheapest
+first). An unverified non-admin gets `403 { code: 'EMAIL_UNVERIFIED' }` (`@repo/api`), which
+the web's `contributionErrorMessage` turns into a pointer at the banner. The cap is
 `MAX_PENDING_SUBMISSIONS` (30, `@repo/api`) PENDING rows per user → 429; admins are
-exempt. `TurnstileGuard` (also on `POST /auth/register`) is a no-op without
+exempt from both. `TurnstileGuard` (also on `POST /auth/register`) is a no-op without
 `TURNSTILE_SECRET` and fails closed when Cloudflare is unreachable. `POST /reports` is the one
 other anonymous write: `@UseGuards(TurnstileGuard)` only, no pending cap, nginx `writes` in
 front (`src/reports/`; the admin side is a separate `AdminReportsController` on
@@ -256,6 +284,11 @@ Single source of truth for the schema. Holds `prisma/schema.prisma`, `prisma/mig
 in `prisma.config.ts` (reads `DATABASE_URL`), not the schema. Money is `BigInt`. Contributable
 Company/FundingRound rows — and the ingest-only `Fund` — also have
 `externalSource`/`externalId` (`@@unique`) for idempotent ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
+
+`User.emailVerifiedAt` (plus `EmailVerificationToken`) gates contributions. The
+`email_verification` migration backfilled every pre-existing user as verified
+(`= createdAt`), so a seed `001` admin created on a fresh DB afterwards stays unverified —
+harmless, admins are exempt.
 
 **Seeding is phased** (Flyway-style): `prisma/seeds/` holds ordered `Seed` phases
 (`001-admin-user` bootstrap, `002-demo-companies` demo, …) registered in `seeds/index.ts`;

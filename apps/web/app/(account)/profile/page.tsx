@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { MyContribution } from '@repo/api';
 
 import { Badge, Button, Card } from '../../../components/ui';
+import { VerifyEmailBanner } from '../../../components/VerifyEmailBanner';
 import { getMyContributions, requireUser } from '../../../lib/auth';
 import { formatDate } from '../../../lib/format';
 import { getSavedCompanies } from '../../../lib/watchlist';
@@ -50,6 +51,8 @@ export default async function ProfilePage() {
           </form>
         </div>
       </div>
+
+      <VerifyEmailBanner user={user} className="mt-7" />
 
       <AccessPanel
         access={access}

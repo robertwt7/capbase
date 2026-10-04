@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { ComponentType } from 'react';
 
 import { PageContainer, SectionHeader } from '@/components/ui';
+import { VerifyEmailBanner } from '@/components/VerifyEmailBanner';
 import { requireUser } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
 import { turnstileSiteKey } from '@/lib/turnstile';
@@ -47,7 +48,7 @@ export default async function ContributeToCompanyPage({
     ? (requested as HubType)
     : 'round';
 
-  await requireUser(`/companies/${slug}/contribute?type=${type}`);
+  const user = await requireUser(`/companies/${slug}/contribute?type=${type}`);
 
   const result = await getCompanyDetail(slug);
   if (!result) {
@@ -103,6 +104,8 @@ export default async function ContributeToCompanyPage({
             </Link>
           ))}
         </nav>
+
+        <VerifyEmailBanner user={user} className="mt-7" />
 
         <div className="mt-7">
           {ActiveForm ? (

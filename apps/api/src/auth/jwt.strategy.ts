@@ -40,6 +40,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || user.bannedAt || (payload.tv ?? 0) !== user.tokenVersion) {
       throw new UnauthorizedException();
     }
-    return { id: user.id, email: user.email, role: user.role };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      emailVerified: user.emailVerifiedAt !== null,
+    };
   }
 }

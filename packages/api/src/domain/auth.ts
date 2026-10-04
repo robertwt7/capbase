@@ -16,6 +16,8 @@ export interface AuthUser {
   email: string;
   name: string;
   role: Role;
+  /** False until the user spends a verification link (and again after an email change). */
+  emailVerified: boolean;
 }
 
 export interface AuthResponse {
@@ -41,6 +43,13 @@ export interface ResetPasswordInput {
   token: string;
   password: string;
 }
+
+export interface VerifyEmailInput {
+  token: string;
+}
+
+/** `code` on the 403 a contribution gets from an account that hasn't verified its email. */
+export const EMAIL_UNVERIFIED = 'EMAIL_UNVERIFIED';
 
 /** Most PENDING submissions one account may have in the queue at once. Above
  *  it, contributions answer 429 until a moderator catches up. */

@@ -4,11 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import request from 'supertest';
 
 import { AppModule } from './../src/app.module';
+import { PrismaService } from './../src/prisma/prisma.service';
 
 // Exercises the crowdsource -> moderation cycle end to end against the seeded DB.
 // Requires Postgres running (docker compose up) and the DB seeded.
 describe('Submissions & moderation (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
   let userToken: string;
   let adminToken: string;
   const email = `e2e-${Date.now()}@test.dev`;
@@ -21,6 +23,7 @@ describe('Submissions & moderation (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
+    prisma = app.get(PrismaService);
   });
 
   afterAll(async () => {
@@ -34,6 +37,11 @@ describe('Submissions & moderation (e2e)', () => {
       .expect(201);
     expect(reg.body.user.role).toBe('USER');
     userToken = reg.body.accessToken;
+    // Pre-verified: this suite tests moderation, not email verification.
+    await prisma.user.update({
+      where: { id: reg.body.user.id },
+      data: { emailVerifiedAt: new Date() },
+    });
 
     // The seeded admin credentials come from env (see packages/db/prisma/seed.ts),
     // loaded into process.env by ConfigModule during app.init().

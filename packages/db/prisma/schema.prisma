@@ -37,6 +37,23 @@ model PasswordResetToken {
   @@index([userId])
 }
 
+/// A single-use email-verification link. Mirrors PasswordResetToken: only the sha256 of the
+/// token is stored, and issuing a new one deletes the user's older unused ones.
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The address the link was sent to. Spending it requires this to still be the user's
+  /// email, so a link mailed to an old address can never verify a new one.
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
 model SeedHistory {
   name      String   @id
   appliedAt DateTime @default(now())
@@ -54,8 +71,12 @@ model User {
   tokenVersion Int       @default(0)
   /// Set by an admin. A banned user can't sign in, and every live session dies.
   bannedAt     DateTime?
+  /// Set when the user spends an email-verification link; cleared when they change their
+  /// email. Contributions require it (admins exempt). Existing users were backfilled to createdAt.
+  emailVerifiedAt DateTime?
 
-  passwordResetTokens PasswordResetToken[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
 
   companies      Company[]
   rounds         FundingRound[]

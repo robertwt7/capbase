@@ -6,6 +6,8 @@ export interface RequestUser {
   id: string;
   email: string;
   role: Role;
+  /** Read from the row on every request, like role, so verifying takes effect at once. */
+  emailVerified: boolean;
 }
 
 export const CurrentUser = createParamDecorator(
