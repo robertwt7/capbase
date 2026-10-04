@@ -155,7 +155,15 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 
 ### Routes
 
-- `/` — landing: hero, market tape, sector cards, company directory table.
+- `/` — landing: hero, market tape, a three-step **How it works** (browse free → contribute →
+  approved contribution unlocks every profile for `CONTRIBUTION_WINDOW_DAYS`), sector cards, and
+  **Popular companies**: a fresh random draw per visit from `GET /companies/featured` (the API
+  scores a 120-company pool on saves, named investors, recent rounds and a known valuation,
+  caches it 15 min, and shuffles per call). A locked viewer sees the bottom half blurred
+  (`CompanyTable`'s `locked` prop) under an "Unlock by contributing accepted data" panel;
+  the featured response carries the viewer's `access` (optional JWT, like the detail read) and
+  lifts it for unlocked users/admins. The gate rule itself is `UsersService.accessFor` — the one
+  definition the profile detail, `/auth/me/contributions` and the featured read all use.
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle).

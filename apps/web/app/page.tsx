@@ -1,23 +1,47 @@
+import { CONTRIBUTION_WINDOW_DAYS, PREVIEW_LIMIT } from '@repo/api';
 import Link from 'next/link';
 
 import { CompanyTable } from '@/components/CompanyTable';
 import { JsonLd } from '@/components/JsonLd';
-import { Button, Eyebrow, SectionHeader, Stat } from '@/components/ui';
-import { getCompanies, getMarketStats, getMarketTotals } from '@/lib/data';
-import { formatCount, formatCountCompact, formatUsd, signedPct } from '@/lib/format';
+import { Button, Card, Eyebrow, SectionHeader, Stat } from '@/components/ui';
+import { getToken } from '@/lib/auth';
+import { getFeaturedCompanies, getMarketStats, getMarketTotals } from '@/lib/data';
+import { formatCount, formatCountCompact, formatDate, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
 import { siteOrganizationJsonLd, websiteJsonLd } from '@/lib/schema';
 
-const HOME_PREVIEW = 8;
+/** Featured rows fetched; the first HOME_OPEN are shown, the rest blurred
+    behind the contribution gate for a viewer who hasn't unlocked. */
+const HOME_FEATURED = 10;
+const HOME_OPEN = 5;
 const HOME_SECTORS = 5;
 
+const STEPS = [
+  {
+    title: 'Browse for free',
+    body: `Every company, investor, fund and person is open to search. Profiles show the first ${PREVIEW_LIMIT} rows of each section — rounds, investors, people — to everyone.`,
+  },
+  {
+    title: 'Contribute a fact',
+    body: 'Add a funding round, a founder, an investor or a correction, with a source. A moderator reviews every submission before it goes live.',
+  },
+  {
+    title: 'Unlock everything',
+    body: `Once a contribution is accepted, every profile opens in full — complete funding histories, every investor, every person — for ${CONTRIBUTION_WINDOW_DAYS} days.`,
+  },
+] as const;
+
 export default async function Home() {
-  // Landing shop window: the top-raised companies, not the full directory.
-  const [companies, marketStats, marketTotals] = await Promise.all([
-    getCompanies({ pageSize: HOME_PREVIEW, sort: 'raised' }),
+  // Landing shop window: a fresh random draw from the most popular companies,
+  // not the head of an alphabetical (or raised-desc) directory.
+  const [{ items: featured, access }, marketStats, marketTotals, token] = await Promise.all([
+    getFeaturedCompanies(HOME_FEATURED),
     getMarketStats(),
     getMarketTotals(),
+    getToken(),
   ]);
+  const open = access.unlocked ? featured : featured.slice(0, HOME_OPEN);
+  const gated = access.unlocked ? [] : featured.slice(HOME_OPEN);
 
   return (
     <div>
@@ -57,6 +81,37 @@ export default async function Home() {
         </div>
       </section>
 
+      <section
+        id="how-it-works"
+        className="mx-auto max-w-(--page-max) scroll-mt-24 px-(--page-pad) pt-16"
+      >
+        <SectionHeader
+          title="How it works"
+          note={
+            access.unlocked ? (
+              <span className="font-mono text-xs text-graphite-500 uppercase">
+                {access.unlockedUntil
+                  ? `Full access until ${formatDate(access.unlockedUntil)}`
+                  : 'Full access'}
+              </span>
+            ) : undefined
+          }
+        />
+        <ol className="mt-6 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line max-[900px]:grid-cols-1">
+          {STEPS.map((step, i) => (
+            <li key={step.title} className="flex flex-col gap-2.5 bg-surface p-[22px]">
+              <span className="font-mono text-xs tracking-[0.14em] text-graphite-500">
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
+                {step.title}
+              </h3>
+              <p className="text-sm leading-relaxed text-graphite-700">{step.body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       <section className="mx-auto max-w-(--page-max) px-(--page-pad) pt-16">
         <SectionHeader
           title="Top sectors"
@@ -92,7 +147,7 @@ export default async function Home() {
 
       <section className="mx-auto max-w-(--page-max) px-(--page-pad) pt-16">
         <SectionHeader
-          title="Companies"
+          title="Popular companies"
           note={
             <Button variant="ghost" size="sm" href="/companies">
               View all companies →
@@ -101,10 +156,52 @@ export default async function Home() {
         />
 
         <div className="mt-6">
-          <CompanyTable companies={companies.items} />
+          <CompanyTable
+            companies={open}
+            locked={
+              gated.length > 0
+                ? { companies: gated, overlay: <UnlockPanel signedIn={Boolean(token)} /> }
+                : undefined
+            }
+          />
         </div>
       </section>
 
     </div>
+  );
+}
+
+/** The overlay on the blurred half of the landing company list. */
+function UnlockPanel({ signedIn }: { signedIn: boolean }) {
+  return (
+    <Card emphasis className="w-full max-w-md p-6 text-center">
+      <Eyebrow>Contributor access</Eyebrow>
+      <p className="mt-3 font-display text-xl font-semibold tracking-tight text-ink">
+        Unlock by contributing accepted data
+      </p>
+      <p className="mt-2 text-sm leading-relaxed text-graphite-700">
+        One approved contribution opens every profile in full — every round, investor and person
+        — for {CONTRIBUTION_WINDOW_DAYS} days.
+      </p>
+      <div className="mt-5 flex flex-wrap justify-center gap-3">
+        {signedIn ? (
+          <Button variant="primary" shape="pill" size="sm" href="/contribute">
+            Contribute data
+          </Button>
+        ) : (
+          <>
+            <Button variant="primary" shape="pill" size="sm" href="/register?next=/contribute">
+              Create a free account
+            </Button>
+            <Button variant="outline" shape="pill" size="sm" href="/login?next=/contribute">
+              Sign in
+            </Button>
+          </>
+        )}
+        <Button variant="ghost" shape="pill" size="sm" href="#how-it-works">
+          How it works
+        </Button>
+      </div>
+    </Card>
   );
 }

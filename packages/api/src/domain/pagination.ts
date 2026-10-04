@@ -17,6 +17,11 @@ export type CompanySort = 'name' | 'raised' | 'valuation';
 
 export const COMPANY_SORTS: readonly CompanySort[] = ['name', 'raised', 'valuation'];
 
+/** `/companies/featured` — a rotating sample from the most-followed, best-documented
+    companies, for the landing page. Not paginated: it is a shop window, not a list. */
+export const DEFAULT_FEATURED_LIMIT = 8;
+export const MAX_FEATURED_LIMIT = 24;
+
 export interface CompanyListQuery {
   q?: string;
   sector?: Sector;

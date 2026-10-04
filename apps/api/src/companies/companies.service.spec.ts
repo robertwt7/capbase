@@ -107,7 +107,11 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
       citation: { findMany: citationFindMany },
       entityIdentifier: { findMany: jest.fn(async () => []) },
     } as unknown as PrismaService;
-    const users = { lastContributionAt } as unknown as UsersService;
+    // The real `accessFor` over a mocked `lastContributionAt`, so these tests
+    // pin the gate rule itself rather than a stub of it.
+    const users = Object.assign(Object.create(UsersService.prototype) as UsersService, {
+      lastContributionAt,
+    });
     service = new CompaniesService(prisma, users);
   });
 
@@ -393,5 +397,73 @@ describe('CompaniesService.getCompanyHistory', () => {
 
     expect(JSON.stringify(items)).not.toContain('@example.com');
     expect(items[0]!.actorName).toBe('Ada Admin');
+  });
+});
+
+describe('CompaniesService.findFeatured (landing shop window)', () => {
+  let service: CompaniesService;
+  let queryRaw: jest.Mock;
+  let findMany: jest.Mock<(args: { where: { id: { in: string[] } } }) => Promise<unknown[]>>;
+  let accessFor: jest.Mock;
+  const POOL = ['a', 'b', 'c', 'd', 'e', 'f'];
+
+  beforeEach(() => {
+    queryRaw = jest.fn(async () => POOL.map((id) => ({ id })));
+    // Rows come back in arbitrary (here: reversed) order, as `IN (...)` does.
+    findMany = jest.fn(async (args) =>
+      [...args.where.id.in].reverse().map((id) => ({ ...dbCompany(), id, slug: id })),
+    );
+    const prisma = {
+      $queryRaw: queryRaw,
+      company: { findMany },
+    } as unknown as PrismaService;
+    accessFor = jest.fn(async () => ({ unlocked: false, unlockedUntil: null }));
+    service = new CompaniesService(prisma, { accessFor } as unknown as UsersService);
+  });
+
+  it('returns `limit` distinct companies drawn from the scored pool', async () => {
+    const { items: companies } = await service.findFeatured(4);
+
+    expect(companies).toHaveLength(4);
+    const slugs = companies.map((c) => c.slug);
+    expect(new Set(slugs).size).toBe(4);
+    slugs.forEach((slug) => expect(POOL).toContain(slug));
+  });
+
+  it('keeps the shuffled order rather than the database order', async () => {
+    const { items: companies } = await service.findFeatured(6);
+    const requested = findMany.mock.calls[0]![0].where.id.in;
+
+    expect(companies.map((c) => c.slug)).toEqual(requested);
+  });
+
+  it('computes the pool once and reuses it across calls', async () => {
+    await service.findFeatured(3);
+    await service.findFeatured(3);
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns nothing without querying rows when the pool is empty', async () => {
+    queryRaw.mockResolvedValue([] as never);
+
+    await expect(service.findFeatured(4)).resolves.toEqual({
+      items: [],
+      access: { unlocked: false, unlockedUntil: null },
+    });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("reports the viewer's gate state alongside the rows", async () => {
+    accessFor.mockResolvedValue({ unlocked: true, unlockedUntil: null } as never);
+    const viewer = { id: 'admin1', role: 'ADMIN' as const };
+
+    const { items, access } = await service.findFeatured(4, viewer);
+
+    expect(accessFor).toHaveBeenCalledWith(viewer);
+    expect(access.unlocked).toBe(true);
+    // Directory rows are public: an unlocked viewer gets the same number.
+    expect(items).toHaveLength(4);
   });
 });
