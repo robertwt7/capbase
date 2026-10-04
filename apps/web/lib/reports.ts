@@ -1,6 +1,7 @@
 import type { CreateReportInput } from '@repo/api';
 
 import { ApiError, apiFetch } from './api';
+import { RATE_LIMITED_MESSAGE } from './rate-limit';
 import { turnstileHeaders } from './turnstile';
 
 /** File a "Report an issue". Deliberately sends NO authorization header —
@@ -26,8 +27,7 @@ export function reportErrorMessage(err: unknown): string {
         : 'Human verification failed. Please retry.';
     }
     if (err.status === 404) return 'This profile no longer exists.';
-    if (err.status === 429)
-      return 'Too many requests. Please wait a minute and try again.';
+    if (err.status === 429) return RATE_LIMITED_MESSAGE;
   }
   return 'Your report could not be sent. Please try again.';
 }

@@ -22,6 +22,7 @@ import {
 } from './dto/contributions.dto';
 import { CreateChangeProposalDto } from './dto/create-proposal.dto';
 import { ListCompaniesDto } from './dto/list-companies.dto';
+import { SearchThrottle } from '../throttle/throttle';
 import { CompanyHistoryDto } from './dto/company-history.dto';
 
 @Controller('companies')
@@ -30,6 +31,7 @@ export class CompaniesController {
 
   // --- Public reads (approved data only) ---
 
+  @SearchThrottle()
   @Get()
   findAll(@Query() query: ListCompaniesDto): Promise<Paginated<Company>> {
     return this.companies.findAllApproved(query);

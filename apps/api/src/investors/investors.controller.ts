@@ -8,12 +8,14 @@ import type {
 
 import { InvestorsService } from './investors.service';
 import { ListInvestorsDto } from './dto/list-investors.dto';
+import { SearchThrottle } from '../throttle/throttle';
 
 @Controller('investors')
 export class InvestorsController {
   constructor(private readonly investors: InvestorsService) {}
 
   // Public read: one page of approved investors.
+  @SearchThrottle()
   @Get()
   findAll(@Query() query: ListInvestorsDto): Promise<Paginated<InvestorSummary>> {
     return this.investors.findAll(query);

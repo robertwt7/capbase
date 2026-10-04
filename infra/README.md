@@ -419,12 +419,60 @@ read-only, not a rendered template. The domain is hardcoded in it.
   hitting the bare IP get nothing.
 - HSTS, `nosniff`, a referrer policy, gzip, and immutable caching on
   `/_next/static/` are all set there.
+- **Rate limits** are per-IP `limit_req` zones answering 429: `auth` 10 r/m on
+  sign-in, `writes` 30 r/m on every POST, `general` 30 r/s. nginx passes the
+  visitor's address on as `X-Real-IP`; the web forwards it to the API on every
+  write, where `@nestjs/throttler` is a second, per-user layer (limits in
+  `apps/api/src/throttle/throttle.ts`, each at or above its nginx twin so nginx
+  normally answers first). Nothing to configure for it.
 - **`www` redirect**: shipped commented out at the bottom of the file. Enabling
   it without a `www` DNS record makes issuance fail for *both* names. Do it in
   this order — add the `www` A record, uncomment the block, then:
   ```sh
   CERT_DOMAINS='capbase.fyi www.capbase.fyi' FORCE=1 make deploy-tls
   ```
+
+### Putting Cloudflare in front (optional)
+
+nginx is already prepared; turning Cloudflare on is a dashboard change only.
+
+**How it works.** With the record proxied (orange cloud), the browser talks
+TLS to Cloudflare, and Cloudflare opens its own HTTPS connection to this VPS.
+nginx therefore sees every request arrive **from a Cloudflare edge address**,
+not from the visitor. Left alone, that would put every visitor behind the same
+edge into one rate-limit bucket, and they would start getting each other's
+429s. **`nginx/conf.d/cloudflare-realip.conf`** fixes that: for a request whose
+peer is a Cloudflare range, nginx takes the visitor's address from the
+`CF-Connecting-IP` header, so the limits, the access log, `X-Real-IP` and the
+API throttler all see the real visitor. From any other peer the header is
+ignored, so nobody can claim an address by sending it straight to the IP.
+While Cloudflare is off the file does nothing.
+
+To turn it on:
+
+1. Add `capbase.fyi` to Cloudflare and switch the A record (and
+   `errors.capbase.fyi`, if you like) to **Proxied**.
+2. **SSL/TLS → Full (strict).** The Let's Encrypt certificate stays valid on
+   the origin. **Never "Flexible"**: Cloudflare would call port 80, which
+   redirects to https, and the redirect loops forever.
+3. Leave HTML uncached (the default; don't add a "Cache Everything" rule).
+   Pages carry per-user state from cookies.
+4. Check it worked: `docker logs --tail 20 capbase-nginx` should show visitor
+   addresses. If you see `172.64.x`, `104.16.x` or `2606:4700:…`, the realip
+   file isn't loaded.
+
+Certificate renewal keeps working through the proxy. The HTTP-01 challenge
+passes through, and the challenge path is also served on :443 in case "Always
+Use HTTPS" redirects it.
+
+Cloudflare's ranges change rarely. Refresh them with
+`make nginx-cloudflare-ips` on the laptop (it rewrites the conf file), then
+commit, deploy and run `docker exec capbase-nginx nginx -s reload`.
+
+*Optional hardening, not done:* restrict 80/443 in `ufw` to those same ranges
+so nobody can bypass Cloudflare by hitting the IP. Do this only once Cloudflare
+is permanently on, because turning Cloudflare off afterwards takes the site
+down.
 
 ## Tuning
 

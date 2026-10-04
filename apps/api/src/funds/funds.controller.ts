@@ -3,6 +3,7 @@ import type { FundSummary, Paginated } from '@repo/api';
 
 import { FundsService } from './funds.service';
 import { ListFundsDto } from './dto/list-funds.dto';
+import { SearchThrottle } from '../throttle/throttle';
 
 @Controller('funds')
 export class FundsController {
@@ -10,6 +11,7 @@ export class FundsController {
 
   /** Public read: one page of approved funds. There is no `GET /funds/:id` —
    *  a fund has no page of its own, so nothing addresses one. */
+  @SearchThrottle()
   @Get()
   findAll(@Query() query: ListFundsDto): Promise<Paginated<FundSummary>> {
     return this.funds.findAll(query);

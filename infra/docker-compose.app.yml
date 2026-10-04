@@ -41,6 +41,9 @@ services:
       QUEUE_ALERT_THRESHOLD: ${QUEUE_ALERT_THRESHOLD:-100}
       QUEUE_DIGEST_CRON: ${QUEUE_DIGEST_CRON:-0 8 * * *}
       QUEUE_DIGEST_TZ: ${QUEUE_DIGEST_TZ:-UTC}
+      # Hops allowed to set X-Forwarded-For (the visitor IP the throttler keys
+      # on). Empty = private + loopback ranges, i.e. the web container. Never true.
+      TRUST_PROXY: ${TRUST_PROXY:-}
       GIT_SHA: ${GIT_SHA:-}
     # Internal only — the browser never hits the API (API_URL is server-side).
     # Uncomment to expose on localhost for debugging:

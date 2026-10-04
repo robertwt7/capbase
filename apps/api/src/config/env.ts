@@ -1,6 +1,7 @@
 import { CronTime } from 'cron';
 
 import { DEFAULT_QUEUE_DIGEST_CRON } from '../admin/queue-alerts.service';
+import { parseTrustProxy } from '../throttle/throttle';
 
 /**
  * Boot-time env validation for ConfigModule. Fails fast with every problem at
@@ -42,6 +43,13 @@ export function validateEnv(env: Record<string, unknown>): Record<string, unknow
     } catch (err) {
       errors.push(`QUEUE_DIGEST_CRON / QUEUE_DIGEST_TZ is invalid: ${(err as Error).message}`);
     }
+  }
+
+  const trustProxy = str('TRUST_PROXY');
+  if (trustProxy && parseTrustProxy(trustProxy) === null) {
+    errors.push(
+      `TRUST_PROXY must be a comma list of loopback/linklocal/uniquelocal, addresses or CIDRs (never true or a hop count), got "${trustProxy}"`,
+    );
   }
 
   const port = str('PORT');

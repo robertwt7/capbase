@@ -32,6 +32,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { TurnstileGuard } from './guards/turnstile.guard';
+import { AuthThrottle } from '../throttle/throttle';
 
 @Controller('auth')
 export class AuthController {
@@ -46,18 +47,21 @@ export class AuthController {
     return this.config.get<string>('SITE_URL', 'http://localhost:3001');
   }
 
+  @AuthThrottle()
   @UseGuards(TurnstileGuard)
   @Post('register')
   register(@Body() dto: RegisterDto): Promise<AuthResponse> {
     return this.auth.register(dto, this.siteUrl());
   }
 
+  @AuthThrottle()
   @Post('login')
   login(@Body() dto: LoginDto): Promise<AuthResponse> {
     return this.auth.login(dto);
   }
 
   /** Always 200, whether or not the email is registered. */
+  @AuthThrottle()
   @Post('forgot-password')
   @HttpCode(200)
   async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<{ ok: true }> {
@@ -65,6 +69,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @AuthThrottle()
   @Post('reset-password')
   @HttpCode(200)
   async resetPassword(@Body() dto: ResetPasswordDto): Promise<{ ok: true }> {
@@ -73,6 +78,7 @@ export class AuthController {
   }
 
   /** Public: the token is the credential, and the link may be opened on another device. */
+  @AuthThrottle()
   @Post('verify-email')
   @HttpCode(200)
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ ok: true }> {

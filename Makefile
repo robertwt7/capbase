@@ -335,6 +335,10 @@ deploy-releases: ## [VPS] List the app releases still on disk (rollback targets)
 deploy-tls: ## [App/1 VPS] One-time Let's Encrypt cert bootstrap (needs DNS + ports 80/443)
 	sh infra/certbot/init-letsencrypt.sh
 
+.PHONY: nginx-cloudflare-ips
+nginx-cloudflare-ips: ## [laptop] Regenerate nginx's Cloudflare real-IP ranges (commit the result)
+	@scripts/cloudflare-ips.sh
+
 .PHONY: deploy-secrets
 deploy-secrets: ## [VPS] Generate strong POSTGRES_PASSWORD / JWT_SECRET / ADMIN_PASSWORD into infra/env/all.env
 	@scripts/gen-secrets.sh

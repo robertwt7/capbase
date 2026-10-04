@@ -49,4 +49,12 @@ describe('validateEnv', () => {
       /QUEUE_DIGEST_TZ/,
     );
   });
+
+  it('accepts a TRUST_PROXY list and rejects one that would trust every hop', () => {
+    const ok = { ...base, TRUST_PROXY: 'loopback, 10.0.0.0/8, fd00::/8' };
+    expect(validateEnv(ok)).toBe(ok);
+    for (const bad of ['true', '1', 'everyone']) {
+      expect(() => validateEnv({ ...base, TRUST_PROXY: bad })).toThrow(/TRUST_PROXY/);
+    }
+  });
 });

@@ -8,12 +8,14 @@ import type {
 
 import { PeopleService } from './people.service';
 import { ListPeopleDto } from './dto/list-people.dto';
+import { SearchThrottle } from '../throttle/throttle';
 
 @Controller('people')
 export class PeopleController {
   constructor(private readonly people: PeopleService) {}
 
   // Public read: one page of public people.
+  @SearchThrottle()
   @Get()
   findAll(@Query() query: ListPeopleDto): Promise<Paginated<PersonSummary>> {
     return this.people.findAll(query);
