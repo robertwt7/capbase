@@ -7,6 +7,7 @@ import {
   type Role,
   type SavedCompanyItem,
   type SavedStatus,
+  type ViewerAccess,
 } from '@repo/api';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -278,10 +279,20 @@ export class UsersService {
     return last !== null && last >= since;
   }
 
-  /** Date full access lapses (last contribution + window), or null if none. */
-  async unlockedUntil(userId: string): Promise<Date | null> {
-    const last = await this.lastContributionAt(userId);
-    return last ? new Date(last.getTime() + WINDOW_MS) : null;
+  /**
+   * The contribution gate for one viewer — the single definition every gated
+   * read uses. Anonymous is locked; an admin is unlocked without a query;
+   * anyone else is unlocked while their latest approved contribution is inside
+   * the rolling window. `unlockedUntil` is reported even after it lapses, so
+   * the UI can say when access expired.
+   */
+  async accessFor(viewer?: { id: string; role: Role }): Promise<ViewerAccess> {
+    if (!viewer) return { unlocked: false, unlockedUntil: null };
+    if (viewer.role === 'ADMIN') return { unlocked: true, unlockedUntil: null };
+    const last = await this.lastContributionAt(viewer.id);
+    if (!last) return { unlocked: false, unlockedUntil: null };
+    const until = new Date(last.getTime() + WINDOW_MS);
+    return { unlocked: Date.now() < until.getTime(), unlockedUntil: until.toISOString() };
   }
 
   /** A user's own submissions across every type, any status, newest first. */

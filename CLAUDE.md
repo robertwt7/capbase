@@ -88,6 +88,12 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   the form-level (non-field) error box, used by both the RHF forms and the auth/admin pages.
 - **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`** stay
   bespoke Tailwind role components (no shadcn equivalent), as does `FundingLadder`.
+- **`CompanyTable`** (`components/CompanyTable.tsx`) is the one company directory table
+  (landing, `/companies`, `/markets/[sector]`). Its optional `locked={{ companies, overlay }}`
+  appends rows rendered blurred, `inert` and `aria-hidden` (plain `<div>`s, not links) under
+  an overlay — the landing page's contribution teaser. Reuse it for any other gated teaser
+  rather than re-inlining a blur; there are no gradients, so the fade is the blur plus a
+  translucent `bg-paper/45`.
 - **`Sheet`** (Radix Dialog) backs the small-screen nav drawer in `components/SiteNav.tsx`
   (`PrimaryNav` + `MobileNav`, both setting `aria-current`).
 - **`TurnstileField`** — the Cloudflare Turnstile challenge on register and every
@@ -155,7 +161,15 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 
 ### Routes
 
-- `/` — landing: hero, market tape, sector cards, company directory table.
+- `/` — landing: hero, market tape, a three-step **How it works** (browse free → contribute →
+  approved contribution unlocks every profile for `CONTRIBUTION_WINDOW_DAYS`), sector cards, and
+  **Popular companies**: a fresh random draw per visit from `GET /companies/featured` (the API
+  scores a 120-company pool on saves, named investors, recent rounds and a known valuation,
+  caches it 15 min, and shuffles per call). A locked viewer sees the bottom half blurred
+  (`CompanyTable`'s `locked` prop) under an "Unlock by contributing accepted data" panel;
+  the featured response carries the viewer's `access` (optional JWT, like the detail read) and
+  lifts it for unlocked users/admins. The gate rule itself is `UsersService.accessFor` — the one
+  definition the profile detail, `/auth/me/contributions` and the featured read all use.
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle).
@@ -289,6 +303,36 @@ other anonymous write: `@UseGuards(TurnstileGuard)` only, no pending cap, nginx 
 front (`src/reports/`; the admin side is a separate `AdminReportsController` on
 `admin/reports`). The JWT is only
 identity: `JwtStrategy` re-reads the user, so role, ban and `tokenVersion` come from the DB.
+
+**The contribution gate (read side).** Anyone can read; a locked viewer gets only the first
+`PREVIEW_LIMIT` (2) rows of each company-profile section, and an approved contribution unlocks
+every profile for `CONTRIBUTION_WINDOW_DAYS` (30) — both constants in `@repo/api`
+`domain/contributions.ts`, which the web copy reads too. The rule lives in **one** place,
+`UsersService.accessFor(viewer?)` → `ViewerAccess { unlocked, unlockedUntil }`: anonymous is
+locked, an ADMIN is unlocked with no query, everyone else is unlocked while their latest
+APPROVED row (any reviewable type, proposals included) is inside the window. `unlockedUntil`
+is still reported after it lapses so the UI can say when. Every read that needs it calls
+`accessFor` — `getCompanyDetail`, `GET /auth/me/contributions`, `GET /companies/featured` —
+never a re-derivation.
+
+Gated reads carry access **in-band**: the route sits behind `OptionalJwtAuthGuard` and the
+response includes `access` (`CompanyDetailResponse`, `FeaturedCompaniesResponse`), so a page
+needs one request and there is no standalone "am I unlocked?" endpoint. **Don't add a guard
+for this**: the guards (`JwtAuthGuard`, `OptionalJwtAuthGuard`, `RolesGuard`,
+`VerifiedEmailGuard`, `PendingCapGuard`, `TurnstileGuard`) decide whether a request may
+proceed, whereas the gate decides how much a request *sees*. Truncate before loading
+citations, so a locked viewer never receives a citation for a row they can't see.
+Directory rows (`/companies`, featured) are public and never truncated.
+
+**`GET /companies/featured?limit=`** (default 8, max 24) is the landing shop window. There is
+no page-view tracking, so popularity is a score over data already held — saves ×5, approved
+investor holdings ×3, non-grant rounds ×1 (each capped), +4 for a round in the last 18 months,
++3 for a known valuation — with `domain <> ''` required so every row has a logo. The top
+`FEATURED_POOL` (120) ids are cached in-process for 15 min (`loadFeaturedPool`), and each call
+draws a fresh Fisher–Yates shuffle; the web fetches it `no-store` so every visit differs. Tune
+the weights there. It carries only the default throttle and the web deliberately sends no
+`forwardedForHeaders()` (see Rate limiting below): one page view is one cheap call, already
+limited by nginx's `general` zone.
 
 **Rate limiting (`src/throttle/`).** `@nestjs/throttler` is a global guard
 (`ApiThrottlerGuard`, provided in `AuthModule` because it decodes the JWT), the backstop
@@ -642,3 +686,14 @@ The `lint` turbo task `dependsOn: ["^build"]` because the type-aware rules need 
 dependency types (`@repo/db`/`@repo/api` `dist`); run `yarn build` first on a fresh
 checkout, or just use `yarn lint` (turbo builds deps for you). `packages/db` is excluded
 (Prisma + generated client).
+
+**Prettier: format only what you wrote.** The repo has a Prettier config
+(`@repo/eslint-config/prettier-base`), but much existing code is not Prettier-clean and lint
+does not enforce it, so `prettier --write` on a whole file (let alone a folder) rewraps
+hundreds of untouched lines into the diff. Match the surrounding style by hand instead.
+
+**Building on a fresh checkout** needs `DATABASE_URL` set even with no database:
+`@repo/db`'s build runs `prisma generate`, whose `prisma.config.ts` refuses an unset URL
+(a dummy like `postgresql://x:x@localhost:5432/x` is enough). `apps/web`'s production build
+prerenders against the API; with none running it logs `ECONNREFUSED` from `[data]` getters,
+which is expected noise, not a failure.

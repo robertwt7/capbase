@@ -23,6 +23,54 @@ function prismaWith(findFirsts: Partial<Record<(typeof MODELS)[number], unknown>
   return prisma as unknown as PrismaService;
 }
 
+const findFirstOf = (prisma: PrismaService, model: (typeof MODELS)[number]) =>
+  (prisma as unknown as Record<string, { findFirst: jest.Mock }>)[model]!.findFirst;
+
+describe('UsersService.accessFor (the contribution gate)', () => {
+  const DAY = 86_400_000;
+
+  it('is locked for an anonymous viewer, without a query', async () => {
+    const prisma = prismaWith({});
+    await expect(new UsersService(prisma).accessFor()).resolves.toEqual({
+      unlocked: false,
+      unlockedUntil: null,
+    });
+    expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
+  });
+
+  it('is unlocked for an admin, without a query', async () => {
+    const prisma = prismaWith({});
+    const access = await new UsersService(prisma).accessFor({ id: 'a1', role: 'ADMIN' });
+    expect(access).toEqual({ unlocked: true, unlockedUntil: null });
+    expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
+  });
+
+  it('is unlocked inside the window and reports when it lapses', async () => {
+    const last = new Date(Date.now() - 5 * DAY);
+    const service = new UsersService(prismaWith({ fundingRound: { createdAt: last } }));
+    await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
+      unlocked: true,
+      unlockedUntil: new Date(last.getTime() + 30 * DAY).toISOString(),
+    });
+  });
+
+  it('re-locks after the window but still reports the expiry', async () => {
+    const last = new Date(Date.now() - 31 * DAY);
+    const service = new UsersService(prismaWith({ personRole: { createdAt: last } }));
+    const access = await service.accessFor({ id: 'u1', role: 'USER' });
+    expect(access.unlocked).toBe(false);
+    expect(access.unlockedUntil).toBe(new Date(last.getTime() + 30 * DAY).toISOString());
+  });
+
+  it('is locked for a user who never contributed', async () => {
+    const service = new UsersService(prismaWith({}));
+    await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
+      unlocked: false,
+      unlockedUntil: null,
+    });
+  });
+});
+
 describe('UsersService.hasRecentContribution', () => {
   let since: Date;
 

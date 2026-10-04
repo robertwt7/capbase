@@ -13,6 +13,7 @@ import { permanentRedirect } from 'next/navigation';
 import { cache } from 'react';
 
 import {
+  DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   type AcquisitionDeal,
@@ -23,6 +24,7 @@ import {
   type CompanySlugEntry,
   type DiversitySignal,
   type ExitEvent,
+  type FeaturedCompaniesResponse,
   type FundListQuery,
   type FundSummary,
   type FundingRound,
@@ -533,6 +535,29 @@ export async function getCompanies(query: CompanyListQuery = {}): Promise<Pagina
   }
 }
 
+
+/**
+ * A random sample of popular companies for the landing page, plus the viewer's
+ * contribution gate (the API reads it from the token, as on the detail read).
+ * Uncached: the API shuffles per call, and the gate is per-viewer.
+ */
+export async function getFeaturedCompanies(
+  limit = DEFAULT_FEATURED_LIMIT,
+): Promise<FeaturedCompaniesResponse> {
+  const token = await getToken();
+  try {
+    return await apiFetch<FeaturedCompaniesResponse>(`/companies/featured?limit=${limit}`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      cache: 'no-store',
+    });
+  } catch (err) {
+    allowMockFallback('getFeaturedCompanies', err);
+    return {
+      items: paginateFallbackCompanies({ pageSize: limit, sort: 'raised' }).items,
+      access: { unlocked: false, unlockedUntil: null },
+    };
+  }
+}
 
 /**
  * Turn the API's "this row was merged away" response into a real browser

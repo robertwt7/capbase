@@ -125,15 +125,11 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me/contributions')
   async myContributions(@CurrentUser() current: RequestUser): Promise<MyContributionsResponse> {
-    const [items, until] = await Promise.all([
+    const [items, access] = await Promise.all([
       this.users.listContributions(current.id),
-      this.users.unlockedUntil(current.id),
+      this.users.accessFor(current),
     ]);
-    const unlocked = until !== null && new Date() < until;
-    return {
-      access: { unlocked, unlockedUntil: until ? until.toISOString() : null },
-      items,
-    };
+    return { access, items };
   }
 
   @UseGuards(JwtAuthGuard)

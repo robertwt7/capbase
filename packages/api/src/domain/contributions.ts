@@ -29,6 +29,22 @@ export interface CompanyAccess {
   };
 }
 
+/** Whether the contribution gate is open for a viewer. Computed in one place
+    (`UsersService.accessFor`) and carried in-band by every gated read. */
+export interface ViewerAccess {
+  /** True if the viewer is an admin or has an approved contribution within the window. */
+  unlocked: boolean;
+  /** ISO timestamp full access expires (latest contribution + window), or null. */
+  unlockedUntil: string | null;
+}
+
+/** `/companies/featured`: the landing sample, plus the viewer's gate state so
+    the page can decide how much of it to blur without a second request. */
+export interface FeaturedCompaniesResponse {
+  items: Company[];
+  access: ViewerAccess;
+}
+
 export interface CompanyDetailResponse {
   /** Sections are already truncated to previewLimit when access is locked. */
   company: Company;

@@ -4,6 +4,7 @@ import type {
   CompanyDetailResponse,
   CompanyHistoryResponse,
   CompanySlugEntry,
+  FeaturedCompaniesResponse,
   Paginated,
 } from '@repo/api';
 
@@ -21,7 +22,7 @@ import {
   CreatePersonDto,
 } from './dto/contributions.dto';
 import { CreateChangeProposalDto } from './dto/create-proposal.dto';
-import { ListCompaniesDto } from './dto/list-companies.dto';
+import { FeaturedCompaniesDto, ListCompaniesDto } from './dto/list-companies.dto';
 import { SearchThrottle } from '../throttle/throttle';
 import { CompanyHistoryDto } from './dto/company-history.dto';
 
@@ -35,6 +36,18 @@ export class CompaniesController {
   @Get()
   findAll(@Query() query: ListCompaniesDto): Promise<Paginated<Company>> {
     return this.companies.findAllApproved(query);
+  }
+
+  // Declared before @Get(':slug') so the literal path wins over the param route.
+  // Optional auth: the rows are public, but the response reports the viewer's
+  // contribution gate so the landing page knows how much to blur.
+  @UseGuards(OptionalJwtAuthGuard)
+  @Get('featured')
+  featured(
+    @Query() query: FeaturedCompaniesDto,
+    @CurrentUser() user?: RequestUser,
+  ): Promise<FeaturedCompaniesResponse> {
+    return this.companies.findFeatured(query.limit, user);
   }
 
   // Declared before @Get(':slug') so the literal path wins over the param route.
