@@ -114,14 +114,14 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
               {investor.funds.map((fund) => (
                 <li
                   key={fund.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-5 border-b border-line px-4 py-3.5 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-y-1.5"
+                  className="grid grid-cols-[minmax(0,1fr)_10rem_3.5rem_7rem] items-center gap-x-6 border-b border-line px-4 py-3.5 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-y-1.5"
                 >
                   <span className="min-w-0 font-display text-[15px] font-semibold tracking-tight text-ink">
                     {fund.name}
                     <Citation citations={investor.citations} entityId={fund.id} />
                   </span>
                   {fund.strategy ? (
-                    <Badge variant="pill" mono>
+                    <Badge variant="pill" mono className="justify-self-start">
                       {fund.strategy}
                     </Badge>
                   ) : (
