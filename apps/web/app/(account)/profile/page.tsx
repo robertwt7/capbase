@@ -131,7 +131,7 @@ function ContributionRow({ item }: { item: MyContribution }) {
       <span className={styles.itemLabel}>
         {item.label}
         {item.companyName && item.companySlug ? (
-          <Link href={`/companies/${item.companySlug}`} className={styles.itemCompany}>
+          <Link prefetch={false} href={`/companies/${item.companySlug}`} className={styles.itemCompany}>
             {' · '}
             {item.companyName}
           </Link>

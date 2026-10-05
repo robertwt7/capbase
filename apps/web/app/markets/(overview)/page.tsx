@@ -4,7 +4,7 @@ import { PageContainer, SectionHeader, Stat } from '@/components/ui';
 import { getMarketStats, getMarketTotals } from '@/lib/data';
 import { formatCount } from '@/lib/format';
 import { canonical } from '@/lib/metadata';
-import { MarketTable } from './MarketTable';
+import { MarketTable } from '../MarketTable';
 
 export const metadata: Metadata = {
   title: 'Startup Market Data by Sector',

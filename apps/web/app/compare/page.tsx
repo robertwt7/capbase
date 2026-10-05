@@ -89,6 +89,7 @@ export default async function ComparePage({
                         <CompanyLogo name={c.name} domain={c.domain} size={36} />
                         <Link
                           href={`/companies/${c.slug}`}
+                          prefetch={false}
                           className="font-display text-[15px] font-semibold text-ink underline-offset-[3px] hover:underline"
                         >
                           {c.name}

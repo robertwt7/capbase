@@ -19,6 +19,7 @@ function SavedRow({ item }: { item: SavedCompanyItem }) {
         <div className="flex items-baseline gap-2.5">
           <Link
             href={`/companies/${item.slug}`}
+            prefetch={false}
             className="font-display text-[15px] font-semibold text-ink underline-offset-[3px] hover:underline"
           >
             {item.name}

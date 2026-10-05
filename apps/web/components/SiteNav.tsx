@@ -1,7 +1,7 @@
 'use client';
 
 import { MenuIcon } from 'lucide-react';
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
@@ -30,6 +30,24 @@ function isCurrent(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** Inline feedback for a click that lands before its prefetch has arrived (the
+    prefetched loading.tsx skeleton covers every other case): a pulsing hairline
+    under the clicked label. Absolutely positioned, so the layout never shifts.
+    Must render inside the <Link>. */
+function NavPendingHint({ className }: { className: string }) {
+  const { pending } = useLinkStatus();
+  if (!pending) return null;
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'absolute h-0.5 rounded-full bg-graphite-400 motion-safe:animate-pulse',
+        className,
+      )}
+    />
+  );
+}
+
 /** The desktop primary nav. Hidden below `md`, where the drawer takes over. */
 export function PrimaryNav() {
   const pathname = usePathname();
@@ -43,11 +61,12 @@ export function PrimaryNav() {
             href={href}
             aria-current={current ? 'page' : undefined}
             className={cn(
-              'text-sm font-medium transition-colors hover:text-ink',
+              'relative text-sm font-medium transition-colors hover:text-ink',
               current ? 'text-ink' : 'text-graphite-500',
             )}
           >
             {label}
+            <NavPendingHint className="inset-x-0 -bottom-1" />
           </Link>
         );
       })}
@@ -99,13 +118,14 @@ export function MobileNav({
                   href={href}
                   aria-current={current ? 'page' : undefined}
                   className={cn(
-                    'rounded-sm px-3 py-2.5 text-[15px] transition-colors hover:bg-paper hover:text-ink',
+                    'relative rounded-sm px-3 py-2.5 text-[15px] transition-colors hover:bg-paper hover:text-ink',
                     current
                       ? 'font-semibold text-ink'
                       : 'font-medium text-graphite-700',
                   )}
                 >
                   {label}
+                  <NavPendingHint className="inset-x-3 bottom-1.5" />
                 </Link>
               </SheetClose>
             );

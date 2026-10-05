@@ -19,6 +19,8 @@ import {
 } from '@/components/ui';
 import { formatCount } from '@/lib/format';
 
+import { PERSON_COLUMNS } from './columns';
+
 type Sort = 'roles' | 'name';
 const SORTS: { value: Sort; label: string }[] = [
   { value: 'roles', label: 'Roles held' },
@@ -26,11 +28,6 @@ const SORTS: { value: Sort; label: string }[] = [
 ];
 
 const isSort = (v: string | undefined): v is Sort => v === 'roles' || v === 'name';
-
-// Every row is its own grid, so no track may size to its content (`auto`) —
-// that would give each row different column edges.
-const COLUMNS =
-  'grid-cols-[minmax(0,1.4fr)_5rem_6.5rem_minmax(0,2fr)] gap-x-8 max-[820px]:grid-cols-1';
 
 /** The organisations on a person's row: companies and firms alike, deduped. */
 function organisations(person: PersonSummary): string[] {
@@ -156,7 +153,7 @@ export function PeopleDirectory({
             aria-label="People directory"
           >
             <div
-              className={`grid ${COLUMNS} items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden`}
+              className={`grid ${PERSON_COLUMNS} items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden`}
               role="row"
             >
               <span role="columnheader">Person</span>
@@ -175,7 +172,8 @@ export function PeopleDirectory({
                 <Link
                   key={person.slug}
                   href={`/people/${person.slug}`}
-                  className={`grid ${COLUMNS} items-center border-t border-line px-[22px] py-4 transition-colors hover:bg-paper max-[820px]:gap-y-2`}
+                  prefetch={false}
+                  className={`grid ${PERSON_COLUMNS} items-center border-t border-line px-[22px] py-4 transition-colors hover:bg-paper max-[820px]:gap-y-2`}
                   role="row"
                 >
                   <span className="min-w-0 truncate" role="cell">

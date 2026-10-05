@@ -46,7 +46,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const person = await getPerson(slug);
-  if (!person) return {};
+  // notFound() here too, not only in the page: under loading.tsx the response
+  // is already a streamed 200, and metadata is the blocking <head> for
+  // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
+  // not-found title there rather than later in the body.
+  if (!person) notFound();
 
   const orgs = [...new Set(person.roles.map((r) => org(r).name))].slice(0, 3);
   const facts = [
@@ -141,6 +145,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
                 {o.href ? (
                   <Link
                     href={o.href}
+                    prefetch={false}
                     className="font-display text-[15px] font-semibold tracking-tight text-ink transition-colors hover:text-graphite-700"
                   >
                     {o.name}

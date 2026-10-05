@@ -21,7 +21,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const investor = await getInvestor(slug);
-  if (!investor) return {};
+  // notFound() here too, not only in the page: under loading.tsx the response
+  // is already a streamed 200, and metadata is the blocking <head> for
+  // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
+  // not-found title there rather than later in the body.
+  if (!investor) notFound();
 
   const facts = [
     `${investor.type} investor`,
@@ -187,6 +191,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                 {person.personSlug ? (
                   <Link
                     href={`/people/${person.personSlug}`}
+                    prefetch={false}
                     className="font-display text-[15px] font-semibold tracking-tight text-ink transition-colors hover:text-graphite-700"
                   >
                     {person.name}
@@ -241,6 +246,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                 <li key={company.slug} className="bg-surface">
                   <Link
                     href={`/companies/${company.slug}`}
+                    prefetch={false}
                     className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-paper"
                   >
                     <CompanyLogo name={company.name} domain={company.domain} size={32} />
