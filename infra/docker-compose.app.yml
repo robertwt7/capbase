@@ -15,7 +15,7 @@ x-logging: &default-logging
 services:
   api:
     build:
-      context: ../..
+      context: ..
       dockerfile: apps/api/Dockerfile
     # Tagged with the git SHA by `make deploy-all`, so `make deploy-rollback`
     # has the previous release to go back to. :latest = what is deployed.
@@ -58,7 +58,7 @@ services:
 
   web:
     build:
-      context: ../..
+      context: ..
       dockerfile: apps/web/Dockerfile
     image: capbase-web:${IMAGE_TAG:-latest}
     container_name: capbase-web
@@ -93,7 +93,7 @@ services:
 
   jobs:
     build:
-      context: ../..
+      context: ..
       dockerfile: apps/jobs/Dockerfile
     image: capbase-jobs:${IMAGE_TAG:-latest}
     container_name: capbase-jobs
