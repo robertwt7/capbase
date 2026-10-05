@@ -49,9 +49,12 @@ export interface InvestorDetailResponse extends InvestorSummary {
   namedFundCount: number;
   /** Citations attesting the fund rows above. */
   citations: Citation[];
+  /** Whether search engines should index this profile (`indexing.ts`). The
+   *  sitemap lists exactly the investors for whom this is true. */
+  indexable: boolean;
 }
 
-/** Lightweight listing entry for the web sitemap: every APPROVED investor. */
+/** Lightweight listing entry for the web sitemap: every indexable investor. */
 export interface InvestorSlugEntry {
   slug: string;
   updatedAt: string; // ISO timestamp of the row's last update

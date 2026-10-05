@@ -2,13 +2,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { Button, PageContainer, SectionHeader } from '@/components/ui';
+import { canonical } from '@/lib/metadata';
 import { SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'About — Open, Crowdsourced Company Data',
   description:
     'Capbase is an open company database: free startup funding data aggregated from SEC EDGAR filings, Wikidata, and moderated community contributions.',
-  alternates: { canonical: '/about' },
+  ...canonical('/about'),
 };
 
 export default function AboutPage() {

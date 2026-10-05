@@ -77,3 +77,6 @@ infra/.release
 
 # Rendered email previews (make mail-preview)
 apps/api/.mail-preview/
+
+# Planning notes live in the private robertwt7/capbase-thoughts repo, cloned here.
+thoughts/

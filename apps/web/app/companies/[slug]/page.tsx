@@ -12,7 +12,8 @@ import { SaveCompanyButton } from '@/components/SaveCompanyButton';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
-import { formatCount, formatDate, formatUsd, signedPct } from '@/lib/format';
+import { formatCount, formatDate, formatUsd, foundedYear, signedPct } from '@/lib/format';
+import { canonical } from '@/lib/metadata';
 import { companyBreadcrumbJsonLd, companyJsonLd } from '@/lib/schema';
 import { getSavedStatus } from '@/lib/watchlist';
 
@@ -35,7 +36,7 @@ export async function generateMetadata({
 
   const facts = [
     company.oneLiner.replace(/\.$/, ''),
-    `Founded ${company.founded}`,
+    foundedYear(company.founded) && `Founded ${company.founded}`,
     company.hq,
     company.totalRaisedUsd > 0 ? `${formatUsd(company.totalRaisedUsd)} raised` : null,
   ]
@@ -47,7 +48,7 @@ export async function generateMetadata({
   return {
     title: `${company.name} — Funding, Investors & Profile`,
     description,
-    alternates: { canonical: `/companies/${slug}` },
+    ...canonical(`/companies/${slug}`),
   };
 }
 
@@ -139,7 +140,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <Identifiers identifiers={company.identifiers} className="mt-5" />
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
-          <Fact label="Founded" value={company.founded.toString()} cite={cite('founded')} />
+          <Fact label="Founded" value={foundedYear(company.founded) ?? '—'} cite={cite('founded')} />
           <Fact label="Headquarters" value={company.hq} cite={cite('hq')} />
           <Fact label="Headcount" value={formatCount(company.headcount)} cite={cite('headcount')} />
           <Fact label="Stage" value={company.stage} />

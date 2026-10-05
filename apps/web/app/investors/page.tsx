@@ -3,15 +3,22 @@ import type { Metadata } from 'next';
 import { PageContainer, SectionHeader } from '@/components/ui';
 import { getInvestors } from '@/lib/data';
 import { formatCount } from '@/lib/format';
-import { investorListQuery } from '@/lib/list-params';
+import { directoryCanonical, investorListQuery } from '@/lib/list-params';
+import { canonical } from '@/lib/metadata';
 import { InvestorDirectory } from './InvestorDirectory';
 
-export const metadata: Metadata = {
-  title: 'Investor Directory — VCs, Angels & Funds',
-  description:
-    'Venture firms, growth funds, and angels with their portfolio companies and sectors — free, crowdsourced investor data.',
-  alternates: { canonical: '/investors' },
-};
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}): Promise<Metadata> {
+  return {
+    title: 'Investor Directory — VCs, Angels & Funds',
+    description:
+      'Venture firms, growth funds, and angels with their portfolio companies and sectors — free, crowdsourced investor data.',
+    ...canonical(directoryCanonical('/investors', await searchParams)),
+  };
+}
 
 export default async function InvestorsPage({
   searchParams,

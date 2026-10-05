@@ -425,9 +425,14 @@ read-only, not a rendered template. The domain is hardcoded in it.
   write, where `@nestjs/throttler` is a second, per-user layer (limits in
   `apps/api/src/throttle/throttle.ts`, each at or above its nginx twin so nginx
   normally answers first). Nothing to configure for it.
-- **`www` redirect**: shipped commented out at the bottom of the file. Enabling
-  it without a `www` DNS record makes issuance fail for *both* names. Do it in
-  this order — add the `www` A record, uncomment the block, then:
+- **`www` redirect**: shipped commented out at the bottom of the file, and not
+  used at launch (see [Search engines](#search-engines)). Enabling it without a
+  `www` DNS record makes issuance fail for *both* names. **Known gap:** as
+  shipped it can't issue at all — the `:80` server answers only
+  `server_name capbase.fyi;`, so the `www` HTTP-01 challenge lands on the
+  `default_server` 444. First add `www.capbase.fyi` to that `:80` `server_name`
+  (leave the `:443` block's alone, so `init-letsencrypt.sh`'s check still
+  passes). Then, in this order — add the `www` A record, uncomment the block, and:
   ```sh
   CERT_DOMAINS='capbase.fyi www.capbase.fyi' FORCE=1 make deploy-tls
   ```
@@ -514,6 +519,64 @@ Prefer swap over lowering the Postgres limit. On an 8 GB box, restore the old
 defaults: `PG_SHARED_BUFFERS=2GB`, `PG_EFFECTIVE_CACHE_SIZE=4GB`,
 `PG_MAINTENANCE_WORK_MEM=512MB`, `PG_WORK_MEM=16MB`, `PG_MEM_LIMIT=3g`,
 `API_MEM_LIMIT`/`WEB_MEM_LIMIT=768m`, `JOBS_MEM_LIMIT=1536m`.
+
+## Search engines
+
+Go-live, once, after the first deploy. A sitemap is never uploaded: Search
+Console is given its **URL** and fetches it, on its own schedule, from then on.
+
+**Apex only, no `www`.** Only `capbase.fyi` gets a DNS record and a cert;
+`www.capbase.fyi` simply doesn't resolve, which costs nothing in search (no
+duplicate host to canonicalise). Don't point a `www` A record at the VPS on its
+own: `http://www` hits the `default_server` 444 and `https://www` serves the apex
+cert (a browser warning). If a `www` redirect is wanted later, prefer the
+registrar's HTTPS URL forwarding or a Cloudflare redirect rule — neither touches
+the VPS. (The self-hosted route under [nginx](#nginx) needs one more change
+first — see the note there.)
+
+1. **DNS.** One A record, `capbase.fyi → <VPS IP>`. Check: `dig +short capbase.fyi`.
+2. **Deploy + TLS** exactly as [Flow A](#deploy--flow-a-ship-the-dataset-you-already-have):
+   `make deploy-all`, then `make deploy-tls`.
+3. **Confirm the origin.** web and api both default `SITE_URL` to
+   `https://${DOMAIN}` (`docker-compose.app.yml`) and `infra/env/all.env` presets
+   `DOMAIN=capbase.fyi` — leave `SITE_URL` commented. (The root
+   `docker-compose.yml`'s `localhost` default is the local stack only.)
+   ```sh
+   curl -s https://capbase.fyi/robots.txt | grep Sitemap   # → https://capbase.fyi/sitemap.xml
+   ```
+4. **Smoke the sitemap from outside.**
+   ```sh
+   curl -s https://capbase.fyi/sitemap.xml | grep -oE '<loc>[^<]*'
+   ```
+   Expect `static.xml`, `companies-0.xml`, `investors-0.xml`, `people-0.xml`. Only
+   `static.xml` means the web container can't reach the API — fix that before
+   submitting.
+5. **Google Search Console.** Add property → **Domain** → `capbase.fyi` → add the
+   TXT record it shows at the DNS provider → Verify. A Domain property covers
+   every protocol and subdomain, and needs no HTML file or meta tag (so no code
+   change).
+6. **Submit.** Indexing → Sitemaps → enter `sitemap.xml` → Submit. Submit **only
+   the index**, never the child files. Expect "Success" and a discovered count of
+   roughly companies + indexable investors + indexable people + ~30 static pages
+   (≈ 36k + 6.3k + 5.4k at launch).
+7. **Request indexing** (URL Inspection) for `/`, `/companies`, `/investors`,
+   `/alternatives/crunchbase`, `/alternatives/pitchbook`, `/faq`, `/about`.
+8. **Bing Webmaster Tools.** Sign in → *Import from Google Search Console* (pulls
+   the property and the sitemap). Covers DuckDuckGo and Yahoo too.
+9. **Validate.** [Rich Results Test](https://search.google.com/test/rich-results)
+   on `/faq`, one company, one person and one investor;
+   [opengraph.xyz](https://www.opengraph.xyz/) on `/` and one company.
+10. **Week-one watch.** Search Console → Pages. "Crawled – currently not indexed"
+    should be a small fraction of what was submitted; "Duplicate, Google chose
+    different canonical" should be ~0.
+
+**What is deliberately not in the sitemap.** Thin person and investor profiles —
+one Form D line under a name, or a firm with no holding, fund or officer — render
+`noindex, follow` and are left out of the sitemap. They stay public and linkable,
+and cross the bar with no code change as data arrives. The rule lives in the API
+(`PERSON_INDEX_MIN_ROLES` in `@repo/api`, `PeopleService.listSlugs`,
+`InvestorsService.listSlugs`); the web only reads `indexable` off the detail
+response. Change history pages (`/companies/*/history`) are `noindex, follow` too.
 
 ## Day-2 operations
 

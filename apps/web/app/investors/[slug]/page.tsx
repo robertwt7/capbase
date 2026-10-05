@@ -5,9 +5,12 @@ import { notFound } from 'next/navigation';
 import { Citation } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
+import { JsonLd } from '@/components/JsonLd';
 import { Badge, Button, EmptyState, SectionHeader } from '@/components/ui';
 import { getInvestor } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
+import { canonical } from '@/lib/metadata';
+import { investorBreadcrumbJsonLd, investorJsonLd } from '@/lib/schema';
 
 const DESCRIPTION_MAX = 160;
 
@@ -34,7 +37,10 @@ export async function generateMetadata({
   return {
     title: `${investor.name} — Portfolio & Profile`,
     description,
-    alternates: { canonical: `/investors/${slug}` },
+    ...canonical(`/investors/${slug}`),
+    // Thin profiles stay public and crawlable but out of the index; the API
+    // decides (the same rule drops them from the sitemap).
+    ...(!investor.indexable && { robots: { index: false, follow: true } }),
   };
 }
 
@@ -47,6 +53,8 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
 
   return (
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
+      <JsonLd data={investorJsonLd(investor)} />
+      <JsonLd data={investorBreadcrumbJsonLd(investor)} />
       <Link
         href="/investors"
         className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"

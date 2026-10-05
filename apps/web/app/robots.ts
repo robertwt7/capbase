@@ -6,7 +6,9 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: '*',
-      allow: '/',
+      // Longest match wins, so /api/logo/ stays fetchable under the /api/ block:
+      // the company JSON-LD `logo` points there.
+      allow: ['/', '/api/logo/'],
       disallow: [
         '/admin',
         '/api/',

@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { canonical } from '@/lib/metadata';
 import { DATA_LICENSE_URL, SOURCE_URL, SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Terms of Service',
   description:
     'The terms that govern your use of Capbase, the free, crowdsourced company and funding database.',
-  alternates: { canonical: '/terms' },
+  ...canonical('/terms'),
 };
 
 const LAST_UPDATED = '3 October 2026';

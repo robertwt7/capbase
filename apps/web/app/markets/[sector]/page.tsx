@@ -15,7 +15,9 @@ import {
 } from '@/components/ui';
 import { getCompanies, getMarketStats } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
+import { directoryCanonical } from '@/lib/list-params';
 import { sectorFromSlug, sectorSlug } from '@/lib/markets';
+import { canonical } from '@/lib/metadata';
 
 export function generateStaticParams() {
   return SECTORS.map((s) => ({ sector: sectorSlug(s) }));
@@ -23,8 +25,10 @@ export function generateStaticParams() {
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ sector: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }): Promise<Metadata> {
   const sector = sectorFromSlug((await params).sector);
   if (!sector) return {}; // the page itself 404s
@@ -38,7 +42,7 @@ export async function generateMetadata({
   return {
     title: `${sector} Startups — Funding & Market Data`,
     description,
-    alternates: { canonical: `/markets/${sectorSlug(sector)}` },
+    ...canonical(directoryCanonical(`/markets/${sectorSlug(sector)}`, await searchParams)),
   };
 }
 

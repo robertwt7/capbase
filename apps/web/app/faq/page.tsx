@@ -4,12 +4,13 @@ import { MAX_PENDING_SUBMISSIONS } from '@repo/api';
 
 import { JsonLd } from '@/components/JsonLd';
 import { PageContainer, SectionHeader } from '@/components/ui';
+import { canonical } from '@/lib/metadata';
 
 export const metadata: Metadata = {
   title: 'Frequently Asked Questions',
   description:
     'Is Capbase free? Where does the data come from? How do I contribute or fix company data? Answers to common questions about the open company database.',
-  alternates: { canonical: '/faq' },
+  ...canonical('/faq'),
 };
 
 // Single source for the visible page AND the FAQPage JSON-LD — answers stay

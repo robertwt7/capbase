@@ -1,4 +1,5 @@
 import { CONTRIBUTION_WINDOW_DAYS, PREVIEW_LIMIT } from '@repo/api';
+import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { CompanyTable } from '@/components/CompanyTable';
@@ -8,7 +9,10 @@ import { getToken } from '@/lib/auth';
 import { getFeaturedCompanies, getMarketStats, getMarketTotals } from '@/lib/data';
 import { formatCount, formatCountCompact, formatDate, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
+import { canonical } from '@/lib/metadata';
 import { siteOrganizationJsonLd, websiteJsonLd } from '@/lib/schema';
+
+export const metadata: Metadata = { ...canonical('/') };
 
 /** Featured rows fetched; the first HOME_OPEN are shown, the rest blurred
     behind the contribution gate for a viewer who hasn't unlocked. */

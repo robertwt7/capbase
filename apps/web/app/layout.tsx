@@ -34,13 +34,14 @@ export const metadata: Metadata = {
   },
   description:
     'Funding rounds, investors, people, and market data for private companies — a free, crowdsourced, open-source alternative to Crunchbase and PitchBook.',
+  // No `url` and no `alternates.canonical` here: every page would inherit them
+  // and claim to be the homepage. Indexable pages set both via `canonical()`
+  // (lib/metadata.ts); the rest emit neither.
   openGraph: {
     type: 'website',
     siteName: SITE_NAME,
-    url: '/',
   },
   twitter: { card: 'summary_large_image' },
-  alternates: { canonical: '/' },
 };
 
 export default function RootLayout({
