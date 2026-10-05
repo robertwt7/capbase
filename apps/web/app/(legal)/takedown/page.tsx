@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { canonical } from '@/lib/metadata';
 import { SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Takedown & removal policy',
   description:
     'How to report a problem with a Capbase profile, ask for personal data to be removed, or send a copyright notice — and how quickly we respond.',
-  alternates: { canonical: '/takedown' },
+  ...canonical('/takedown'),
 };
 
 const LAST_UPDATED = '3 October 2026';

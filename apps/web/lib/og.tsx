@@ -1,5 +1,5 @@
 // Shared pieces for the next/og ImageResponse routes (app/opengraph-image.tsx
-// and app/companies/[slug]/opengraph-image.tsx).
+// and the per-profile cards under app/{companies,investors}/[slug]/).
 //
 // Fonts are vendored OFL .ttf files loaded via readFile(new URL(...,
 // import.meta.url)): the bundler rewrites the URL to the emitted asset and
@@ -50,5 +50,37 @@ export function OgWordmark({ height = 64 }: { height?: number }) {
     <svg width={(height * 1006) / 250} height={height} viewBox="400 0 1006 250">
       <path fill={OG.ink} fillRule="evenodd" d={WORDMARK_PATH} />
     </svg>
+  );
+}
+
+/** The plain branded card a profile route returns for a slug it can't resolve —
+ *  an OG route must never throw (the page itself 404s or redirects). */
+export function OgFallbackCard() {
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        background: OG.paper,
+        padding: 80,
+      }}
+    >
+      <OgMark size={84} />
+      <OgWordmark height={96} />
+      <div
+        style={{
+          borderTop: `2px solid ${OG.line}`,
+          paddingTop: 28,
+          fontFamily: 'IBM Plex Mono',
+          fontSize: 24,
+          color: OG.graphite500,
+        }}
+      >
+        capbase.fyi
+      </div>
+    </div>
   );
 }

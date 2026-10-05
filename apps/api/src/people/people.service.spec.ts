@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { HttpException, NotFoundException } from '@nestjs/common';
 
+import { PERSON_INDEX_MIN_ROLES } from '@repo/api';
+
 import { PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -46,6 +48,7 @@ describe('PeopleService', () => {
   let citationFindMany: jest.Mock;
   let roleFindMany: jest.Mock;
   let queryRaw: jest.Mock;
+  let identifierFindMany: jest.Mock;
 
   beforeEach(() => {
     findMany = jest.fn();
@@ -58,12 +61,13 @@ describe('PeopleService', () => {
     roleFindMany = jest.fn(async () => []);
     // The exact "roles at 2+ public companies" id set.
     queryRaw = jest.fn(async () => []);
+    identifierFindMany = jest.fn(async () => []);
     const prisma = {
       person: { findMany, count, findFirst, findUnique, update: jest.fn() },
       personRole: { findMany: roleFindMany },
       $queryRaw: queryRaw,
       citation: { findMany: citationFindMany },
-      entityIdentifier: { findMany: jest.fn(async () => []) },
+      entityIdentifier: { findMany: identifierFindMany },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
     service = new PeopleService(prisma);
@@ -269,17 +273,69 @@ describe('PeopleService', () => {
       findFirst.mockResolvedValue(null);
       await expect(service.findOne('nobody')).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    describe('indexable', () => {
+      it('is false for a one-role person', async () => {
+        findFirst.mockResolvedValue(personRow({ _count: { roles: 1 } }));
+        expect((await service.findOne('jane-smith')).indexable).toBe(false);
+      });
+
+      it('is true at two public roles', async () => {
+        findFirst.mockResolvedValue(
+          personRow({ roles: [role({ id: 'pr-1' }), role({ id: 'pr-2' })], _count: { roles: 2 } }),
+        );
+        expect((await service.findOne('jane-smith')).indexable).toBe(true);
+      });
+
+      it('reads the filtered role count, not the loaded rows', async () => {
+        // Same contract as roleCount: the count is what the public filter saw.
+        findFirst.mockResolvedValue(personRow({ roles: [role(), role({ id: 'pr-2' })], _count: { roles: 1 } }));
+        expect((await service.findOne('jane-smith')).indexable).toBe(false);
+      });
+
+      it('is true for a one-role person with a Wikidata identifier', async () => {
+        findFirst.mockResolvedValue(personRow({ _count: { roles: 1 } }));
+        identifierFindMany.mockResolvedValue([
+          { id: 'e-1', scheme: 'WIKIDATA', value: 'Q42', entityType: 'person', entityId: 'h-1' },
+        ]);
+        expect((await service.findOne('jane-smith')).indexable).toBe(true);
+      });
+    });
   });
 
+  // The SQL's row-level behaviour (one role out, two in, QID in, suppressed and
+  // merged out) runs against Postgres in test/indexing.e2e-spec.ts; a mocked
+  // $queryRaw can only check what the query says.
   describe('listSlugs', () => {
-    it('excludes tombstoned and suppressed people', async () => {
-      findMany.mockResolvedValue([{ slug: 'jane-smith', updatedAt: new Date('2026-02-01') }]);
-      const slugs = await service.listSlugs();
+    /** The raw SQL text with its parameters, from a tagged-template call. */
+    function sqlOf(call: unknown[]): { text: string; values: unknown[] } {
+      const [strings, ...values] = call as [TemplateStringsArray, ...unknown[]];
+      return { text: strings.join('?').replace(/\s+/g, ' '), values };
+    }
 
-      expect(slugs).toEqual([{ slug: 'jane-smith', updatedAt: '2026-02-01T00:00:00.000Z' }]);
-      expect(findMany.mock.calls[0]![0]).toMatchObject({
-        where: { moderationStatus: 'APPROVED', mergedIntoId: null, suppressedAt: null },
-      });
+    it('maps rows to ISO timestamps for the sitemap', async () => {
+      queryRaw.mockResolvedValue([{ slug: 'jane-smith', updatedAt: new Date('2026-02-01') }]);
+      await expect(service.listSlugs()).resolves.toEqual([
+        { slug: 'jane-smith', updatedAt: '2026-02-01T00:00:00.000Z' },
+      ]);
+    });
+
+    it('excludes tombstoned and suppressed people', async () => {
+      await service.listSlugs();
+      const { text } = sqlOf(queryRaw.mock.calls[0]!);
+      expect(text).toContain(`p."moderationStatus" = 'APPROVED'`);
+      expect(text).toContain('p."mergedIntoId" IS NULL');
+      expect(text).toContain('p."suppressedAt" IS NULL');
+    });
+
+    it('requires PERSON_INDEX_MIN_ROLES public roles or a Wikidata identifier', async () => {
+      await service.listSlugs();
+      const { text, values } = sqlOf(queryRaw.mock.calls[0]!);
+      expect(values).toEqual([PERSON_INDEX_MIN_ROLES]);
+      // The roles counted are PUBLIC_ROLES: approved, on a public company or on none.
+      expect(text).toContain(`r."moderationStatus" = 'APPROVED'`);
+      expect(text).toContain(`r."companyId" IS NULL OR (c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL)`);
+      expect(text).toContain(`e.scheme = 'WIKIDATA'`);
     });
   });
 });

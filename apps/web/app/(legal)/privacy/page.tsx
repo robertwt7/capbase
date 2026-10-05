@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { canonical } from '@/lib/metadata';
 import { SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
   description:
     'How Capbase collects, uses, and protects personal information, framed around the Australian Privacy Principles.',
-  alternates: { canonical: '/privacy' },
+  ...canonical('/privacy'),
 };
 
 const LAST_UPDATED = '3 October 2026';

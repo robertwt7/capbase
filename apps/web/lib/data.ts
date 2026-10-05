@@ -729,8 +729,12 @@ export async function getFunds(query: FundListQuery = {}): Promise<Paginated<Fun
   }
 }
 
-/** One investor profile, or null when the slug is unknown (renders notFound). */
-export async function getInvestor(slug: string): Promise<InvestorDetailResponse | null> {
+/** One investor profile, or null when the slug is unknown (renders notFound).
+ *  Wrapped in React cache() so generateMetadata, the page and the OG image
+ *  route share one fetch per request. */
+export const getInvestor = cache(async function getInvestor(
+  slug: string,
+): Promise<InvestorDetailResponse | null> {
   try {
     return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`);
   } catch (err) {
@@ -740,9 +744,10 @@ export async function getInvestor(slug: string): Promise<InvestorDetailResponse 
     const match = fallbackInvestors.find((i) => i.slug === slug);
     if (!match) return null;
     const funds = fallbackFunds.filter((f) => f.manager.slug === slug);
-    return { ...match, people: [], funds, namedFundCount: funds.length, citations: [] };
+    // Mock data is illustrative, never something to put in a search index.
+    return { ...match, people: [], funds, namedFundCount: funds.length, citations: [], indexable: false };
   }
-}
+});
 
 // --- People ----------------------------------------------------------------
 //

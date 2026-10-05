@@ -11,6 +11,7 @@ import { JsonLd } from '@/components/JsonLd';
 import { Badge, SectionHeader } from '@/components/ui';
 import { getPerson } from '@/lib/data';
 import { formatCount } from '@/lib/format';
+import { canonical } from '@/lib/metadata';
 import { personBreadcrumbJsonLd, personJsonLd } from '@/lib/schema';
 
 const DESCRIPTION_MAX = 160;
@@ -63,7 +64,10 @@ export async function generateMetadata({
   return {
     title: `${person.name} — Roles & Companies`,
     description,
-    alternates: { canonical: `/people/${slug}` },
+    ...canonical(`/people/${slug}`),
+    // Thin profiles stay public and crawlable but out of the index; the API
+    // decides (the same rule drops them from the sitemap).
+    ...(!person.indexable && { robots: { index: false, follow: true } }),
   };
 }
 

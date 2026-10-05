@@ -256,6 +256,50 @@ describe('InvestorsService', () => {
       findFirst.mockResolvedValue(null);
       await expect(service.findOne('nope')).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    describe('indexable', () => {
+      it('is false for a firm with nothing on its profile but a name', async () => {
+        findFirst.mockResolvedValue(investorRow());
+        expect((await service.findOne('sequoia-capital')).indexable).toBe(false);
+      });
+
+      it('is true for a firm with only a holding', async () => {
+        findFirst.mockResolvedValue(
+          investorRow({
+            holdings: [{ company: company('helia', 'Helia', 'Fintech') }],
+            _count: { holdings: 1, funds: 0 },
+          }),
+        );
+        expect((await service.findOne('sequoia-capital')).indexable).toBe(true);
+      });
+
+      it('is true for a firm with only funds', async () => {
+        findFirst.mockResolvedValue(
+          investorRow({ funds: [fundRow()], _count: { holdings: 0, funds: 1 } }),
+        );
+        expect((await service.findOne('sequoia-capital')).indexable).toBe(true);
+      });
+
+      it('is true for a firm with only an officer', async () => {
+        findFirst.mockResolvedValue(
+          investorRow({
+            people: [
+              {
+                id: 'pr-1',
+                name: 'Jane Smith',
+                role: 'Founder',
+                since: 1972,
+                prior: null,
+                linkedinUrl: null,
+                title: null,
+                person: { slug: 'jane-smith', mergedIntoId: null, suppressedAt: null },
+              },
+            ],
+          }),
+        );
+        expect((await service.findOne('sequoia-capital')).indexable).toBe(true);
+      });
+    });
   });
 
   describe('listSlugs', () => {
@@ -270,6 +314,27 @@ describe('InvestorsService', () => {
       expect(findMany.mock.calls[0]![0]).toMatchObject({
         where: { moderationStatus: 'APPROVED', mergedIntoId: null },
       });
+    });
+
+    it('lists only firms with a holding, a fund or an officer — on the filters findOne counts', async () => {
+      findMany.mockResolvedValue([]);
+      await service.listSlugs();
+      findFirst.mockResolvedValue(investorRow());
+      await service.findOne('sequoia-capital');
+
+      const where = (findMany.mock.calls[0]![0] as { where: { OR: unknown[] } }).where;
+      const include = (findFirst.mock.calls[0]![0] as {
+        include: {
+          _count: { select: { holdings: { where: unknown }; funds: { where: unknown } } };
+          people: { where: unknown };
+        };
+      }).include;
+      // A firm can't be indexable on a row its page doesn't show.
+      expect(where.OR).toEqual([
+        { holdings: { some: include._count.select.holdings.where } },
+        { funds: { some: include._count.select.funds.where } },
+        { people: { some: include.people.where } },
+      ]);
     });
   });
 });

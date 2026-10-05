@@ -4,7 +4,8 @@ import type { Company } from '@repo/api';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { EmptyState, PageContainer, SectionHeader } from '@/components/ui';
 import { getCompanies } from '@/lib/data';
-import { formatCount, formatUsd } from '@/lib/format';
+import { formatCount, formatUsd, foundedYear } from '@/lib/format';
+import { canonical } from '@/lib/metadata';
 
 import { ComparePicker } from './ComparePicker';
 
@@ -13,7 +14,7 @@ export const metadata = {
   description:
     'Line up funding, stage, valuation, and scale for up to four private companies side by side.',
   // Selection query variants canonicalise to the bare compare URL.
-  alternates: { canonical: '/compare' },
+  ...canonical('/compare'),
 };
 
 const MAX_COMPARE = 4;
@@ -23,7 +24,7 @@ const FACTS: { label: string; value: (c: Company) => string }[] = [
   { label: 'Sector', value: (c) => c.primarySector ?? '—' },
   { label: 'Stage', value: (c) => c.stage },
   { label: 'Status', value: (c) => c.status },
-  { label: 'Founded', value: (c) => c.founded.toString() },
+  { label: 'Founded', value: (c) => foundedYear(c.founded) ?? '—' },
   { label: 'HQ', value: (c) => c.hq },
   { label: 'Headcount', value: (c) => formatCount(c.headcount) },
   { label: 'Total raised', value: (c) => formatUsd(c.totalRaisedUsd) },

@@ -2,13 +2,14 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 
+import { canonical } from '@/lib/metadata';
 import { DATA_LICENSE_URL, SOURCE_URL, SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Data & Sources',
   description:
     'Where Capbase data comes from — SEC EDGAR, SBIR.gov, Wikidata and community contributions — the terms each source carries, the CC BY-NC 4.0 data licence, and how to cite Capbase.',
-  alternates: { canonical: '/data' },
+  ...canonical('/data'),
 };
 
 const LAST_UPDATED = '3 October 2026';

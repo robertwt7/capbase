@@ -1,7 +1,7 @@
 // schema.org JSON-LD builders — pure functions kept out of JSX, rendered via
 // <JsonLd>. URLs are absolute (search engines don't resolve relative JSON-LD).
 
-import type { Company, PersonDetailResponse } from '@repo/api';
+import type { Company, InvestorDetailResponse, PersonDetailResponse } from '@repo/api';
 
 import { SITE_NAME, SITE_URL, SUPPORT_EMAIL } from './site';
 
@@ -44,7 +44,8 @@ export function companyJsonLd(company: Company) {
     name: company.name,
     description: company.oneLiner,
     ...(company.websiteUrl && { url: company.websiteUrl }),
-    foundingDate: String(company.founded),
+    // 0 means no source recorded the year; schema.org rejects "0".
+    ...(company.founded > 0 && { foundingDate: String(company.founded) }),
     address: { '@type': 'PostalAddress', addressLocality: company.hq },
     ...(sameAs.length > 0 && { sameAs }),
     // Same logo source CompanyLogo uses.
@@ -64,6 +65,50 @@ export function companyBreadcrumbJsonLd(company: Company) {
         position: 3,
         name: company.name,
         item: `${SITE_URL}/companies/${company.slug}`,
+      },
+    ],
+  };
+}
+
+/**
+ * The profiled firm on /investors/[slug].
+ *
+ * `sameAs` carries the registry pages for the identifiers we hold (Wikidata,
+ * the SEC's IAPD summary for a CRD, …) — the same disambiguation the person
+ * markup gets from a QID.
+ */
+export function investorJsonLd(investor: InvestorDetailResponse) {
+  const sameAs = [
+    investor.linkedinUrl,
+    ...(investor.identifiers ?? []).map((i) => i.url),
+  ].filter((u): u is string => Boolean(u));
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: investor.name,
+    ...(investor.description && { description: investor.description }),
+    ...(investor.websiteUrl && { url: investor.websiteUrl }),
+    ...(investor.legalName && { legalName: investor.legalName }),
+    ...(investor.foundedYear && { foundingDate: String(investor.foundedYear) }),
+    ...(investor.hq && { address: { '@type': 'PostalAddress', addressLocality: investor.hq } }),
+    ...(sameAs.length > 0 && { sameAs: [...new Set(sameAs)] }),
+    // Same logo source CompanyLogo uses.
+    ...(investor.domain && { logo: `${SITE_URL}/api/logo/${encodeURIComponent(investor.domain)}` }),
+  };
+}
+
+export function investorBreadcrumbJsonLd(investor: InvestorDetailResponse) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
+      { '@type': 'ListItem', position: 2, name: 'Investors', item: `${SITE_URL}/investors` },
+      {
+        '@type': 'ListItem',
+        position: 3,
+        name: investor.name,
+        item: `${SITE_URL}/investors/${investor.slug}`,
       },
     ],
   };

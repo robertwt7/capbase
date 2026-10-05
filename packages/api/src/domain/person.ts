@@ -60,6 +60,9 @@ export interface PersonSummary {
 export interface PersonDetailResponse extends PersonSummary {
   identifiers: EntityIdentifierRef[];
   citations: Citation[];
+  /** Whether search engines should index this profile (`indexing.ts`). The
+   *  sitemap lists exactly the people for whom this is true. */
+  indexable: boolean;
 }
 
 /**
@@ -111,7 +114,7 @@ export function normalizePersonName(name: string): string {
   return tokens.join(' ');
 }
 
-/** Lightweight listing entry for the web sitemap: every public person. */
+/** Lightweight listing entry for the web sitemap: every indexable person. */
 export interface PersonSlugEntry {
   slug: string;
   updatedAt: string; // ISO timestamp of the row's last update

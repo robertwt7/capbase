@@ -69,3 +69,13 @@ export function fundListQuery(sp: SearchParams): FundListQuery {
     page: pageOf(sp.page),
   };
 }
+
+/**
+ * A directory page's canonical. A bare `?page=N` is its own page (Google drops deep pages
+ * that canonicalise to page 1); any filter, sort or search collapses to the bare directory.
+ */
+export function directoryCanonical(base: string, sp: SearchParams): string {
+  const keys = Object.keys(sp).filter((k) => sp[k] !== undefined && sp[k] !== '');
+  const page = pageOf(sp.page);
+  return keys.length === 1 && keys[0] === 'page' && page && page > 1 ? `${base}?page=${page}` : base;
+}

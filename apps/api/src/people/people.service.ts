@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
+  PERSON_INDEX_MIN_ROLES,
   type Citation,
   type EntityIdentifierRef,
   type Paginated,
@@ -24,6 +25,9 @@ const ROLE_SAMPLE = 6;
  * Roles that count towards a public profile: approved, and — when the role
  * hangs off a company — on a company the public can see. A firm-officer role
  * has no company, so the OR is what keeps it visible.
+ *
+ * `listSlugs` restates this in raw SQL (Prisma objects can't be reused there) —
+ * change one, change both.
  */
 const PUBLIC_ROLES = {
   moderationStatus: 'APPROVED',
@@ -155,10 +159,16 @@ export class PeopleService {
     if (!row) return this.redirectOrNotFound(slug);
 
     const summary = toPersonSummary(row as unknown as PersonWithRoles);
+    const identifiers = await this.loadIdentifiers(row.id);
     return {
       ...summary,
-      identifiers: await this.loadIdentifiers(row.id),
+      identifiers,
       citations: await this.loadRoleCitations(summary.roles.map((r) => r.id)),
+      // The same rule `listSlugs` applies in SQL, so a page is noindex exactly
+      // when it is missing from the sitemap.
+      indexable:
+        row._count.roles >= PERSON_INDEX_MIN_ROLES ||
+        identifiers.some((i) => i.scheme === 'WIKIDATA'),
     };
   }
 
@@ -238,13 +248,43 @@ export class PeopleService {
     return rows.map(toCitation);
   }
 
-  /** Every public person slug, for the web sitemap. */
+  /**
+   * Every INDEXABLE person slug, for the web sitemap: at least
+   * PERSON_INDEX_MIN_ROLES public roles, or a Wikidata identifier. ~93% of the
+   * corpus is one Form D line under a name; those pages stay public but
+   * `noindex`, and join the sitemap on their own once a second role arrives.
+   *
+   * Raw SQL because no Prisma filter can say "count of a filtered relation >= n".
+   * The person conditions restate PUBLIC_PERSON and the role conditions
+   * PUBLIC_ROLES — keep all three in step. `findOne` computes `indexable` with
+   * the same rule.
+   */
   async listSlugs(): Promise<PersonSlugEntry[]> {
-    const rows = await this.prisma.person.findMany({
-      where: PUBLIC_PERSON,
-      select: { slug: true, updatedAt: true },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const rows = await this.prisma.$queryRaw<{ slug: string; updatedAt: Date }[]>`
+      SELECT p.slug, p."updatedAt"
+        FROM "Person" p
+       WHERE p."moderationStatus" = 'APPROVED'
+         AND p."mergedIntoId" IS NULL
+         AND p."suppressedAt" IS NULL
+         AND (
+           (SELECT count(*)
+              FROM "PersonRole" r
+              LEFT JOIN "Company" c ON c.id = r."companyId"
+             WHERE r."personId" = p.id
+               AND r."moderationStatus" = 'APPROVED'
+               AND (r."companyId" IS NULL
+                    OR (c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL))
+           ) >= ${PERSON_INDEX_MIN_ROLES}
+           OR EXISTS (
+             SELECT 1
+               FROM "EntityIdentifier" e
+              WHERE e."entityType" = 'person'
+                AND e."entityId" = p.id
+                AND e.scheme = 'WIKIDATA'
+           )
+         )
+       ORDER BY p."updatedAt" DESC
+    `;
     return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
   }
 

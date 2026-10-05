@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { JsonLd } from '@/components/JsonLd';
 import { Button, PageContainer, SectionHeader } from '@/components/ui';
 import { COMPETITORS, competitorBySlug } from '@/lib/alternatives';
+import { canonical } from '@/lib/metadata';
 
 export function generateStaticParams() {
   return COMPETITORS.map((c) => ({ competitor: c.slug }));
@@ -19,7 +20,7 @@ export async function generateMetadata({
   return {
     title: competitor.title,
     description: competitor.description,
-    alternates: { canonical: `/alternatives/${competitor.slug}` },
+    ...canonical(`/alternatives/${competitor.slug}`),
   };
 }
 

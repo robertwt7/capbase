@@ -50,3 +50,8 @@ export function signedPct(value: number): string {
   const sign = value > 0 ? '+' : '';
   return `${sign}${value}%`;
 }
+
+/** `Company.founded` is 0 when no source recorded it — never show that as a year. */
+export function foundedYear(year: number): string | null {
+  return year > 0 ? String(year) : null;
+}

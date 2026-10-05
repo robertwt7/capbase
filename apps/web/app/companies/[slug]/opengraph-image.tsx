@@ -1,8 +1,8 @@
 import { ImageResponse } from 'next/og';
 
 import { getCompanyDetail } from '@/lib/data';
-import { formatUsd } from '@/lib/format';
-import { loadOgFonts, OG, OG_SIZE, OgMark, OgWordmark } from '@/lib/og';
+import { formatUsd, foundedYear } from '@/lib/format';
+import { loadOgFonts, OG, OG_SIZE, OgFallbackCard, OgMark, OgWordmark } from '@/lib/og';
 
 export const alt = 'Company funding profile on Capbase';
 export const size = OG_SIZE;
@@ -24,45 +24,14 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const company = result?.company;
   const fonts = await loadOgFonts();
 
-  if (!company) {
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            background: OG.paper,
-            padding: 80,
-          }}
-        >
-          <OgMark size={84} />
-          <OgWordmark height={96} />
-          <div
-            style={{
-              borderTop: `2px solid ${OG.line}`,
-              paddingTop: 28,
-              fontFamily: 'IBM Plex Mono',
-              fontSize: 24,
-              color: OG.graphite500,
-            }}
-          >
-            capbase.fyi
-          </div>
-        </div>
-      ),
-      { ...size, fonts },
-    );
-  }
+  if (!company) return new ImageResponse(<OgFallbackCard />, { ...size, fonts });
 
   const rounds = (company.rounds ?? []).slice(-MAX_BARS);
   const maxAmount = Math.max(...rounds.map((r) => r.amountUsd), 1);
   const stats = [
     company.totalRaisedUsd > 0 ? `${formatUsd(company.totalRaisedUsd)} RAISED` : null,
     company.stage.toUpperCase(),
-    `FOUNDED ${company.founded}`,
+    foundedYear(company.founded) && `FOUNDED ${company.founded}`,
   ].filter((s): s is string => Boolean(s));
   const nameSize = company.name.length > 24 ? 56 : company.name.length > 14 ? 72 : 88;
 

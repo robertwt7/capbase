@@ -187,7 +187,8 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 - `/companies/[slug]/history` — public, paginated change timeline for one company
   (what changed, from what to what, who, when). Deliberately ungated: it shows data
   past the `PREVIEW_LIMIT` contribution gate, which is the right trade for an
-  open-data project's audit trail.
+  open-data project's audit trail. `noindex, follow`, so it never competes with the
+  profile in search.
 - `/admin/users` — account list: search, ban/unban (a ban revokes sessions and rejects
   the user's pending queue), make/revoke admin.
 - `/admin` — moderation queue (ADMIN only). `/admin/login` signs in via
@@ -223,6 +224,17 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   (the sitemap is route-handler based; there is no `app/sitemap.ts`); a new form route must be
   added to `disallow` in `app/robots.ts`. Footer links live in `COLUMNS` in
   `components/SiteFooter.tsx`.
+
+**SEO metadata:** an indexable page spreads `...canonical(path)` (`lib/metadata.ts`), which
+sets `alternates.canonical` **and** `openGraph.url` together — Next merges metadata shallowly
+per key, and the root layout deliberately sets neither, so a page without it (auth, admin,
+404) emits no canonical rather than claiming to be `/`. Directory pages pass
+`directoryCanonical(base, searchParams)` (`lib/list-params.ts`): a bare `?page=N` is
+self-canonical, any filter collapses to the bare URL. Thin person/investor profiles render
+`noindex, follow` and leave the sitemap; the API owns that rule (`indexable` on the detail
+response, `PERSON_INDEX_MIN_ROLES` in `@repo/api`, the same filter in each `listSlugs`) — the
+web never re-derives it. `Company.founded` is `0` when unknown: render it through
+`foundedYear()` (`lib/format.ts`), never raw.
 
 **Entity ids on the web side:** the `Company` and `Investor` domain types expose **no `id`,
 only `slug`** (a company's row id is recoverable only through its citations,

@@ -40,6 +40,25 @@ const PUBLIC_HOLDINGS = {
   company: PUBLIC_COMPANY_RELATION,
 } satisfies Prisma.InvestorHoldingWhereInput;
 
+/** The firm's own officers (Wikidata P112/P169) that the profile lists. */
+const PUBLIC_OFFICERS = { moderationStatus: 'APPROVED' } satisfies Prisma.PersonRoleWhereInput;
+
+/**
+ * Worth a search engine's time: the profile shows at least one portfolio
+ * company, named fund or officer. Built from the SAME filters the detail read
+ * counts with, so a firm can't be indexable on a row its page doesn't show —
+ * and `findOne` derives `indexable` from those counts, so the sitemap and the
+ * robots meta always agree.
+ */
+const INDEXABLE_INVESTOR = {
+  ...PUBLIC_INVESTOR,
+  OR: [
+    { holdings: { some: PUBLIC_HOLDINGS } },
+    { funds: { some: PUBLIC_FUNDS } },
+    { people: { some: PUBLIC_OFFICERS } },
+  ],
+} satisfies Prisma.InvestorWhereInput;
+
 const COMPANY_SELECT = {
   select: { slug: true, name: true, domain: true, primarySector: true },
 };
@@ -105,7 +124,7 @@ export class InvestorsService {
           take: FUND_PREVIEW,
         },
         people: {
-          where: { moderationStatus: 'APPROVED' },
+          where: PUBLIC_OFFICERS,
           orderBy: { since: 'desc' },
           include: { person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } } },
         },
@@ -118,8 +137,9 @@ export class InvestorsService {
     if (!row) return this.redirectOrNotFound(slug);
 
     const funds = row.funds.map(toFund);
+    const summary = toInvestorSummary(row as unknown as InvestorWithHoldings);
     return {
-      ...toInvestorSummary(row as unknown as InvestorWithHoldings),
+      ...summary,
       identifiers: await this.loadIdentifiers(row.id),
       // Officers Wikidata names on the firm itself. Same role rows as a
       // company's people, carrying investorId instead of companyId.
@@ -128,6 +148,8 @@ export class InvestorsService {
       // What we can name, as against `fundCount` — what the firm told the SEC.
       namedFundCount: row._count.funds,
       citations: await this.loadFundCitations(funds.map((f) => f.id)),
+      // INDEXABLE_INVESTOR, read off the counts this response already carries.
+      indexable: summary.portfolioCount > 0 || row._count.funds > 0 || row.people.length > 0,
     };
   }
 
@@ -196,10 +218,15 @@ export class InvestorsService {
     return rows.map(toCitation);
   }
 
-  /** Every approved investor slug, for the web sitemap. */
+  /**
+   * Every INDEXABLE investor slug, for the web sitemap. Most of the Form ADV
+   * universe is a name and an address; those profiles stay public but
+   * `noindex`, and join the sitemap on their own once a holding, fund or
+   * officer arrives.
+   */
   async listSlugs(): Promise<InvestorSlugEntry[]> {
     const rows = await this.prisma.investor.findMany({
-      where: PUBLIC_INVESTOR,
+      where: INDEXABLE_INVESTOR,
       select: { slug: true, updatedAt: true },
       orderBy: { updatedAt: 'desc' },
     });

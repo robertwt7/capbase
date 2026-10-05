@@ -32,6 +32,8 @@ export const PUBLIC_INVESTOR = {
  * run, so a suppression has to be its own column that both the read path and
  * the ingest match index honour — flipping `moderationStatus` would be undone
  * by the next cron.
+ *
+ * `PeopleService.listSlugs` restates these three in raw SQL — keep it in step.
  */
 export const PUBLIC_PERSON = {
   moderationStatus: 'APPROVED',

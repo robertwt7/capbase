@@ -45,7 +45,9 @@ export async function generateMetadata({
   return {
     title: `${result.company.name} — Change history`,
     description: `Every recorded change to ${result.company.name}'s Capbase profile: what changed, who changed it, and when.`,
-    alternates: { canonical: `/companies/${slug}/history` },
+    // Public and linkable, but it would compete with the profile for
+    // "{company} funding" — so it stays out of the index and passes link equity on.
+    robots: { index: false, follow: true },
   };
 }
 
