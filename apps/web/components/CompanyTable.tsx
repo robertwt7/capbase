@@ -7,8 +7,11 @@ import type { Company } from '@/lib/data';
 import { formatUsd } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-const ROW =
-  'grid grid-cols-[minmax(0,2.6fr)_1.1fr_1fr_1fr] items-center gap-5 border-t border-line px-[22px] py-4 max-[700px]:grid-cols-[1fr_auto] max-[700px]:gap-y-3';
+/** The table's grid (tracks + gaps), shared with its loading skeleton. */
+export const COMPANY_COLUMNS =
+  'grid-cols-[minmax(0,2.6fr)_1.1fr_1fr_1fr] gap-5 max-[700px]:grid-cols-[1fr_auto] max-[700px]:gap-y-3';
+
+const ROW = cn('grid items-center border-t border-line px-[22px] py-4', COMPANY_COLUMNS);
 
 /** Presentational company directory table. Shared by the landing page,
     /companies, and /markets/[sector].
@@ -30,7 +33,10 @@ export function CompanyTable({
       aria-label="Company directory"
     >
       <div
-        className="grid grid-cols-[minmax(0,2.6fr)_1.1fr_1fr_1fr] items-center gap-5 bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[700px]:hidden"
+        className={cn(
+          'grid items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[700px]:hidden',
+          COMPANY_COLUMNS,
+        )}
         role="row"
       >
         <span role="columnheader">Company</span>
@@ -44,9 +50,13 @@ export function CompanyTable({
       </div>
 
       {companies.map((company) => (
+        // prefetch={false}: a profile prefetch runs its generateMetadata, i.e. an
+        // uncached detail API call per row in view. The (profile) skeleton still
+        // streams first on click. Every entity-profile link follows this rule.
         <Link
           key={company.slug}
           href={`/companies/${company.slug}`}
+          prefetch={false}
           className={cn(ROW, 'transition-colors hover:bg-paper')}
           role="row"
         >

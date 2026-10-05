@@ -20,6 +20,8 @@ import {
 } from '@/components/ui';
 import { formatCount } from '@/lib/format';
 
+import { INVESTOR_COLUMNS } from './columns';
+
 const ALL = 'all';
 
 type Sort = 'portfolio' | 'name';
@@ -29,12 +31,6 @@ const SORTS: { value: Sort; label: string }[] = [
 ];
 
 const isSort = (v: string | undefined): v is Sort => v === 'portfolio' || v === 'name';
-
-// Every row is its own grid, so no track may size to its content (`auto`, or a
-// bare `fr`, whose minimum is min-content) — that would give each row different
-// column edges and pull the sectors column off its header.
-const COLUMNS =
-  'grid-cols-[minmax(0,1.4fr)_6rem_minmax(0,1.2fr)_minmax(0,1.6fr)] gap-x-8 max-[820px]:grid-cols-1';
 
 /**
  * Server-driven directory: filters/sort/page live in the URL, the server
@@ -150,7 +146,7 @@ export function InvestorDirectory({
         <div className={`mt-4 transition-opacity ${isPending ? 'opacity-60' : ''}`}>
           <div className="overflow-hidden rounded-xl border border-line bg-surface" role="table" aria-label="Investor directory">
             <div
-              className={`grid ${COLUMNS} items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden`}
+              className={`grid ${INVESTOR_COLUMNS} items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden`}
               role="row"
             >
               <span role="columnheader">Investor</span>
@@ -165,7 +161,8 @@ export function InvestorDirectory({
               <Link
                 key={inv.slug || inv.name}
                 href={`/investors/${inv.slug}`}
-                className={`grid ${COLUMNS} items-center border-t border-line px-[22px] py-4 transition-colors hover:bg-paper max-[820px]:gap-y-2`}
+                prefetch={false}
+                className={`grid ${INVESTOR_COLUMNS} items-center border-t border-line px-[22px] py-4 transition-colors hover:bg-paper max-[820px]:gap-y-2`}
                 role="row"
               >
                 <span className="flex min-w-0 flex-col gap-1" role="cell">

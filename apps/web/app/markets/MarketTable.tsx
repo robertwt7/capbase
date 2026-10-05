@@ -8,6 +8,8 @@ import type { MarketStat } from '@repo/api';
 import { formatCount, formatUsd, signedPct } from '@/lib/format';
 import { sectorSlug } from '@/lib/markets';
 
+import { MARKET_COLUMNS } from './columns';
+
 export type MarketRow = MarketStat;
 
 type Key = 'sector' | 'capital' | 'deals' | 'median' | 'trend' | 'companies';
@@ -39,8 +41,7 @@ const columns: { key: Key; label: string; numeric: boolean }[] = [
   { key: 'companies', label: 'Companies', numeric: true },
 ];
 
-const GRID =
-  'grid grid-cols-[minmax(0,1.6fr)_1fr_0.8fr_1.2fr_0.8fr_0.9fr] items-center gap-5 px-[22px]';
+const GRID = `grid ${MARKET_COLUMNS} items-center px-[22px]`;
 
 export function MarketTable({ rows }: { rows: MarketRow[] }) {
   const [sort, setSort] = useState<{ key: Key; dir: Dir }>({ key: 'capital', dir: 'desc' });

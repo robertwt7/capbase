@@ -86,8 +86,9 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   `input.tsx`), `Label`, and `Select` is shadcn's **Radix Select** (`SelectTrigger` /
   `SelectContent` / `SelectItem` / `SelectValue` / …). **`FormError`** (`FormError.tsx`) is
   the form-level (non-field) error box, used by both the RHF forms and the auth/admin pages.
-- **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`** stay
-  bespoke Tailwind role components (no shadcn equivalent), as does `FundingLadder`.
+- **`SectionHeader`**, **`Eyebrow`**, **`Stat`**, **`EmptyState`**, **`PageContainer`**,
+  **`Skeleton`** / **`LoadingStatus`** stay bespoke Tailwind role components (no shadcn
+  equivalent), as does `FundingLadder`.
 - **`CompanyTable`** (`components/CompanyTable.tsx`) is the one company directory table
   (landing, `/companies`, `/markets/[sector]`). Its optional `locked={{ companies, overlay }}`
   appends rows rendered blurred, `inert` and `aria-hidden` (plain `<div>`s, not links) under
@@ -111,6 +112,44 @@ Pages render plain containers (`<div>` / `PageContainer`) — never their own `<
 **Build new UI from these primitives + Tailwind utilities.** Never re-inline a button,
 badge, card, etc. — extend the primitive. Bespoke layout (grids, the Funding Ladder spine)
 is just Tailwind utilities in the component/page, no CSS Modules.
+
+#### Loading states
+
+Every route is dynamic (the root layout reads the session cookie), so without a
+`loading.tsx` a `<Link>` click waits for the whole server render. Every data route therefore
+has one — a skeleton that `<Link>` prefetches and swaps in the same frame as the click:
+
+- **Route groups scope the boundary.** A `loading.tsx` wraps its whole subtree, so each sits
+  in a group with just its page: `(directory)` for `/companies`, `/investors`, `/people`,
+  `/funds`; `(overview)` for `/markets`; `(profile)` for `/companies/[slug]` (so `history/`
+  and `contribute/` don't flash the profile skeleton — `history/` has its own); `(home)` for
+  `/`. Leaf segments (`/investors/[slug]`, `/people/[slug]`, `/markets/[sector]`) need no
+  group. **Never add `app/loading.tsx`** — it would wrap every route.
+- **Skeletons mirror the real geometry** (`components/skeletons.tsx`: `DirectorySkeleton`,
+  `TableSkeleton`, `ProfileSkeleton`, `StatsSkeleton`): the same containers, the real static
+  headings, and the real table grid strings, shared from a plain `columns.ts` next to each
+  `'use client'` directory — a server component importing a constant from a client module
+  gets a client reference, not the string. Blocks are `bg-graphite-200` and
+  `motion-safe:animate-pulse` (globals.css shortens, not removes, animations under reduced
+  motion), hidden from AT, with one `<LoadingStatus>` per view.
+- **Directory filters are unaffected**: a searchParams-only change does not remount the
+  segment, so typing keeps focus and the existing `useTransition` dim, never the skeleton.
+- **The landing page streams** its stat strip, sectors and popular companies into separate
+  `<Suspense>` boundaries (`app/(home)/sections.tsx`); `loading.tsx` is the same composition
+  with every fallback showing. `AccessNote` and `PopularCompanies` share one featured draw
+  through React `cache`.
+- `PrimaryNav`/`MobileNav` links carry a `useLinkStatus` underline for a click that beats
+  its prefetch.
+- **Links to a company/investor/person profile set `prefetch={false}`.** A profile prefetch
+  renders its `generateMetadata`, which fetches the full, uncached detail record — one API
+  call per link in the viewport, ~25 per directory page. Without prefetch the click still
+  streams the profile skeleton after one round trip. Directory, markets and home links
+  prefetch normally: their loading boundary sits above every API call.
+- **The accepted trade:** once the skeleton has streamed the status is fixed at 200, so a
+  missing profile slug is a 200 with `noindex` (and the not-found title in the blocking head
+  for HTML-limited bots like Bingbot, because profile `generateMetadata` calls `notFound()`
+  too), and a merged slug is a client redirect plus a 0s meta refresh — for every crawler,
+  not only Googlebot.
 
 #### Forms — react-hook-form + zod
 

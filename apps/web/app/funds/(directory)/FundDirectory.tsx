@@ -20,6 +20,8 @@ import {
 } from '@/components/ui';
 import { formatCount, formatUsd } from '@/lib/format';
 
+import { FUND_COLUMNS } from './columns';
+
 const ALL = 'all';
 
 type Sort = 'size' | 'vintage' | 'name';
@@ -31,13 +33,6 @@ const SORTS: { value: Sort; label: string }[] = [
 
 const isSort = (v: string | undefined): v is Sort =>
   v === 'size' || v === 'vintage' || v === 'name';
-
-// Every row is its own grid, so no track may size to its content (`auto`, or a
-// bare `fr`, whose minimum is min-content) — that would give each row different
-// column edges. Fixed tracks fit the widest value ("Securitized asset",
-// "Undisclosed"); the text tracks share the rest.
-const COLUMNS =
-  'grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_10rem_4.5rem_7rem] gap-x-8 max-[820px]:grid-cols-1';
 
 /**
  * Server-driven directory: filters/sort/page live in the URL, the server
@@ -169,7 +164,7 @@ export function FundDirectory({
             aria-label="Fund directory"
           >
             <div
-              className={`grid ${COLUMNS} items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden`}
+              className={`grid ${FUND_COLUMNS} items-center bg-paper px-[22px] py-3 font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase max-[820px]:hidden`}
               role="row"
             >
               <span role="columnheader">Fund</span>
@@ -186,7 +181,7 @@ export function FundDirectory({
             {items.map((fund) => (
               <div
                 key={fund.id}
-                className={`grid ${COLUMNS} items-center border-t border-line px-[22px] py-4 max-[820px]:gap-y-2`}
+                className={`grid ${FUND_COLUMNS} items-center border-t border-line px-[22px] py-4 max-[820px]:gap-y-2`}
                 role="row"
               >
                 <span className="min-w-0 font-display text-[15px] font-semibold tracking-tight text-ink" role="cell">
@@ -194,6 +189,7 @@ export function FundDirectory({
                 </span>
                 <Link
                   href={`/investors/${fund.manager.slug}`}
+                  prefetch={false}
                   className="max-w-full justify-self-start truncate text-[13px] text-graphite-700 underline-offset-[3px] transition-colors hover:text-ink hover:underline"
                   title={fund.manager.name}
                   role="cell"

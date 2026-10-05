@@ -231,7 +231,7 @@ export function SubmissionDetail({ item }: { item: PendingSubmission }) {
   // Child submissions carry their parent company; link it to the public profile.
   const companyLink =
     item.type !== 'company' && item.companySlug && item.companyName ? (
-      <Link href={`/companies/${item.companySlug}`} className={styles.detailLink}>
+      <Link prefetch={false} href={`/companies/${item.companySlug}`} className={styles.detailLink}>
         {item.companyName}
       </Link>
     ) : null;

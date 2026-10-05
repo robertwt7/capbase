@@ -41,7 +41,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const result = await getCompanyDetail(slug);
-  if (!result) return {};
+  // notFound() here too, not only in the page: under loading.tsx the response
+  // is already a streamed 200, and metadata is the blocking <head> for
+  // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
+  // not-found title there rather than later in the body.
+  if (!result) notFound();
   return {
     title: `${result.company.name} — Change history`,
     description: `Every recorded change to ${result.company.name}'s Capbase profile: what changed, who changed it, and when.`,

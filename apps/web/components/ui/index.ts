@@ -16,6 +16,7 @@ export { EmptyState } from './EmptyState';
 export { PageContainer } from './PageContainer';
 export { SectionHeader } from './SectionHeader';
 export { Stat } from './Stat';
+export { Skeleton, LoadingStatus } from './Skeleton';
 export { Pagination } from './pagination';
 export { Separator } from './separator';
 export {

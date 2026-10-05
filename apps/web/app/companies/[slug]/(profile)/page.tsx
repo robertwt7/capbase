@@ -17,7 +17,7 @@ import { canonical } from '@/lib/metadata';
 import { companyBreadcrumbJsonLd, companyJsonLd } from '@/lib/schema';
 import { getSavedStatus } from '@/lib/watchlist';
 
-import { ProposeChangeMenu } from './ProposeChangeMenu';
+import { ProposeChangeMenu } from '../ProposeChangeMenu';
 
 const panel = 'grid gap-px overflow-hidden rounded-[10px] border border-line bg-line';
 const cell = 'bg-surface';
@@ -31,7 +31,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const result = await getCompanyDetail(slug);
-  if (!result) return {};
+  // notFound() here too, not only in the page: under loading.tsx the response
+  // is already a streamed 200, and metadata is the blocking <head> for
+  // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
+  // not-found title there rather than later in the body.
+  if (!result) notFound();
   const { company } = result;
 
   const facts = [
@@ -225,6 +229,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 {inv.slug ? (
                   <Link
                     href={`/investors/${inv.slug}`}
+                    prefetch={false}
                     className="font-display text-[15px] font-semibold text-ink underline underline-offset-[3px] hover:text-graphite-700"
                   >
                     {inv.name}
@@ -287,6 +292,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 {person.personSlug ? (
                   <Link
                     href={`/people/${person.personSlug}`}
+                    prefetch={false}
                     className="font-display text-[15px] font-semibold text-ink transition-colors hover:text-graphite-700"
                   >
                     {person.name}
