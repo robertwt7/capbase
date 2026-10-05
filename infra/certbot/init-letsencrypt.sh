@@ -53,10 +53,10 @@ mkdir -p "$CONF" infra/certbot/www
 
 # Recommended TLS params referenced by the nginx vhost.
 [ -f "$CONF/options-ssl-nginx.conf" ] || curl -sfL \
-  https://raw.githubusercontent.com/certbot/certbot/main/certbot-nginx/src/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
+  https://raw.githubusercontent.com/certbot/certbot/main/certbot/src/certbot/_internal/plugins/nginx/tls_configs/options-ssl-nginx.conf \
   -o "$CONF/options-ssl-nginx.conf"
 [ -f "$CONF/ssl-dhparams.pem" ] || curl -sfL \
-  https://raw.githubusercontent.com/certbot/certbot/main/certbot/certbot/ssl-dhparams.pem \
+  https://raw.githubusercontent.com/certbot/certbot/main/certbot/src/certbot/ssl-dhparams.pem \
   -o "$CONF/ssl-dhparams.pem"
 
 if [ -d "$CONF/live/$DOMAIN" ] && [ "${FORCE:-0}" != "1" ]; then
