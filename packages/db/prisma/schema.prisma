@@ -135,7 +135,9 @@ model Citation {
   createdAt     DateTime @default(now())
 
   @@unique([sourceId, entityType, entityId, field])
-  @@index([entityType, entityId])
+  /// entityId first: the company profile and admin queue look citations up by
+  /// id alone (a profile spans seven child types); everything else adds entityType.
+  @@index([entityId, entityType])
 }
 
 /// One recorded change to published data. Anchored to a company so the profile
@@ -229,13 +231,18 @@ model Company {
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
-  @@index([moderationStatus])
+  /// Admin queue: one status, newest first, cursor on (createdAt, id).
+  @@index([moderationStatus, createdAt, id])
+  /// Contribution gate + pending cap: a user's rows in one status, newest first.
+  @@index([submittedById, moderationStatus, createdAt])
   // Server-side directory filters/sorts always scope to APPROVED first.
   @@index([moderationStatus, primarySector])
   @@index([moderationStatus, stage])
   @@index([moderationStatus, status])
   @@index([moderationStatus, name])
   @@index([moderationStatus, totalRaisedUsd])
+  /// `DESC NULLS LAST` in the migration SQL, as on Fund's size/vintage indexes.
+  @@index([moderationStatus, lastValuationUsd(sort: Desc)])
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_name_trgm_idx")
   @@index([oneLiner(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_oneLiner_trgm_idx")
@@ -274,7 +281,8 @@ model ChangeProposal {
   updatedAt        DateTime     @updatedAt
 
   @@index([companyId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 model FundingRound {
@@ -306,7 +314,8 @@ model FundingRound {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 // Investors named on a specific round; inherits the round's review state.
@@ -431,8 +440,11 @@ model Fund {
   @@index([managerId])
   @@index([moderationStatus])
   @@index([moderationStatus, strategy])
-  @@index([moderationStatus, vintageYear])
-  @@index([moderationStatus, grossAssetsUsd])
+  /// `(sort: Desc)` here, `DESC NULLS LAST` in the migration SQL: the reads sort
+  /// nulls last, which a default btree can't serve backwards, and Prisma can't
+  /// declare null ordering (it ignores it when diffing, so there is no drift).
+  @@index([moderationStatus, vintageYear(sort: Desc), name])
+  @@index([moderationStatus, grossAssetsUsd(sort: Desc), name])
   @@index([moderationStatus, name])
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Fund_name_trgm_idx")
@@ -468,7 +480,8 @@ model InvestorHolding {
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([investorId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 /// One role: a person at a company or an investor firm.
@@ -522,7 +535,8 @@ model PersonRole {
   @@index([companyId])
   @@index([investorId])
   @@index([personId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 /// A human, deduplicated across every company and firm they appear at.
@@ -581,7 +595,8 @@ model AcquisitionDeal {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 model ExitEvent {
@@ -605,7 +620,8 @@ model ExitEvent {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 model DiversitySignal {
@@ -623,7 +639,8 @@ model DiversitySignal {
   updatedAt        DateTime     @updatedAt
 
   @@index([companyId])
-  @@index([moderationStatus])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
 }
 
 /// An external identifier for one Company or Investor — the crosswalk that lets
