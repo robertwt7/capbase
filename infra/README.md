@@ -420,7 +420,13 @@ read-only, not a rendered template. The domain is hardcoded in it.
 - HSTS, `nosniff`, a referrer policy, gzip, and immutable caching on
   `/_next/static/` are all set there.
 - **Rate limits** are per-IP `limit_req` zones answering 429: `auth` 10 r/m on
-  sign-in, `writes` 30 r/m on every POST, `general` 30 r/s. nginx passes the
+  sign-in, `writes` 30 r/m on every POST, `general` 10 r/s. On top of those,
+  `crawlers` (30 r/m, burst 10) is keyed on the **bot's name** from the
+  User-Agent, not its IP, so a crawler spread over dozens of addresses shares one
+  bucket; search engines (Googlebot, Bingbot, …) are exempt from it. nginx's 429s
+  carry `Retry-After: 60`. To see who is being throttled:
+  `docker logs capbase-nginx 2>&1 | grep '" 429 ' | awk -F'"' '{print $6}' | sort | uniq -c`.
+  nginx passes the
   visitor's address on as `X-Real-IP`; the web forwards it to the API on every
   write, where `@nestjs/throttler` is a second, per-user layer (limits in
   `apps/api/src/throttle/throttle.ts`, each at or above its nginx twin so nginx

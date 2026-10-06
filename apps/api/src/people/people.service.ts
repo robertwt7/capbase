@@ -148,15 +148,19 @@ export class PeopleService {
   /** Full profile: every public role, not a sample, plus the crosswalk and the
    *  citations attesting those roles. */
   async findOne(slug: string): Promise<PersonDetailResponse> {
-    const row = await this.prisma.person.findFirst({
+    // No `_count` here: Prisma compiles a filtered relation count into a
+    // GROUP BY over the whole PersonRole table (~83k rows, ~300ms idle and
+    // seconds under crawler load) before joining the one person. The detail
+    // read loads every public role anyway, so their length IS that count.
+    const found = await this.prisma.person.findFirst({
       where: { slug, ...PUBLIC_PERSON },
       include: {
         roles: { where: PUBLIC_ROLES, orderBy: { since: 'desc' }, include: ROLE_INCLUDE },
-        _count: { select: { roles: { where: PUBLIC_ROLES } } },
       },
     });
     // Returns `never` — either a 301 to the survivor, or a 404.
-    if (!row) return this.redirectOrNotFound(slug);
+    if (!found) return this.redirectOrNotFound(slug);
+    const row = { ...found, _count: { roles: found.roles.length } };
 
     const summary = toPersonSummary(row as unknown as PersonWithRoles);
     const identifiers = await this.loadIdentifiers(row.id);

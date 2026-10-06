@@ -287,10 +287,17 @@ describe('PeopleService', () => {
         expect((await service.findOne('jane-smith')).indexable).toBe(true);
       });
 
-      it('reads the filtered role count, not the loaded rows', async () => {
-        // Same contract as roleCount: the count is what the public filter saw.
-        findFirst.mockResolvedValue(personRow({ roles: [role(), role({ id: 'pr-2' })], _count: { roles: 1 } }));
-        expect((await service.findOne('jane-smith')).indexable).toBe(false);
+      it('counts the loaded public roles instead of asking for a relation count', async () => {
+        // A filtered `_count` makes Prisma aggregate the whole PersonRole table
+        // for one person; the detail read already loads every public role.
+        findFirst.mockResolvedValue(
+          personRow({ roles: [role(), role({ id: 'pr-2' })], _count: undefined }),
+        );
+        const person = await service.findOne('jane-smith');
+        expect(person.roleCount).toBe(2);
+        expect(person.indexable).toBe(true);
+        const args = findFirst.mock.calls[0]![0] as { include: Record<string, unknown> };
+        expect(args.include).not.toHaveProperty('_count');
       });
 
       it('is true for a one-role person with a Wikidata identifier', async () => {
