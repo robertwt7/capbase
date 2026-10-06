@@ -12,6 +12,7 @@ import {
 import {
   IDENTIFIABLE_TYPES,
   MERGE_STATUSES,
+  REVIEWABLE_TYPES,
   type IdentifiableType,
   type MergeQueueResponse,
   type AdminUser,
@@ -35,16 +36,6 @@ import { MergeService } from './merge/merge.service';
 import { AdminUsersService } from './users/admin-users.service';
 
 const REVIEW_STATUSES: ReviewStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
-const REVIEWABLE_TYPES: ReviewableType[] = [
-  'company',
-  'round',
-  'person',
-  'investor',
-  'acquisition',
-  'exit',
-  'diversity',
-  'proposal',
-];
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN')
@@ -58,12 +49,19 @@ export class AdminController {
   ) {}
 
   @Get('submissions')
-  submissions(@Query('status') status?: string): Promise<PendingSubmissionsResponse> {
+  submissions(
+    @Query('status') status?: string,
+    @Query('type') type?: string,
+    @Query('before') before?: string,
+  ): Promise<PendingSubmissionsResponse> {
     const resolved = (status ?? 'PENDING') as ReviewStatus;
     if (!REVIEW_STATUSES.includes(resolved)) {
       throw new BadRequestException(`Invalid status "${status}"`);
     }
-    return this.admin.listSubmissions(resolved);
+    if (type !== undefined && !REVIEWABLE_TYPES.includes(type as ReviewableType)) {
+      throw new BadRequestException(`Invalid type "${type}"`);
+    }
+    return this.admin.listSubmissions(resolved, type as ReviewableType | undefined, before);
   }
 
   @Patch('submissions/:type/:id')
@@ -87,6 +85,7 @@ export class AdminController {
   mergeQueue(
     @Query('status') status?: string,
     @Query('type') type?: string,
+    @Query('page') page?: string,
   ): Promise<MergeQueueResponse> {
     const resolved = (status ?? 'PENDING') as MergeStatus;
     if (!MERGE_STATUSES.includes(resolved)) {
@@ -95,7 +94,21 @@ export class AdminController {
     if (type && !IDENTIFIABLE_TYPES.includes(type as IdentifiableType)) {
       throw new BadRequestException(`Invalid entity type "${type}"`);
     }
-    return this.merges.listCandidates(resolved, type as IdentifiableType | undefined);
+    const n = page === undefined ? 1 : Number(page);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new BadRequestException(`Invalid page "${page}"`);
+    }
+    return this.merges.listCandidates(resolved, type as IdentifiableType | undefined, n);
+  }
+
+  /** The nav badge's count, without rendering a page of candidates. */
+  @Get('merges/count')
+  async mergeCount(@Query('status') status?: string): Promise<{ total: number }> {
+    const resolved = (status ?? 'PENDING') as MergeStatus;
+    if (!MERGE_STATUSES.includes(resolved)) {
+      throw new BadRequestException(`Invalid status "${status}"`);
+    }
+    return { total: await this.merges.countCandidates(resolved) };
   }
 
   /** Fold one row of the pair into the other. The loser is tombstoned, not

@@ -1,14 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  EntityIdentifierRef,
-  IdentifiableType,
-  MergeCandidateItem,
-  MergeQueueResponse,
-  MergeSide,
-  MergeSignal,
-  MergeStatus,
+import {
+  MERGE_PAGE_SIZE,
+  MERGE_SIGNALS,
+  type EntityIdentifierRef,
+  type IdentifiableType,
+  type MergeCandidateItem,
+  type MergeQueueResponse,
+  type MergeSide,
+  type MergeSignal,
+  type MergeStatus,
 } from '@repo/api';
-import type { Prisma } from '@repo/db';
+import type { MergeCandidate, Prisma } from '@repo/db';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { toEntityIdentifiers } from '../../provenance/identifier.mapper';
@@ -98,26 +100,16 @@ export class MergeService {
 
   // --- Queue ---------------------------------------------------------------
 
-  /** The review queue: candidate pairs with both sides rendered enough to
-   *  decide on, strongest signal first. */
+  /** The review queue, one page at a time: candidate pairs with both sides
+   *  rendered enough to decide on, strongest signal first, then newest. Paged
+   *  because every item costs a few queries per side, and production holds
+   *  thousands of PENDING pairs — loading them all timed the admin out. */
   async listCandidates(
     status: MergeStatus = 'PENDING',
     entityType?: IdentifiableType,
+    page = 1,
   ): Promise<MergeQueueResponse> {
     const where = { status, ...(entityType ? { entityType } : {}) };
-    const rows = await this.prisma.mergeCandidate.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // Signal order, not insertion order: an identifier collision is the
-    // publisher's own statement and deserves the top of the queue.
-    const rank: Record<MergeSignal, number> = { identifier: 0, domain: 1, name: 2 };
-    rows.sort(
-      (a, b) =>
-        (rank[a.signal as MergeSignal] ?? 9) - (rank[b.signal as MergeSignal] ?? 9) ||
-        b.createdAt.getTime() - a.createdAt.getTime(),
-    );
 
     const countsBySignal: Record<MergeSignal, number> = { identifier: 0, domain: 0, name: 0 };
     for (const r of await this.prisma.mergeCandidate.groupBy({
@@ -127,39 +119,72 @@ export class MergeService {
     })) {
       countsBySignal[r.signal as MergeSignal] = r._count._all;
     }
+    const total = Object.values(countsBySignal).reduce((sum, n) => sum + n, 0);
 
-    const items: MergeCandidateItem[] = [];
-    for (const row of rows) {
-      const type = row.entityType as IdentifiableType;
-      const [left, right] = await Promise.all([
-        this.side(type, row.leftId),
-        this.side(type, row.rightId),
-      ]);
-      // A side can be missing if the row was deleted out from under the queue.
-      if (!left || !right) continue;
-
-      const record =
-        row.status === 'MERGED'
-          ? await this.prisma.mergeRecord.findFirst({
-              where: { candidateId: row.id, unmergedAt: null },
-              select: { id: true },
-            })
-          : null;
-
-      items.push({
-        id: row.id,
-        entityType: type,
-        signal: row.signal as MergeSignal,
-        evidence: row.evidence,
-        status: row.status as MergeStatus,
-        createdAt: row.createdAt.toISOString(),
-        left,
-        right,
-        mergeRecordId: record?.id ?? null,
-      });
+    // Signal order, not insertion order: an identifier collision is the
+    // publisher's own statement and deserves the top of the queue. The order
+    // is not a column, so walk the signals in rank order (MERGE_SIGNALS) and
+    // take this page's window out of each in turn, using the counts above.
+    const rows: MergeCandidate[] = [];
+    let skip = (page - 1) * MERGE_PAGE_SIZE;
+    for (const signal of MERGE_SIGNALS) {
+      const remaining = MERGE_PAGE_SIZE - rows.length;
+      if (remaining <= 0) break;
+      if (skip >= countsBySignal[signal]) {
+        skip -= countsBySignal[signal];
+        continue;
+      }
+      rows.push(
+        ...(await this.prisma.mergeCandidate.findMany({
+          where: { ...where, signal },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: remaining,
+        })),
+      );
+      skip = 0;
     }
 
-    return { total: items.length, countsBySignal, items };
+    const items = await Promise.all(rows.map((row) => this.candidateItem(row)));
+    return {
+      total,
+      countsBySignal,
+      // A side can be missing if the row was deleted out from under the queue.
+      items: items.filter((item): item is MergeCandidateItem => item !== null),
+      page,
+      pageSize: MERGE_PAGE_SIZE,
+    };
+  }
+
+  /** Candidates in a status, without rendering any — the admin nav badge. */
+  countCandidates(status: MergeStatus = 'PENDING'): Promise<number> {
+    return this.prisma.mergeCandidate.count({ where: { status } });
+  }
+
+  private async candidateItem(row: MergeCandidate): Promise<MergeCandidateItem | null> {
+    const type = row.entityType as IdentifiableType;
+    const [left, right, record] = await Promise.all([
+      this.side(type, row.leftId),
+      this.side(type, row.rightId),
+      row.status === 'MERGED'
+        ? this.prisma.mergeRecord.findFirst({
+            where: { candidateId: row.id, unmergedAt: null },
+            select: { id: true },
+          })
+        : null,
+    ]);
+    if (!left || !right) return null;
+    return {
+      id: row.id,
+      entityType: type,
+      signal: row.signal as MergeSignal,
+      evidence: row.evidence,
+      status: row.status as MergeStatus,
+      createdAt: row.createdAt.toISOString(),
+      left,
+      right,
+      mergeRecordId: record?.id ?? null,
+    };
   }
 
   /** One side of a candidate: identity, the fields a reviewer diffs, its

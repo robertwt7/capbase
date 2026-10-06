@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 import { Logo } from '../../components/Logo';
 import { Button, Eyebrow } from '../../components/ui';
-import { getMergeQueue, getReports } from '../../lib/admin';
+import { getMergeCount, getReports } from '../../lib/admin';
 import { getSession } from '../../lib/auth';
 import { logoutAction } from './actions';
 
@@ -73,10 +73,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
 /** Pending merge candidates, for the nav badge. Never throws: the count is a
  *  convenience and the API being briefly unreachable should not blank the
- *  whole admin shell. */
+ *  whole admin shell. A bare count — this runs on every admin page, and
+ *  building the queue itself here once stalled the whole admin. */
 async function pendingMergeCount(): Promise<number> {
   try {
-    return (await getMergeQueue('PENDING')).total;
+    return await getMergeCount('PENDING');
   } catch {
     return 0;
   }

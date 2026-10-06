@@ -16,12 +16,18 @@ import type {
 import { apiFetch } from './api';
 import { getToken } from './auth';
 
-/** Fetch the moderation queue for a given status (admin-only, always fresh). */
+/** One page of the moderation queue for a status (admin-only, always fresh).
+ *  `before` is the previous page's `nextCursor`. */
 export async function getSubmissions(
   status: ReviewStatus,
+  type?: ReviewableType,
+  before?: string,
 ): Promise<PendingSubmissionsResponse> {
   const token = await getToken();
-  return apiFetch<PendingSubmissionsResponse>(`/admin/submissions?status=${status}`, {
+  const query = new URLSearchParams({ status });
+  if (type) query.set('type', type);
+  if (before) query.set('before', before);
+  return apiFetch<PendingSubmissionsResponse>(`/admin/submissions?${query}`, {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
   });
@@ -44,17 +50,28 @@ export async function moderateSubmission(
   });
 }
 
-/** The merge queue for a given status (admin-only, always fresh). */
+/** One page of the merge queue for a status (admin-only, always fresh). */
 export async function getMergeQueue(
   status: MergeStatus = 'PENDING',
   type?: IdentifiableType,
+  page = 1,
 ): Promise<MergeQueueResponse> {
   const token = await getToken();
-  const query = `?status=${status}${type ? `&type=${type}` : ''}`;
+  const query = `?status=${status}${type ? `&type=${type}` : ''}${page > 1 ? `&page=${page}` : ''}`;
   return apiFetch<MergeQueueResponse>(`/admin/merges${query}`, {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
   });
+}
+
+/** How many candidates are in a status — the nav badge, without rendering any. */
+export async function getMergeCount(status: MergeStatus = 'PENDING'): Promise<number> {
+  const token = await getToken();
+  const { total } = await apiFetch<{ total: number }>(`/admin/merges/count?status=${status}`, {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+  return total;
 }
 
 /** Fold one row of a candidate pair into the other. */

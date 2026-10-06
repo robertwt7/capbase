@@ -235,7 +235,13 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
   (server actions) approve/reject. Keep it strictly monochrome (`admin.module.css`).
   The admin nav is hand-written `<Link>`s in `app/admin/layout.tsx` (Merges shows a pending
-  count); the queue itself has no nav link, only the brand link. Only the queue page uses
+  count, from `GET /admin/merges/count` — never the queue itself, since the layout runs on
+  every admin page); the queue itself has no nav link, only the brand link. **Both queues are
+  paged and no admin read may load a whole status**: APPROVED is every ingested row (~255k), and
+  loading it ran the API out of heap. Submissions page by cursor (`before` ← `nextCursor`,
+  `SUBMISSION_PAGE_SIZE`; eight tables merged on `(createdAt desc, type, id desc)`, so an
+  offset would load every row above it from each), merges by page number (`MERGE_PAGE_SIZE`,
+  windowed across signals in `MERGE_SIGNALS` order). Only the queue page uses
   `admin.module.css` — `/admin/merges` and `/admin/users` are Tailwind + `components/ui`, so
   copy **`merges/page.tsx`** (header, `FilterLink` pills, `Card` rows, one `<form
   action={fn.bind(null, …)}>` per button) for any new admin page. The web layer does no

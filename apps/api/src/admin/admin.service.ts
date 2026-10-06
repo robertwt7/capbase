@@ -1,6 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   normalizePersonName,
+  REVIEWABLE_TYPES,
+  SUBMISSION_PAGE_SIZE,
   type ChangeProposalReview,
   type CompanyEditFields,
   type PendingSubmission,
@@ -206,6 +208,61 @@ function kebab(name: string): string {
   return slug || 'person';
 }
 
+/** The filter one table gets for a queue page: its status, plus "older than
+ *  the cursor" when paging. */
+interface SubmissionWhere {
+  moderationStatus: ReviewStatus;
+  createdAt?: { lt: Date } | { lte: Date };
+  OR?: [{ createdAt: { lt: Date } }, { createdAt: Date; id: { lt: string } }];
+}
+
+interface SubmissionCursor {
+  createdAt: Date;
+  type: ReviewableType;
+  id: string;
+}
+
+/** The queue's total order: newest first, ties broken by type, then id. The
+ *  cursor filter in `olderThan` must agree with it exactly. */
+function bySubmissionOrder(a: PendingSubmission, b: PendingSubmission): number {
+  return (
+    b.createdAt.localeCompare(a.createdAt) ||
+    (a.type < b.type ? -1 : a.type > b.type ? 1 : 0) ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+  );
+}
+
+/** `<createdAt ISO>_<type>_<id>` — opaque to the web, which only echoes it. */
+function submissionCursor(item: PendingSubmission): string {
+  return `${item.createdAt}_${item.type}_${item.id}`;
+}
+
+function parseSubmissionCursor(raw: string): SubmissionCursor {
+  const first = raw.indexOf('_');
+  const second = raw.indexOf('_', first + 1);
+  const createdAt = new Date(raw.slice(0, first));
+  const type = raw.slice(first + 1, second) as ReviewableType;
+  const id = raw.slice(second + 1);
+  if (first < 0 || second < 0 || Number.isNaN(createdAt.getTime()) || !id ||
+      !REVIEWABLE_TYPES.includes(type)) {
+    throw new BadRequestException(`Invalid cursor "${raw}"`);
+  }
+  return { createdAt, type, id };
+}
+
+/**
+ * Rows of table `t` that sort after the cursor in `bySubmissionOrder`. On the
+ * cursor's own timestamp, a type sorting after the cursor's keeps every row, a
+ * type before it keeps none, and the cursor's own type continues by id.
+ */
+function olderThan(cursor: SubmissionCursor | null, t: ReviewableType): Partial<SubmissionWhere> {
+  if (!cursor) return {};
+  const at = cursor.createdAt;
+  if (t > cursor.type) return { createdAt: { lte: at } };
+  if (t < cursor.type) return { createdAt: { lt: at } };
+  return { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: cursor.id } }] };
+}
+
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
@@ -215,41 +272,92 @@ export class AdminService {
     private readonly mail: MailService,
   ) {}
 
-  async listSubmissions(status: ReviewStatus): Promise<PendingSubmissionsResponse> {
-    const where = { moderationStatus: status };
-    const order = { orderBy: { createdAt: 'desc' as const } };
+  /**
+   * One page of the queue for a status — optionally of one type — newest first,
+   * plus the true per-type totals. Never unbounded: APPROVED holds every
+   * ingested row (~255k with their joins), and loading them all ran the API out
+   * of heap and crashed it (2026-10-06).
+   *
+   * Paged by cursor (`before`, from the previous page's `nextCursor`) on the
+   * order (createdAt desc, type asc, id desc). Each table contributes its own
+   * next PAGE + 1 rows past the cursor; the merged newest PAGE of those is
+   * exactly the next page, and the +1 says whether another follows.
+   */
+  async listSubmissions(
+    status: ReviewStatus,
+    type?: ReviewableType,
+    before?: string,
+  ): Promise<PendingSubmissionsResponse> {
+    const cursor = before ? parseSubmissionCursor(before) : null;
+    const page = {
+      orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
+      take: SUBMISSION_PAGE_SIZE + 1,
+    };
+    const only = <T>(
+      t: ReviewableType,
+      query: (where: SubmissionWhere) => Promise<T[]>,
+    ): Promise<T[]> =>
+      !type || type === t
+        ? query({ moderationStatus: status, ...olderThan(cursor, t) })
+        : Promise.resolve([]);
 
-    const [companies, rounds, people, investors, acquisitions, exits, diversity, proposals] =
-      await Promise.all([
-        this.prisma.company.findMany({ where, include: { submittedBy }, ...order }),
+    const [
+      companies,
+      rounds,
+      people,
+      investors,
+      acquisitions,
+      exits,
+      diversity,
+      proposals,
+      countsByType,
+    ] = await Promise.all([
+      only('company', (where) =>
+        this.prisma.company.findMany({ where, include: { submittedBy }, ...page }),
+      ),
+      only('round', (where) =>
         this.prisma.fundingRound.findMany({
           where,
           include: { submittedBy, company: true, investors: true },
-          ...order,
+          ...page,
         }),
-        this.prisma.personRole.findMany({ where, include: { submittedBy, company: true }, ...order }),
+      ),
+      only('person', (where) =>
+        this.prisma.personRole.findMany({ where, include: { submittedBy, company: true }, ...page }),
+      ),
+      only('investor', (where) =>
         this.prisma.investorHolding.findMany({
           where,
           include: { submittedBy, company: true },
-          ...order,
+          ...page,
         }),
+      ),
+      only('acquisition', (where) =>
         this.prisma.acquisitionDeal.findMany({
           where,
           include: { submittedBy, company: true },
-          ...order,
+          ...page,
         }),
-        this.prisma.exitEvent.findMany({ where, include: { submittedBy, company: true }, ...order }),
+      ),
+      only('exit', (where) =>
+        this.prisma.exitEvent.findMany({ where, include: { submittedBy, company: true }, ...page }),
+      ),
+      only('diversity', (where) =>
         this.prisma.diversitySignal.findMany({
           where,
           include: { submittedBy, company: true },
-          ...order,
+          ...page,
         }),
+      ),
+      only('proposal', (where) =>
         this.prisma.changeProposal.findMany({
           where,
           include: { submittedBy, company: true },
-          ...order,
+          ...page,
         }),
-      ]);
+      ),
+      this.countSubmissions(status),
+    ]);
 
     const items: PendingSubmission[] = [
       ...companies.map((c) =>
@@ -283,24 +391,39 @@ export class AdminService {
           p.sourceUrl,
         );
       }),
-    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    ].sort(bySubmissionOrder);
 
+    const hasMore = items.length > SUBMISSION_PAGE_SIZE;
+    items.length = Math.min(items.length, SUBMISSION_PAGE_SIZE);
     await this.fillCitedSources(items);
 
+    const total = type
+      ? countsByType[type]
+      : Object.values(countsByType).reduce((sum, n) => sum + n, 0);
+    const last = items[items.length - 1];
     return {
-      total: items.length,
-      countsByType: {
-        company: companies.length,
-        round: rounds.length,
-        person: people.length,
-        investor: investors.length,
-        acquisition: acquisitions.length,
-        exit: exits.length,
-        diversity: diversity.length,
-        proposal: proposals.length,
-      },
+      total,
+      countsByType,
       items,
+      nextCursor: hasMore && last ? submissionCursor(last) : null,
     };
+  }
+
+  /** Rows per type in a status — one `count` per table, never the rows. */
+  private async countSubmissions(status: ReviewStatus): Promise<Record<ReviewableType, number>> {
+    const where = { moderationStatus: status };
+    const [company, round, person, investor, acquisition, exit, diversity, proposal] =
+      await Promise.all([
+        this.prisma.company.count({ where }),
+        this.prisma.fundingRound.count({ where }),
+        this.prisma.personRole.count({ where }),
+        this.prisma.investorHolding.count({ where }),
+        this.prisma.acquisitionDeal.count({ where }),
+        this.prisma.exitEvent.count({ where }),
+        this.prisma.diversitySignal.count({ where }),
+        this.prisma.changeProposal.count({ where }),
+      ]);
+    return { company, round, person, investor, acquisition, exit, diversity, proposal };
   }
 
   async moderate(

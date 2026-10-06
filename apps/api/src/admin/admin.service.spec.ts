@@ -595,3 +595,142 @@ describe('AdminService.moderate (contributor email)', () => {
     expect(mail.sendSubmissionApprovedEmail).not.toHaveBeenCalled();
   });
 });
+
+describe('AdminService.listSubmissions (paging)', () => {
+  type Row = { id: string; moderationStatus: string; createdAt: Date } & Record<string, unknown>;
+  type Where = Record<string, unknown>;
+
+  /** Just enough of Prisma's filter semantics for the cursor: equality,
+   *  `lt`/`lte` on dates and ids, and `OR`. */
+  function matches(row: Row, where: Where): boolean {
+    return Object.entries(where).every(([key, cond]) => {
+      if (key === 'OR') return (cond as Where[]).some((w) => matches(row, w));
+      const value = row[key] as Date | string;
+      const n = (v: unknown) => (v instanceof Date ? v.getTime() : (v as string));
+      if (cond instanceof Date) return n(value) === cond.getTime();
+      if (cond !== null && typeof cond === 'object') {
+        const { lt, lte } = cond as { lt?: unknown; lte?: unknown };
+        if (lt !== undefined) return n(value) < n(lt);
+        if (lte !== undefined) return n(value) <= n(lte);
+      }
+      return value === cond;
+    });
+  }
+
+  function table(rows: Row[]) {
+    return {
+      findMany: jest.fn(async ({ where, take }: { where: Where; take: number }) =>
+        rows
+          .filter((r) => matches(r, where))
+          // orderBy [createdAt desc, id desc]
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1))
+          .slice(0, take),
+      ),
+      count: jest.fn(async ({ where }: { where: Where }) =>
+        rows.filter((r) => matches(r, where)).length,
+      ),
+    };
+  }
+
+  // Only five distinct timestamps across 130 rows, so nearly every page
+  // boundary lands inside a tie — the case a createdAt-only cursor gets wrong.
+  const at = (i: number) => new Date(Date.UTC(2026, 9, 1 + (i % 5)));
+  const exits: Row[] = Array.from({ length: 70 }, (_, i) => ({
+    id: `e${String(i).padStart(3, '0')}`,
+    moderationStatus: 'APPROVED',
+    createdAt: at(i),
+    type: 'IPO',
+    date: new Date('2024-01-01'),
+    valueUsd: null,
+    detail: '',
+    company: null,
+  }));
+  const diversity: Row[] = Array.from({ length: 60 }, (_, i) => ({
+    id: `d${String(i).padStart(3, '0')}`,
+    moderationStatus: 'APPROVED',
+    createdAt: at(i),
+    label: 'Founders',
+    value: '1',
+    note: null,
+    company: null,
+  }));
+
+  function makeService() {
+    const prisma = {
+      company: table([]),
+      fundingRound: table([]),
+      personRole: table([]),
+      investorHolding: table([]),
+      acquisitionDeal: table([]),
+      exitEvent: table(exits),
+      diversitySignal: table(diversity),
+      changeProposal: table([]),
+      citation: { findMany: jest.fn(async () => []) },
+    };
+    return {
+      prisma,
+      service: new AdminService(prisma as unknown as PrismaService, {} as MailService),
+    };
+  }
+
+  async function walk(service: AdminService, type?: 'exit') {
+    const seen: string[] = [];
+    let before: string | undefined;
+    for (let pages = 0; pages < 10; pages++) {
+      const res = await service.listSubmissions('APPROVED', type, before);
+      expect(res.items.length).toBeLessThanOrEqual(50);
+      seen.push(...res.items.map((i) => i.id));
+      if (!res.nextCursor) return { seen, last: res };
+      before = res.nextCursor;
+    }
+    throw new Error('never reached the last page');
+  }
+
+  it('walks every row exactly once, newest first, across ties', async () => {
+    const { service } = makeService();
+    const { seen } = await walk(service);
+
+    expect(seen).toHaveLength(130);
+    expect(new Set(seen).size).toBe(130);
+    // The total order: createdAt desc, then type asc (diversity < exit), then id desc.
+    const expected = [
+      ...diversity.map((r) => ({ ...r, type: 'diversity' })),
+      ...exits.map((r) => ({ ...r, type: 'exit' })),
+    ]
+      .sort(
+        (a, b) =>
+          b.createdAt.getTime() - a.createdAt.getTime() ||
+          (a.type < b.type ? -1 : a.type > b.type ? 1 : 0) ||
+          (a.id < b.id ? 1 : -1),
+      )
+      .map((r) => r.id);
+    expect(seen).toEqual(expected);
+  });
+
+  it('reports true totals, not the page size', async () => {
+    const { service } = makeService();
+    const res = await service.listSubmissions('APPROVED');
+    expect(res.items).toHaveLength(50);
+    expect(res.total).toBe(130);
+    expect(res.countsByType).toMatchObject({ exit: 70, diversity: 60, company: 0 });
+  });
+
+  it('pages one type without reading the other tables', async () => {
+    const { service, prisma } = makeService();
+    const { seen, last } = await walk(service, 'exit');
+    expect(new Set(seen).size).toBe(70);
+    expect(seen.every((id) => id.startsWith('e'))).toBe(true);
+    expect(last.total).toBe(70);
+    expect(prisma.diversitySignal.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed cursor', async () => {
+    const { service } = makeService();
+    await expect(service.listSubmissions('APPROVED', undefined, 'nonsense')).rejects.toThrow(
+      'Invalid cursor',
+    );
+    await expect(
+      service.listSubmissions('APPROVED', undefined, '2026-10-01T00:00:00.000Z_bogus_x1'),
+    ).rejects.toThrow('Invalid cursor');
+  });
+});

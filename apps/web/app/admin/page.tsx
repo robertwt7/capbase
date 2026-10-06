@@ -1,5 +1,10 @@
 import Link from 'next/link';
-import { MODERATION_NOTE_MAX, type ReviewableType, type ReviewStatus } from '@repo/api';
+import {
+  MODERATION_NOTE_MAX,
+  REVIEWABLE_TYPES,
+  type ReviewableType,
+  type ReviewStatus,
+} from '@repo/api';
 
 import { Badge, Button, Textarea } from '../../components/ui';
 import { getSubmissions } from '../../lib/admin';
@@ -17,25 +22,26 @@ export const dynamic = 'force-dynamic';
 export default async function AdminQueue({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; type?: string }>;
+  searchParams: Promise<{ status?: string; type?: string; before?: string }>;
 }) {
   await requireAdmin();
 
-  const { status, type } = await searchParams;
+  const { status, type, before } = await searchParams;
   const active: ReviewStatus = STATUSES.includes(status as ReviewStatus)
     ? (status as ReviewStatus)
     : 'PENDING';
-
-  const queue = await getSubmissions(active);
-
-  // Chip list comes from the response itself so future reviewable types appear
-  // automatically; an unknown ?type= is ignored.
-  const typeKeys = Object.keys(queue.countsByType) as ReviewableType[];
-  const activeType = typeKeys.includes(type as ReviewableType)
+  // An unknown ?type= is ignored.
+  const activeType = REVIEWABLE_TYPES.includes(type as ReviewableType)
     ? (type as ReviewableType)
     : undefined;
-  const items = activeType ? queue.items.filter((i) => i.type === activeType) : queue.items;
-  const shownCount = activeType ? items.length : queue.total;
+
+  // One page, filtered by the API: APPROVED alone holds every ingested row.
+  const queue = await getSubmissions(active, activeType, before);
+  const { items } = queue;
+
+  const typeKeys = Object.keys(queue.countsByType) as ReviewableType[];
+  const allCount = typeKeys.reduce((sum, t) => sum + queue.countsByType[t], 0);
+  const shownCount = queue.total;
   const typeParam = activeType ? `&type=${activeType}` : '';
 
   return (
@@ -45,6 +51,7 @@ export default async function AdminQueue({
         <p className={styles.sub}>
           {shownCount} {active.toLowerCase()} {activeType ? `${activeType} ` : ''}
           {shownCount === 1 ? 'item' : 'items'}
+          {before || queue.nextCursor ? ' · newest first, 50 per page' : ''}
         </p>
       </div>
 
@@ -65,7 +72,7 @@ export default async function AdminQueue({
           href={`/admin?status=${active}`}
           className={`${styles.chip} ${!activeType ? styles.chipActive : ''}`}
         >
-          All ({queue.total})
+          All ({allCount})
         </Link>
         {typeKeys
           .filter((t) => queue.countsByType[t] > 0 || t === activeType)
@@ -180,6 +187,26 @@ export default async function AdminQueue({
           ))}
         </div>
       )}
+
+      {before || queue.nextCursor ? (
+        <nav className="mt-6 flex items-center justify-center gap-2" aria-label="Pagination">
+          {before ? (
+            <Button variant="outline" shape="box" size="sm" href={`/admin?status=${active}${typeParam}`}>
+              ← Newest
+            </Button>
+          ) : null}
+          {queue.nextCursor ? (
+            <Button
+              variant="outline"
+              shape="box"
+              size="sm"
+              href={`/admin?status=${active}${typeParam}&before=${encodeURIComponent(queue.nextCursor)}`}
+            >
+              Older →
+            </Button>
+          ) : null}
+        </nav>
+      ) : null}
     </div>
   );
 }

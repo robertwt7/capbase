@@ -7,7 +7,7 @@ import type {
   MergeStatus,
 } from '@repo/api';
 
-import { Badge, Button, Card } from '../../../components/ui';
+import { Badge, Button, Card, Pagination } from '../../../components/ui';
 import { getMergeQueue } from '../../../lib/admin';
 import { requireAdmin } from '../../../lib/auth';
 import { formatDate } from '../../../lib/format';
@@ -29,11 +29,11 @@ export const dynamic = 'force-dynamic';
 export default async function MergeQueue({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; type?: string }>;
+  searchParams: Promise<{ status?: string; type?: string; page?: string }>;
 }) {
   await requireAdmin();
 
-  const { status, type } = await searchParams;
+  const { status, type, page } = await searchParams;
   const active: MergeStatus = STATUSES.includes(status as MergeStatus)
     ? (status as MergeStatus)
     : 'PENDING';
@@ -41,7 +41,9 @@ export default async function MergeQueue({
     ? (type as IdentifiableType)
     : undefined;
 
-  const queue = await getMergeQueue(active, activeType);
+  const pageNum = Math.max(1, Number.parseInt(page ?? '1', 10) || 1);
+
+  const queue = await getMergeQueue(active, activeType, pageNum);
   const typeParam = activeType ? `&type=${activeType}` : '';
 
   return (
@@ -99,6 +101,14 @@ export default async function MergeQueue({
           ))}
         </ol>
       )}
+
+      <Pagination
+        className="mt-8"
+        page={queue.page}
+        pageSize={queue.pageSize}
+        total={queue.total}
+        href={(p) => `/admin/merges?status=${active}${typeParam}${p > 1 ? `&page=${p}` : ''}`}
+      />
     </div>
   );
 }

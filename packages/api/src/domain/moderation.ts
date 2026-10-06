@@ -14,6 +14,17 @@ export type ReviewableType =
   | 'diversity'
   | 'proposal';
 
+export const REVIEWABLE_TYPES: readonly ReviewableType[] = [
+  'company',
+  'round',
+  'person',
+  'investor',
+  'acquisition',
+  'exit',
+  'diversity',
+  'proposal',
+];
+
 /** A single row awaiting (or having undergone) moderation. */
 export interface PendingSubmission {
   type: ReviewableType;
@@ -33,10 +44,22 @@ export interface PendingSubmission {
   data: unknown;
 }
 
+/** Rows per page of the submission queue. Never unbounded: APPROVED holds
+ *  every ingested row (hundreds of thousands), and loading them all ran the API
+ *  out of heap. */
+export const SUBMISSION_PAGE_SIZE = 50;
+
 export interface PendingSubmissionsResponse {
+  /** Every row in the status (or in the requested type), not just `items`. */
   total: number;
+  /** Per-type totals for the status, whatever type was requested. */
   countsByType: Record<ReviewableType, number>;
+  /** One page, newest first, at most `SUBMISSION_PAGE_SIZE`. */
   items: PendingSubmission[];
+  /** Pass back as `before` for the next (older) page; null on the last one.
+   *  A cursor, not a page number: the queue merges eight tables, and an offset
+   *  would have to load every row above it from each of them. */
+  nextCursor: string | null;
 }
 
 export interface ModerationDecisionInput {
@@ -97,10 +120,18 @@ export interface MergeCandidateItem {
   mergeRecordId?: string | null;
 }
 
+/** Candidate pairs per page of the merge queue. Each renders both sides, so a
+ *  page costs a handful of queries per item. */
+export const MERGE_PAGE_SIZE = 25;
+
 export interface MergeQueueResponse {
+  /** Every candidate in the status (and type), not just this page. */
   total: number;
   countsBySignal: Record<MergeSignal, number>;
+  /** One page, strongest signal first, then newest. */
   items: MergeCandidateItem[];
+  page: number;
+  pageSize: number;
 }
 
 /** Admin picks which of the pair survives. */

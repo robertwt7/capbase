@@ -570,3 +570,52 @@ describe('MergeService reject', () => {
     await expect(service.reject('cand-1', 'admin-1')).rejects.toThrow(/unmerge it before rejecting/);
   });
 });
+
+describe('MergeService.listCandidates (paging)', () => {
+  // 30 identifier, 10 domain, 40 name pairs: page windows straddle signals.
+  const counts = { identifier: 30, domain: 10, name: 40 } as const;
+  const rows = (Object.keys(counts) as (keyof typeof counts)[]).flatMap((signal) =>
+    Array.from({ length: counts[signal] }, (_, i) => ({
+      id: `${signal}-${String(i).padStart(2, '0')}`,
+      signal,
+      status: 'PENDING',
+      entityType: 'company',
+      createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 100 - i)),
+    })),
+  );
+
+  function makeService() {
+    const prisma = {
+      mergeCandidate: {
+        groupBy: async () =>
+          Object.entries(counts).map(([signal, n]) => ({ signal, _count: { _all: n } })),
+        findMany: async ({ where, skip, take }: { where: { signal: string }; skip: number; take: number }) =>
+          rows.filter((r) => r.signal === where.signal).slice(skip, skip + take),
+      },
+    };
+    const service = new MergeService(prisma as unknown as PrismaService);
+    // Rendering the two sides is covered elsewhere; here only the window matters.
+    jest
+      .spyOn(service as unknown as { candidateItem: (r: { id: string }) => Promise<unknown> }, 'candidateItem')
+      .mockImplementation(async (r) => ({ id: r.id }));
+    return service;
+  }
+
+  it('pages through every pair once, strongest signal first', async () => {
+    const service = makeService();
+    const seen: string[] = [];
+    for (let page = 1; page <= 4; page++) {
+      const res = await service.listCandidates('PENDING', undefined, page);
+      expect(res.total).toBe(80);
+      expect(res.pageSize).toBe(25);
+      seen.push(...res.items.map((i) => i.id));
+    }
+    expect(seen).toEqual(rows.map((r) => r.id));
+  });
+
+  it('returns an empty page past the end', async () => {
+    const res = await makeService().listCandidates('PENDING', undefined, 9);
+    expect(res.items).toEqual([]);
+    expect(res.total).toBe(80);
+  });
+});
