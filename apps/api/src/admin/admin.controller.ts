@@ -64,6 +64,12 @@ export class AdminController {
     return this.admin.listSubmissions(resolved, type as ReviewableType | undefined, before);
   }
 
+  /** The nav badge's count, without rendering a page of the queue. */
+  @Get('submissions/count')
+  async submissionCount(): Promise<{ total: number }> {
+    return { total: await this.admin.pendingCount() };
+  }
+
   @Patch('submissions/:type/:id')
   moderate(
     @Param('type') type: string,

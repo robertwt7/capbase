@@ -31,6 +31,7 @@ import {
   shouldNotify,
   type SubmissionNotice,
 } from './submission-notice';
+import { pendingQueueStats } from './queue-alerts.service';
 
 const submittedBy = { select: { id: true, name: true, email: true } } as const;
 
@@ -271,6 +272,12 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
   ) {}
+
+  /** PENDING rows across every reviewable table, for the admin nav badge. One
+   *  aggregate per table (the queue digest's read), never `listSubmissions`. */
+  async pendingCount(): Promise<number> {
+    return (await pendingQueueStats(this.prisma)).total;
+  }
 
   /**
    * One page of the queue for a status — optionally of one type — newest first,

@@ -6,8 +6,6 @@ import { useState } from 'react';
 import { Button, Card, FormError, Input, Label } from '../../../components/ui';
 import { RATE_LIMITED_MESSAGE } from '../../../lib/rate-limit';
 
-import styles from '../admin.module.css';
-
 export default function AdminLogin() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +37,11 @@ export default function AdminLogin() {
   }
 
   return (
-    <div className={styles.loginMain}>
-      <Card className={styles.loginCard}>
-        <form className={styles.loginForm} onSubmit={onSubmit}>
-          <h1 className={styles.loginTitle}>Admin sign in</h1>
-          <p className={styles.loginSub}>Review and approve crowdsourced submissions.</p>
+    <div className="flex items-center justify-center px-(--page-pad) py-20">
+      <Card className="w-full max-w-[360px]">
+        <form className="flex flex-col gap-3.5 p-8" onSubmit={onSubmit}>
+          <h1 className="font-display text-[22px] font-bold text-ink">Admin sign in</h1>
+          <p className="mb-2 text-[13px] text-graphite-500">Review and approve crowdsourced submissions.</p>
 
           <div className="grid gap-1.5">
             <Label htmlFor="email">Email</Label>

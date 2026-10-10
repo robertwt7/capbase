@@ -1,6 +1,6 @@
 import type { AdminUser } from '@repo/api';
 
-import { Badge, Button, Input, Pagination } from '../../../components/ui';
+import { Badge, Button, Input, PageContainer, Pagination } from '../../../components/ui';
 import { getUsers } from '../../../lib/admin';
 import { requireAdmin } from '../../../lib/auth';
 import { formatCount, formatDate } from '../../../lib/format';
@@ -29,7 +29,7 @@ export default async function AdminUsers({
   };
 
   return (
-    <div className="mx-auto max-w-[1180px] px-6 py-9">
+    <PageContainer className="py-9">
       <header className="border-b border-ink pb-6">
         <h1 className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">
           Users
@@ -95,7 +95,7 @@ export default async function AdminUsers({
         href={href}
         className="mt-6"
       />
-    </div>
+    </PageContainer>
   );
 }
 

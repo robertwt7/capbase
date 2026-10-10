@@ -734,3 +734,33 @@ describe('AdminService.listSubmissions (paging)', () => {
     ).rejects.toThrow('Invalid cursor');
   });
 });
+
+describe('AdminService.pendingCount', () => {
+  it('sums the PENDING aggregate of every reviewable table', async () => {
+    const counts: Record<string, number> = {
+      company: 2,
+      fundingRound: 3,
+      personRole: 0,
+      investorHolding: 1,
+      acquisitionDeal: 0,
+      exitEvent: 4,
+      diversitySignal: 0,
+      changeProposal: 5,
+    };
+    const prisma = Object.fromEntries(
+      Object.entries(counts).map(([model, count]) => [
+        model,
+        {
+          aggregate: jest.fn(async () => ({
+            _count: { _all: count },
+            _min: { createdAt: null },
+          })),
+        },
+      ]),
+    );
+    await expect(newService(prisma).pendingCount()).resolves.toBe(15);
+    expect(prisma.company.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { moderationStatus: 'PENDING' } }),
+    );
+  });
+});

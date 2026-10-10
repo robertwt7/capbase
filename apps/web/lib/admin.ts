@@ -33,6 +33,17 @@ export async function getSubmissions(
   });
 }
 
+/** How many submissions are PENDING across every type — the nav badge, without
+ *  rendering a page of the queue. */
+export async function getSubmissionCount(): Promise<number> {
+  const token = await getToken();
+  const { total } = await apiFetch<{ total: number }>('/admin/submissions/count', {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+  return total;
+}
+
 /** Approve/reject a single submission. `note` is a rejection reason, emailed to
  *  the contributor (never stored). */
 export async function moderateSubmission(

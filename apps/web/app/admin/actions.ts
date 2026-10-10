@@ -1,24 +1,22 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import type { ReviewableType } from '@repo/api';
 
 import { moderateSubmission } from '../../lib/admin';
-import { TOKEN_COOKIE } from '../../lib/auth';
 
-// Server action invoked from the moderation queue's Approve/Reject forms.
-// Bound with (type, id, status) per row; no client JS required. The optional
-// `note` field comes from the "Reject with a reason" form in the detail panel
-// and is quoted in the contributor's rejection email.
+// Server action invoked from each queue card's decision form. Approve and
+// Reject share that form and pick the action via `formAction`, bound with
+// (type, id, status); no client JS required. The optional `note` is a
+// rejection reason quoted in the contributor's email, so it is read only on a
+// rejection — an approval never forwards a reason typed into the box.
 export async function moderateAction(
   type: ReviewableType,
   id: string,
   status: 'APPROVED' | 'REJECTED',
   formData?: FormData,
 ): Promise<void> {
-  const note = formData?.get('note');
+  const note = status === 'REJECTED' ? formData?.get('note') : null;
   await moderateSubmission(
     type,
     id,
@@ -26,11 +24,4 @@ export async function moderateAction(
     typeof note === 'string' && note.trim() ? note.trim() : undefined,
   );
   revalidatePath('/admin');
-}
-
-/** Clear the admin session cookie and return to the login screen. */
-export async function logoutAction(): Promise<void> {
-  const store = await cookies();
-  store.delete(TOKEN_COOKIE);
-  redirect('/admin/login');
 }

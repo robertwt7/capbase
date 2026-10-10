@@ -1,6 +1,6 @@
 /* Styles for the public profile page (`/profile`). The login/register auth forms
    were migrated to Tailwind + the RHF+zod pattern; only the profile page remains
-   on this module. Strictly monochrome — mirrors admin.module.css conventions. */
+   on this module. Strictly monochrome. */
 
 /* ---- Profile ---------------------------------------------------------- */
 .profileMain {

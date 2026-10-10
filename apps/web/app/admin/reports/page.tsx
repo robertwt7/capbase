@@ -6,10 +6,11 @@ import {
   type ReportStatus,
 } from '@repo/api';
 
-import { Badge, Button, Card, Input, Textarea } from '../../../components/ui';
+import { Badge, Button, Card, Input, PageContainer, Textarea } from '../../../components/ui';
 import { getReports } from '../../../lib/admin';
 import { requireAdmin } from '../../../lib/auth';
 import { formatDate } from '../../../lib/format';
+import { FilterLink } from '../FilterLink';
 import {
   dismissAction,
   resolveAction,
@@ -40,7 +41,7 @@ export default async function ReportQueue({
   const queue = await getReports(active);
 
   return (
-    <div className="mx-auto max-w-[1180px] px-6 py-9">
+    <PageContainer className="py-9">
       <header className="border-b border-ink pb-6">
         <h1 className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">
           Reports
@@ -83,31 +84,7 @@ export default async function ReportQueue({
           ))}
         </ol>
       )}
-    </div>
-  );
-}
-
-function FilterLink({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className={
-        'rounded-full border px-3.5 py-1.5 font-mono text-[11px] tracking-[0.06em] uppercase transition-colors ' +
-        (active
-          ? 'border-ink bg-primary text-primary-foreground'
-          : 'border-line bg-surface text-graphite-700 hover:border-ink hover:text-ink')
-      }
-    >
-      {children}
-    </Link>
+    </PageContainer>
   );
 }
 

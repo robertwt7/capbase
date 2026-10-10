@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 import type {
   AcquisitionDeal,
@@ -14,19 +13,23 @@ import type {
 } from '@repo/api';
 
 import { formatCount, formatDate, formatUsd, signedPct } from '../../lib/format';
-
-import styles from './admin.module.css';
+import { cn } from '../../lib/utils';
 
 interface Field {
   label: string;
   value: ReactNode;
+  /** Long text or a URL: spans the full card width instead of one column. */
+  wide?: boolean;
 }
+
+const LABEL = 'font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase';
+const VALUE = 'text-[13px] text-ink [overflow-wrap:anywhere]';
 
 // Outbound link for a submitted URL (rendered monochrome, opens in a new tab).
 function extLink(url: string | null | undefined): ReactNode {
   if (!url) return null;
   return (
-    <a href={url} target="_blank" rel="noreferrer" className={styles.detailLink}>
+    <a href={url} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-[3px]">
       {url}
     </a>
   );
@@ -43,17 +46,17 @@ function usd(value: number | null | undefined): string {
 
 function companyFields(c: Company): Field[] {
   const fields: Field[] = [
-    { label: 'One-liner', value: c.oneLiner },
-    { label: 'Description', value: c.description },
+    { label: 'One-liner', wide: true, value: c.oneLiner },
+    { label: 'Description', wide: true, value: c.description },
     { label: 'Domain', value: c.domain },
-    { label: 'Website', value: extLink(c.websiteUrl) },
-    { label: 'LinkedIn', value: extLink(c.linkedinUrl) },
-    { label: 'Twitter', value: extLink(c.twitterUrl) },
+    { label: 'Website', wide: true, value: extLink(c.websiteUrl) },
+    { label: 'LinkedIn', wide: true, value: extLink(c.linkedinUrl) },
+    { label: 'Twitter', wide: true, value: extLink(c.twitterUrl) },
     { label: 'Legal name', value: c.legalName },
     { label: 'HQ', value: c.hq },
     { label: 'Founded', value: c.founded ? String(c.founded) : null },
     { label: 'Headcount', value: c.headcount ? formatCount(c.headcount) : null },
-    { label: 'Industry', value: c.industry?.length ? c.industry.join(', ') : null },
+    { label: 'Industry', wide: true, value: c.industry?.length ? c.industry.join(', ') : null },
     { label: 'Sector', value: c.primarySector },
     { label: 'Stage', value: c.stage },
     { label: 'Status', value: c.status },
@@ -86,7 +89,7 @@ function roundFields(r: FundingRound): Field[] {
     { label: 'Amount', value: usd(r.amountUsd) },
     { label: 'Post-money', value: usd(r.postMoneyUsd) },
     { label: 'Lead', value: r.lead },
-    { label: 'Investors', value: investors || null },
+    { label: 'Investors', wide: true, value: investors || null },
   ];
 }
 
@@ -96,8 +99,8 @@ function personFields(p: Person): Field[] {
     { label: 'Title', value: p.title },
     { label: 'Role', value: p.role },
     { label: 'Since', value: p.since ? String(p.since) : null },
-    { label: 'Prior', value: p.prior ?? null },
-    { label: 'LinkedIn', value: extLink(p.linkedinUrl) },
+    { label: 'Prior', wide: true, value: p.prior ?? null },
+    { label: 'LinkedIn', wide: true, value: extLink(p.linkedinUrl) },
   ];
 }
 
@@ -107,8 +110,8 @@ function investorFields(i: InvestorHolding): Field[] {
     { label: 'Type', value: i.type },
     { label: 'First round', value: i.firstRound },
     { label: 'Rounds participated', value: i.rounds ? formatCount(i.rounds) : null },
-    { label: 'Website', value: extLink(i.websiteUrl) },
-    { label: 'LinkedIn', value: extLink(i.linkedinUrl) },
+    { label: 'Website', wide: true, value: extLink(i.websiteUrl) },
+    { label: 'LinkedIn', wide: true, value: extLink(i.linkedinUrl) },
   ];
 }
 
@@ -117,7 +120,7 @@ function acquisitionFields(a: AcquisitionDeal): Field[] {
     { label: 'Target', value: a.target },
     { label: 'Date', value: a.date ? formatDate(a.date) : null },
     { label: 'Amount', value: usd(a.amountUsd) },
-    { label: 'Rationale', value: a.rationale },
+    { label: 'Rationale', wide: true, value: a.rationale },
   ];
 }
 
@@ -126,7 +129,7 @@ function exitFields(e: ExitEvent): Field[] {
     { label: 'Type', value: e.type },
     { label: 'Date', value: e.date ? formatDate(e.date) : null },
     { label: 'Value', value: usd(e.valueUsd) },
-    { label: 'Detail', value: e.detail },
+    { label: 'Detail', wide: true, value: e.detail },
   ];
 }
 
@@ -134,7 +137,7 @@ function diversityFields(d: DiversitySignal): Field[] {
   return [
     { label: 'Label', value: d.label },
     { label: 'Value', value: d.value },
-    { label: 'Note', value: d.note },
+    { label: 'Note', wide: true, value: d.note },
   ];
 }
 
@@ -193,30 +196,51 @@ function formatEditValue(key: keyof CompanyEditFields, value: unknown): string {
   return String(value);
 }
 
-/** Field / current → proposed rows for an edit proposal, one per changed field. */
+/** Field / current → proposed rows for an edit proposal, one per changed field.
+ *  Stacks under `sm`, the arrow turning to point down at the proposed value. */
 function ProposalDiff({ review }: { review: ChangeProposalReview }) {
   const keys = Object.keys(review.changes) as (keyof CompanyEditFields)[];
   return (
-    <>
-      <div className={styles.diffGrid}>
-        {keys.map((key) => (
-          <Fragment key={key}>
-            <span className={styles.detailLabel}>{EDIT_FIELD_LABELS[key] ?? key}</span>
-            <span className={styles.diffCurrent}>{formatEditValue(key, review.current[key])}</span>
-            <span className={styles.diffArrow} aria-hidden="true">
-              →
-            </span>
-            <span className={styles.diffProposed}>{formatEditValue(key, review.changes[key])}</span>
-          </Fragment>
-        ))}
-      </div>
-      {review.note ? (
-        <p className={styles.detailNote}>
-          <span className={styles.detailNoteLabel}>Submitter&apos;s note</span>
-          {review.note}
-        </p>
-      ) : null}
-    </>
+    <div className="grid grid-cols-[7.5rem_1fr_auto_1fr] items-baseline gap-x-4 gap-y-2 max-sm:grid-cols-1 max-sm:gap-y-0.5">
+      {keys.map((key) => (
+        <Fragment key={key}>
+          <span className={cn(LABEL, 'max-sm:not-first:mt-3')}>{EDIT_FIELD_LABELS[key] ?? key}</span>
+          <span className={cn(VALUE, 'text-graphite-500')}>
+            {formatEditValue(key, review.current[key])}
+          </span>
+          <span
+            className="font-mono text-[12px] text-graphite-500 max-sm:justify-self-start max-sm:rotate-90"
+            aria-hidden="true"
+          >
+            →
+          </span>
+          <span className={cn(VALUE, 'font-medium')}>
+            {formatEditValue(key, review.changes[key])}
+          </span>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/** Label/value pairs: short facts two to a row on wider screens, long ones
+ *  across the full width; under 480px each label sits above its value. */
+function FieldList({ fields }: { fields: Field[] }) {
+  return (
+    <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+      {fields.map((f) => (
+        <div
+          key={f.label}
+          className={cn(
+            'grid grid-cols-[7.5rem_1fr] items-baseline gap-x-3 max-[480px]:grid-cols-1',
+            f.wide && 'sm:col-span-2',
+          )}
+        >
+          <dt className={LABEL}>{f.label}</dt>
+          <dd className={cn(VALUE, 'whitespace-pre-line')}>{f.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -225,47 +249,29 @@ function isEmpty(value: ReactNode): boolean {
 }
 
 export function SubmissionDetail({ item }: { item: PendingSubmission }) {
-  const isProposal = item.type === 'proposal';
-  const fields = isProposal ? [] : buildFields(item).filter((f) => !isEmpty(f.value));
+  // The cited source comes first, so a moderator can check it before reading
+  // anything else — the single highest-value use of the citation feature.
+  const source: Field[] = item.sourceUrl
+    ? [{ label: 'Source', wide: true, value: extLink(item.sourceUrl) }]
+    : [];
 
-  // Child submissions carry their parent company; link it to the public profile.
-  const companyLink =
-    item.type !== 'company' && item.companySlug && item.companyName ? (
-      <Link prefetch={false} href={`/companies/${item.companySlug}`} className={styles.detailLink}>
-        {item.companyName}
-      </Link>
-    ) : null;
+  if (item.type === 'proposal') {
+    const review = item.data as ChangeProposalReview;
+    return (
+      <div className="flex flex-col gap-4">
+        {source.length ? <FieldList fields={source} /> : null}
+        <ProposalDiff review={review} />
+        {review.note ? (
+          <FieldList fields={[{ label: "Submitter's note", wide: true, value: review.note }]} />
+        ) : null}
+      </div>
+    );
+  }
 
-  return (
-    <>
-      <dl className={styles.detailGrid}>
-        {companyLink ? (
-          <>
-            <dt className={styles.detailLabel}>Company</dt>
-            <dd className={styles.detailValue}>{companyLink}</dd>
-          </>
-        ) : null}
-        {/* The cited source, so a moderator can check it before approving —
-            the single highest-value use of the whole citation feature. */}
-        {item.sourceUrl ? (
-          <>
-            <dt className={styles.detailLabel}>Source</dt>
-            <dd className={styles.detailValue}>{extLink(item.sourceUrl)}</dd>
-          </>
-        ) : null}
-        {fields.map((f) => (
-          <Fragment key={f.label}>
-            <dt className={styles.detailLabel}>{f.label}</dt>
-            <dd className={styles.detailValue}>{f.value}</dd>
-          </Fragment>
-        ))}
-      </dl>
-      {isProposal ? <ProposalDiff review={item.data as ChangeProposalReview} /> : null}
-      <p className={styles.detailFoot}>
-        {item.submittedBy
-          ? `Submitted by ${item.submittedBy.name} <${item.submittedBy.email}> · ${formatDate(item.createdAt)}`
-          : 'Ingested automatically (no submitter)'}
-      </p>
-    </>
+  const fields = [...source, ...buildFields(item)].filter((f) => !isEmpty(f.value));
+  return fields.length ? (
+    <FieldList fields={fields} />
+  ) : (
+    <p className="text-[13px] text-graphite-500">No fields submitted.</p>
   );
 }
