@@ -22,10 +22,10 @@ Next.js 16 (App Router, React 19). Styling is **Tailwind CSS v4 + shadcn/ui**, t
 to a monochrome design system. Tokens are declared in `app/globals.css` (`:root` for
 the raw values, `@theme inline` to expose them as utilities); `lib/utils.ts` exports
 `cn` (clsx + tailwind-merge). Style with Tailwind utilities and the `components/ui`
-primitives — don't add CSS Module files for new UI. (Two legacy CSS Modules remain for
-the not-yet-redesigned `admin` and `(account)` **profile** pages; the `(account)` auth
+primitives — don't add CSS Module files for new UI. (One legacy CSS Module remains, for
+the not-yet-redesigned `(account)` **profile** pages; the `(account)` auth
 forms — login/register — now follow the RHF+zod + Tailwind pattern. Back-compat token
-aliases `--font-body`/`--page-max`/`--page-pad` exist only for the remaining modules and
+aliases `--font-body`/`--page-max`/`--page-pad` exist only for the remaining module and
 will go when those routes are redesigned.)
 
 ### Design system — "parchment ledger"
@@ -233,18 +233,24 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 - `/admin` — moderation queue (ADMIN only). `/admin/login` signs in via
   `app/api/admin/login` which stores the JWT in an httpOnly `capbase_token` cookie.
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
-  (server actions) approve/reject. Keep it strictly monochrome (`admin.module.css`).
-  The admin nav is hand-written `<Link>`s in `app/admin/layout.tsx` (Merges shows a pending
-  count, from `GET /admin/merges/count` — never the queue itself, since the layout runs on
-  every admin page); the queue itself has no nav link, only the brand link. **Both queues are
+  (server actions) approve/reject. The admin layout renders **no header of its own**: under
+  the public `SiteHeader` it adds `AdminNav` (`app/admin/AdminNav.tsx`, Queue/Reports/Merges/
+  Users), whose pending counts come from `GET /admin/submissions/count` and `GET
+  /admin/merges/count` — bare counts, never the queues themselves, since the layout runs on
+  every admin page. The nav is **rendered only for an ADMIN session**, and only then are the
+  counts fetched. Signed-out visitors and ordinary users on `/admin/login` see nothing
+  admin-shaped. Never link to `/admin` from the public site. **Both queues are
   paged and no admin read may load a whole status**: APPROVED is every ingested row (~255k), and
   loading it ran the API out of heap. Submissions page by cursor (`before` ← `nextCursor`,
   `SUBMISSION_PAGE_SIZE`; eight tables merged on `(createdAt desc, type, id desc)`, so an
   offset would load every row above it from each), merges by page number (`MERGE_PAGE_SIZE`,
-  windowed across signals in `MERGE_SIGNALS` order). Only the queue page uses
-  `admin.module.css` — `/admin/merges` and `/admin/users` are Tailwind + `components/ui`, so
-  copy **`merges/page.tsx`** (header, `FilterLink` pills, `Card` rows, one `<form
-  action={fn.bind(null, …)}>` per button) for any new admin page. The web layer does no
+  windowed across signals in `MERGE_SIGNALS` order). Every admin page is Tailwind +
+  `components/ui` inside `PageContainer` (so it shares the header's left edge), with filter pills
+  from `app/admin/FilterLink.tsx`. Copy **`merges/page.tsx`** (header, `FilterLink` pills,
+  `Card` rows, one `<form action={fn.bind(null, …)}>` per button) for any new admin page. The
+  queue renders each submission as an **open** `Card` (every field visible, no expand), ending
+  in one form whose Approve/Reject buttons pick the action via `formAction`. The reason is sent
+  only on reject. The web layer does no
   per-action auth; the API's `@Roles('ADMIN')` on `AdminController` is the gate.
   `POST /admin/people/:id/suppress|unsuppress` exists in the API; its only web UI is
   Suppress & resolve on a person report (below).
@@ -328,7 +334,7 @@ mail can never slow, fail or roll back a decision; `MailService` logs and report
 to GlitchTip (no recipient in the report). No email for ingested rows, admins, banned users,
 unverified addresses, or a decision that repeats the current status. The optional rejection
 `note` (`ModerationDecisionInput`, ≤ `MODERATION_NOTE_MAX`) is quoted in the email and **not
-stored**; the queue's detail panel has a "Reject with reason" form for it.
+stored**; each queue card's decision form has an optional reason box, sent only with Reject.
 
 **Queue emails to admins.** `QueueAlertsService` (`src/admin/queue-alerts.service.ts`, plain
 `cron` `CronJob`s, no `@nestjs/schedule` in the api) emails every unbanned ADMIN a
