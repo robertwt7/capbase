@@ -11,8 +11,8 @@ import type { Prisma } from '@repo/db';
  * explicitly.
  *
  * These live in one place so that filter is one edit rather than fourteen by
- * hand. `market.service.ts` builds raw SQL and carries the same two conditions
- * inline.
+ * hand. `market.service.ts` and `search.service.ts` build raw SQL and carry the
+ * same conditions inline.
  */
 export const PUBLIC_COMPANY = {
   moderationStatus: 'APPROVED',
@@ -33,7 +33,8 @@ export const PUBLIC_INVESTOR = {
  * the ingest match index honour — flipping `moderationStatus` would be undone
  * by the next cron.
  *
- * `PeopleService.listSlugs` restates these three in raw SQL — keep it in step.
+ * `PeopleService.listSlugs` and `SearchService` restate these three in raw SQL —
+ * keep them in step.
  */
 export const PUBLIC_PERSON = {
   moderationStatus: 'APPROVED',
@@ -46,6 +47,19 @@ export const PUBLIC_COMPANY_RELATION = {
   moderationStatus: 'APPROVED' as const,
   mergedIntoId: null,
 };
+
+/**
+ * Roles that count towards a public profile: approved, and — when the role
+ * hangs off a company — on a company the public can see. A firm-officer role
+ * has no company, so the OR is what keeps it visible.
+ *
+ * `PeopleService.listSlugs` restates this in raw SQL (Prisma objects can't be
+ * reused there) — change one, change both.
+ */
+export const PUBLIC_ROLES = {
+  moderationStatus: 'APPROVED',
+  OR: [{ company: PUBLIC_COMPANY_RELATION }, { companyId: null }],
+} satisfies Prisma.PersonRoleWhereInput;
 
 /**
  * How far a chain of merges is followed when resolving a tombstoned slug.

@@ -20,7 +20,8 @@ export const THROTTLE_MESSAGE = 'Too many requests. Please wait a minute and try
 
 /** Login, register, and the password-reset / email-verification token routes. */
 export const AuthThrottle = () => Throttle({ default: AUTH_LIMIT });
-/** The paginated directory endpoints (`GET /companies`, `/investors`, `/people`, `/funds`). */
+/** The paginated directory endpoints (`GET /companies`, `/investors`, `/people`, `/funds`)
+ *  and the header typeahead (`GET /search`). */
 export const SearchThrottle = () => Throttle({ default: SEARCH_LIMIT });
 
 /**

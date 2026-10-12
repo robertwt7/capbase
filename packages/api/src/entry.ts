@@ -14,3 +14,4 @@ export * from './domain/provenance';
 export * from './domain/identifiers';
 export * from './domain/reports';
 export * from './domain/indexing';
+export * from './domain/search';

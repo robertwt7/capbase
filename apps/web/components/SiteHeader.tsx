@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { logout } from '@/app/(account)/actions';
 import { getSession } from '@/lib/auth';
+import { HeaderSearch } from './HeaderSearch';
 import { Logo } from './Logo';
 import { MobileNav, PrimaryNav } from './SiteNav';
 import { Button } from './ui';
@@ -22,25 +23,7 @@ export async function SiteHeader() {
 
         <PrimaryNav />
 
-        <form
-          className="ml-auto flex h-[38px] w-80 max-w-[38vw] items-center gap-2 rounded-[9px] border border-line bg-surface px-3 transition-colors focus-within:border-graphite-500 max-md:w-auto max-md:max-w-none max-md:min-w-0 max-md:flex-1"
-          role="search"
-          action="/companies"
-        >
-          <span
-            className="grid size-[18px] shrink-0 place-items-center rounded border border-line font-mono text-xs text-graphite-500"
-            aria-hidden="true"
-          >
-            /
-          </span>
-          <input
-            className="min-w-0 flex-1 border-none bg-transparent font-sans text-sm text-ink outline-none placeholder:text-graphite-400"
-            type="search"
-            name="q"
-            placeholder="Search companies, investors, sectors"
-            aria-label="Search Capbase"
-          />
-        </form>
+        <HeaderSearch />
 
         <div className="flex shrink-0 items-center gap-4 max-md:hidden">
           {session ? (

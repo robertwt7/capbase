@@ -102,6 +102,13 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   per request** (`lib/turnstile.ts`, env `TURNSTILE_SITE_KEY`) and passed down as a prop;
   the token travels through the server action to the API in the `x-turnstile-token`
   header. Tokens are single-use: forms remount the widget (`key`) after every attempt.
+- **`HeaderSearch`** (`components/HeaderSearch.tsx`, client) — the header's search-as-you-type
+  combobox. After a 300ms pause and 2+ characters (`SEARCH_MIN_CHARS`) it makes **one**
+  `GET /api/search` call (the same-origin proxy → API `GET /search`) and shows up to 5
+  companies / investors / people, each group ending in a "See all" link into its directory.
+  Superseded requests are aborted. Rows are real `<Link prefetch={false}>`s (profile links);
+  ↑/↓/Enter/Escape drive it and `/` focuses it from outside a text field. With nothing
+  highlighted — or without JS — Enter still submits the plain form to `/companies?q=`.
 
 **Landmarks:** the root layout owns the skip link and the single `<main id="content">`.
 Pages render plain containers (`<div>` / `PageContainer`) — never their own `<main>`.
@@ -397,12 +404,20 @@ the weights there. It carries only the default throttle and the web deliberately
 `forwardedForHeaders()` (see Rate limiting below): one page view is one cheap call, already
 limited by nginx's `general` zone.
 
+**`GET /search?q=`** (`src/search/`) answers the header typeahead in one call: three
+parallel raw `$queryRaw` queries (Prisma can't order by a CASE), each matching **name only**,
+ranked exact → prefix → word-start → substring, `LIMIT SEARCH_GROUP_LIMIT` (5), **no counts**,
+plus one `PersonRole` lookup that labels each person with their latest public role's
+organisation. Each query restates its public filter from `public-filters.ts` inline (keep them
+in step), and the input is LIKE-escaped (`escapeLike`). Under `SEARCH_MIN_CHARS` it returns
+empty groups without touching the DB; over `SEARCH_MAX_CHARS` is a 400. `@SearchThrottle()`.
+
 **Rate limiting (`src/throttle/`).** `@nestjs/throttler` is a global guard
 (`ApiThrottlerGuard`, provided in `AuthModule` because it decodes the JWT), the backstop
 behind nginx. It is in-memory, so it assumes one API process. Limits live in
 `throttle.ts`: `DEFAULT_LIMIT` 300/min on every route, `@AuthThrottle()` 20/min on
 login/register/forgot/reset/verify-email, `@SearchThrottle()` 60/min on the four directory
-lists, and `@SkipThrottle()` on `/health`. The key is `user:<id>` for a valid JWT, otherwise
+lists and `/search`, and `@SkipThrottle()` on `/health`. The key is `user:<id>` for a valid JWT, otherwise
 `req.ip`. Admins (re-checked against the row) are exempt. `main.ts` sets Express
 `trust proxy` from `TRUST_PROXY`, which defaults to the private and loopback ranges, so
 `X-Forwarded-For` is believed only from the web container.

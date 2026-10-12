@@ -14,6 +14,7 @@ import { MarketModule } from './market/market.module';
 import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReportsModule } from './reports/reports.module';
+import { SearchModule } from './search/search.module';
 import { DEFAULT_LIMIT, THROTTLE_MESSAGE } from './throttle/throttle';
 import { UsersModule } from './users/users.module';
 
@@ -37,6 +38,7 @@ import { HealthController } from './health.controller';
     InvestorsModule,
     PeopleModule,
     FundsModule,
+    SearchModule,
     MarketModule,
     AdminModule,
     ReportsModule,

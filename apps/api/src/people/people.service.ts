@@ -13,26 +13,13 @@ import {
 import type { Prisma } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { MAX_MERGE_HOPS, PUBLIC_COMPANY_RELATION, PUBLIC_PERSON } from '../prisma/public-filters';
+import { MAX_MERGE_HOPS, PUBLIC_PERSON, PUBLIC_ROLES } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
 import { toPersonSummary, type PersonWithRoles } from './person.mapper';
 
 /** How many roles to include on each person's directory card. */
 const ROLE_SAMPLE = 6;
-
-/**
- * Roles that count towards a public profile: approved, and — when the role
- * hangs off a company — on a company the public can see. A firm-officer role
- * has no company, so the OR is what keeps it visible.
- *
- * `listSlugs` restates this in raw SQL (Prisma objects can't be reused there) —
- * change one, change both.
- */
-const PUBLIC_ROLES = {
-  moderationStatus: 'APPROVED',
-  OR: [{ company: PUBLIC_COMPANY_RELATION }, { companyId: null }],
-} satisfies Prisma.PersonRoleWhereInput;
 
 const ROLE_INCLUDE = {
   company: { select: { slug: true, name: true, domain: true } },
