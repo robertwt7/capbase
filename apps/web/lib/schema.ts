@@ -46,7 +46,11 @@ export function companyJsonLd(company: Company) {
     ...(company.websiteUrl && { url: company.websiteUrl }),
     // 0 means no source recorded the year; schema.org rejects "0".
     ...(company.founded > 0 && { foundingDate: String(company.founded) }),
-    address: { '@type': 'PostalAddress', addressLocality: company.hq },
+    address: {
+      '@type': 'PostalAddress',
+      addressLocality: company.hq,
+      ...(company.countryCode && { addressCountry: company.countryCode }),
+    },
     ...(sameAs.length > 0 && { sameAs }),
     // Same logo source CompanyLogo uses.
     ...(company.domain && { logo: `${SITE_URL}/api/logo/${encodeURIComponent(company.domain)}` }),
@@ -90,7 +94,13 @@ export function investorJsonLd(investor: InvestorDetailResponse) {
     ...(investor.websiteUrl && { url: investor.websiteUrl }),
     ...(investor.legalName && { legalName: investor.legalName }),
     ...(investor.foundedYear && { foundingDate: String(investor.foundedYear) }),
-    ...(investor.hq && { address: { '@type': 'PostalAddress', addressLocality: investor.hq } }),
+    ...(investor.hq && {
+      address: {
+        '@type': 'PostalAddress',
+        addressLocality: investor.hq,
+        ...(investor.countryCode && { addressCountry: investor.countryCode }),
+      },
+    }),
     ...(sameAs.length > 0 && { sameAs: [...new Set(sameAs)] }),
     // Same logo source CompanyLogo uses.
     ...(investor.domain && { logo: `${SITE_URL}/api/logo/${encodeURIComponent(investor.domain)}` }),

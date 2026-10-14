@@ -1,17 +1,52 @@
 // Money and number formatting used across the data-dense views.
 
-export function formatUsd(amount: number | null): string {
+import { countryName as isoCountryName } from '@repo/api';
+
+const symbols = new Map<string, string>();
+
+/** The currency's narrow symbol ($, £, €), or "CODE " when the locale has
+ *  none — never a guess. Cached: Intl formatters are not free to build. */
+function currencySymbol(currency: string): string {
+  const code = currency.toUpperCase();
+  let symbol = symbols.get(code);
+  if (symbol === undefined) {
+    try {
+      const part = new Intl.NumberFormat('en', { style: 'currency', currency: code, currencyDisplay: 'narrowSymbol' })
+        .formatToParts(0)
+        .find((p) => p.type === 'currency')?.value;
+      symbol = part && part !== code ? part : `${code} `;
+    } catch {
+      symbol = `${code} `;
+    }
+    symbols.set(code, symbol);
+  }
+  return symbol;
+}
+
+/** Compact money in its own currency: £425K, €1.2M, $24B. Same rounding rules
+ *  as `formatUsd`, which is this with USD. */
+export function formatMoney(amount: number | null, currency = 'USD'): string {
   if (amount === null) return 'Undisclosed';
+  const symbol = currencySymbol(currency);
   if (amount >= 1_000_000_000) {
-    return `$${trim(amount / 1_000_000_000)}B`;
+    return `${symbol}${trim(amount / 1_000_000_000)}B`;
   }
   if (amount >= 1_000_000) {
-    return `$${trim(amount / 1_000_000)}M`;
+    return `${symbol}${trim(amount / 1_000_000)}M`;
   }
   if (amount >= 1_000) {
-    return `$${trim(amount / 1_000)}K`;
+    return `${symbol}${trim(amount / 1_000)}K`;
   }
-  return `$${amount}`;
+  return `${symbol}${Math.round(amount)}`;
+}
+
+export function formatUsd(amount: number | null): string {
+  return formatMoney(amount, 'USD');
+}
+
+/** English name for an ISO alpha-2 code ("GB" → "United Kingdom"), or null. */
+export function countryName(code: string | null | undefined): string | null {
+  return isoCountryName(code);
 }
 
 function trim(value: number): string {

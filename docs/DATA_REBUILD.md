@@ -15,6 +15,8 @@ empty Postgres with the commands below — locally or on production.
 | `SEC_FORM_C` | Regulation Crowdfunding issuers + their raises + signing officers, from the quarterly Form C data sets | 41 quarterly snapshots (2016Q2→) | 9.0k issuers, 4.3k rounds, 19.6k people |
 | `SBIR` | Deep-tech companies + their federal research awards (`kind: 'Grant'`), from the monthly SBIR.gov bulk file | Monthly full snapshot | 15.3k companies, 124k grant rounds ($56bn) |
 | `SEC_S1` | **Investor→company edges only**, from S-1 principal-stockholder tables | Document walk from `S1_START_DATE` | ~1,000 filings/year |
+| `INNOVATE_UK` | UK businesses + their Innovate UK awards (`kind: 'Grant'` in GBP, Innovation Loans as `Debt`), from UKRI's two funded-projects workbooks | Full snapshot, refreshed in place | 20.9k companies, 44.4k awards (£10.2bn) |
+| `COMPANIES_HOUSE` | UK companies: the register's large-company slice (FULL/GROUP/MEDIUM accounts) **plus every company number already held** | Monthly full snapshot | ~107k kept of 5.7M rows |
 
 Two properties make this reproducible:
 
@@ -103,6 +105,45 @@ Four consequences worth knowing before reading the numbers:
 Also note that `Gross Asset Value` is **NAV as of the filing, not capital raised**.
 It sits in its own column (`grossAssetsUsd`) precisely so it is never read as a
 fund size.
+
+**The UK sources key on the Companies House number, and their order matters.**
+Innovate UK publishes each participant's `CRN`, which is the only identity it uses
+(no name fallback); Companies House is the register itself. `COMPANIES_HOUSE` keeps
+every number we already hold whatever the company's size, so it must run **after**
+`INNOVATE_UK` and `WIKIDATA` (whose P2622 is the same number) — in one run that is
+`IngestModule` registration order, in `ingest-all` it is the line order. Run it first
+and it simply enriches fewer rows; nothing breaks. About 4k grantee numbers are
+dissolved companies the live register no longer lists, so they keep only what
+Innovate UK said about them.
+
+**A name match never crosses a border or a registry number.** UK rows bring ~128k
+names into a corpus that was US-only, so the company name match is country-scoped
+(a GB "Acme Ltd" never enriches a US "Acme Inc") and may not land on a row that
+already holds a different Companies House number. Two same-named UK companies with
+different numbers become two rows and a merge candidate, never one silently merged
+row.
+
+**Grants in pounds, compared in dollars.** An Innovate UK award keeps its published
+amount in `FundingRound.amountLocal` with `currency: 'GBP'`; `amountUsd` is that
+amount at the ECB reference rate on the project's start date (`util/fx.ts`, the full
+rate history downloaded once per run). Grants stay out of the market tape exactly
+like SBIR's; the 345 Innovation Loans are `Debt`, so they count as raised capital.
+
+**Country is derived, never guessed.** `countryCode` is written by each source from a
+structured field and backfilled for older rows by `make backfill-geography` (no
+network, only `countryCode IS NULL` rows). Wikidata rows whose item has no P17 stay
+null — most are EIB-financed *projects*, not companies.
+
+## Memory: the 1 GB jobs container
+
+`JOBS_MEM_LIMIT=1g` gives Node a V8 heap ceiling of ~549 MB (measured with
+`docker run --memory=1g`). The two UK snapshot runs are the largest in the
+pipeline; rehearse them locally under the same ceiling:
+
+```bash
+cd apps/jobs && node --max-old-space-size=540 dist/backfill.js 1 1000000 INNOVATE_UK
+cd apps/jobs && node --max-old-space-size=540 dist/backfill.js 1 1000000 COMPANIES_HOUSE
+```
 
 ## Full rebuild, local
 
@@ -255,8 +296,10 @@ make ingest-prod DAYS=3650 LIMIT=1000000 SOURCE=SEC_EDGAR  # …then vintages/si
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=WIKIDATA
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_FORM_C
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SBIR
+make ingest-uk-prod             # Innovate UK → Companies House (after WIKIDATA)
 make ingest-prod DAYS=1 LIMIT=1000000 SOURCE=SEC_S1
 make backfill-sectors-prod
+make backfill-geography-prod    # countryCode for rows a source didn't stamp
 make backfill-identifiers-prod  # the CIK/QID/CRD/UEI crosswalk
 make backfill-people-prod       # one Person per human, from the role rows
 make merge-candidates-prod      # propose duplicate pairs for the admin queue
@@ -431,6 +474,13 @@ SELECT count(*) FILTER (WHERE "vintageYear" IS NOT NULL), count(*) FROM "Fund";
   `--max-old-space-size=512`.
 
 ## Adding a source to an existing dataset
+
+> **Production is live: prefer the in-place route.** Since the UK sources shipped,
+> new sources reach production as an additive migration (applied by `deploy-all`)
+> plus re-runnable `*-prod` make targets run in the deployed jobs container — no
+> dump, no restore, nothing on prod overwritten. The worked example is
+> [`infra/README.md` → Adding a data source to a live production](../infra/README.md#adding-a-data-source-to-a-live-production).
+> The dump-and-restore route below predates that and wipes every prod-side change.
 
 The rebuild commands above create a corpus from nothing. Adding one new source to
 a corpus you already have is a different job, and `make ingest-all` is the wrong

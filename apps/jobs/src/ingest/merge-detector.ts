@@ -6,7 +6,7 @@
  * Nest context — importing the CLI runs it.
  */
 
-import { normalizeInvestorName } from './ingest.service';
+import { countriesCompatible, normalizeInvestorName } from './ingest.service';
 
 /**
  * The detector's name key — deliberately LOOSER than the company matcher's.
@@ -39,6 +39,8 @@ export interface DetectRow {
   id: string;
   name: string;
   domain: string | null;
+  /** ISO alpha-2, or null/absent when no source stated one. */
+  countryCode?: string | null;
 }
 
 /** A pair the detector wants reviewed. */
@@ -69,31 +71,58 @@ export function sweep(
   rows: DetectRow[],
   key: (row: DetectRow) => string,
   groupLimit: number = GROUP_LIMIT,
+  opts: { scopeByCountry?: boolean } = {},
 ): SweepResult {
-  const groups = new Map<string, string[]>();
+  const groups = new Map<string, DetectRow[]>();
   for (const row of rows) {
     const k = key(row);
     if (!k) continue;
     const list = groups.get(k);
-    if (list) list.push(row.id);
-    else groups.set(k, [row.id]);
+    if (list) list.push(row);
+    else groups.set(k, [row]);
   }
 
   const pairs: DetectedPair[] = [];
   const skipped: { key: string; size: number }[] = [];
+  const seen = new Set<string>();
 
-  for (const [k, ids] of groups) {
-    if (ids.length < 2) continue;
-    if (ids.length > groupLimit) {
-      skipped.push({ key: k, size: ids.length });
-      continue;
-    }
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = i + 1; j < ids.length; j++) {
-        pairs.push({ aId: ids[i]!, bId: ids[j]!, evidence: k });
+  for (const [k, group] of groups) {
+    if (group.length < 2) continue;
+    for (const sub of opts.scopeByCountry ? byCountry(group) : [{ label: '', rows: group }]) {
+      if (sub.rows.length < 2) continue;
+      if (sub.rows.length > groupLimit) {
+        skipped.push({ key: sub.label ? `${k} [${sub.label}]` : k, size: sub.rows.length });
+        continue;
+      }
+      for (let i = 0; i < sub.rows.length; i++) {
+        for (let j = i + 1; j < sub.rows.length; j++) {
+          const aId = sub.rows[i]!.id;
+          const bId = sub.rows[j]!.id;
+          // Two country-less rows sit in every country's sub-group; once is enough.
+          const pairKey = `${aId}|${bId}`;
+          if (seen.has(pairKey)) continue;
+          seen.add(pairKey);
+          pairs.push({ aId, bId, evidence: k });
+        }
       }
     }
   }
 
   return { pairs, skipped };
+}
+
+/**
+ * Split one name group so no pair inside a sub-group has two known, different
+ * countries — the rule the ingest matcher applies (`countriesCompatible`).
+ * Each known country gets its rows plus every country-less row; a group with at
+ * most one known country stays whole. Without this the UK register's ~125k
+ * names would pair with every same-named US company and bury `/admin/merges`.
+ */
+function byCountry(group: DetectRow[]): { label: string; rows: DetectRow[] }[] {
+  const known = [...new Set(group.map((r) => r.countryCode).filter((c): c is string => !!c))];
+  if (known.length <= 1) return [{ label: '', rows: group }];
+  return known.map((country) => ({
+    label: country,
+    rows: group.filter((r) => countriesCompatible(country, r.countryCode ?? null)),
+  }));
 }

@@ -138,6 +138,29 @@ describe('normalizeIdentifier', () => {
     });
   });
 
+  describe('COMPANIES_HOUSE', () => {
+    it('zero-pads an all-digit number to eight characters', () => {
+      expect(normalizeIdentifier('COMPANIES_HOUSE', '5002194')).toBe('05002194');
+      expect(normalizeIdentifier('COMPANIES_HOUSE', '05002194')).toBe('05002194');
+      expect(normalizeIdentifier('COMPANIES_HOUSE', '123')).toBe('00000123');
+    });
+
+    it('upper-cases and closes up a register prefix', () => {
+      expect(normalizeIdentifier('COMPANIES_HOUSE', 'sc123456')).toBe('SC123456');
+      expect(normalizeIdentifier('COMPANIES_HOUSE', 'SC 123456')).toBe('SC123456');
+      expect(normalizeIdentifier('COMPANIES_HOUSE', 'OC301234')).toBe('OC301234');
+      expect(normalizeIdentifier('COMPANIES_HOUSE', 'R0000123')).toBe('R0000123');
+    });
+
+    it('rejects anything that is not a company number', () => {
+      expect(normalizeIdentifier('COMPANIES_HOUSE', 'ABC')).toBeNull();
+      expect(normalizeIdentifier('COMPANIES_HOUSE', '00000000')).toBeNull();
+      expect(normalizeIdentifier('COMPANIES_HOUSE', '0')).toBeNull();
+      expect(normalizeIdentifier('COMPANIES_HOUSE', '123456789')).toBeNull();
+      expect(normalizeIdentifier('COMPANIES_HOUSE', 'SC12345')).toBeNull();
+    });
+  });
+
   describe('DOMAIN', () => {
     it('lowercases, strips scheme, path and www.', () => {
       expect(normalizeIdentifier('DOMAIN', 'Acme.com')).toBe('acme.com');
@@ -164,6 +187,7 @@ describe('normalizeIdentifier', () => {
       TICKER: 'nasdaq:abnb',
       UEI: 'zqggha8hkdm7',
       DUNS: '80736155',
+      COMPANIES_HOUSE: 'sc 123456',
       DOMAIN: 'https://www.acme.com/about',
     };
 
@@ -193,6 +217,9 @@ describe('identifierUrl', () => {
       'https://opencorporates.com/companies/us_de/1234567',
     );
     expect(identifierUrl('UEI', 'ZQGGHA8HKDM7')).toBe('https://sam.gov/entity/ZQGGHA8HKDM7');
+    expect(identifierUrl('COMPANIES_HOUSE', '05002194')).toBe(
+      'https://find-and-update.company-information.service.gov.uk/company/05002194',
+    );
     expect(identifierUrl('DOMAIN', 'acme.com')).toBe('https://acme.com');
   });
 

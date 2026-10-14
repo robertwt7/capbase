@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import type {
+  CountryFacet,
   InvestorDetailResponse,
   InvestorSlugEntry,
   InvestorSummary,
@@ -19,6 +20,12 @@ export class InvestorsController {
   @Get()
   findAll(@Query() query: ListInvestorsDto): Promise<Paginated<InvestorSummary>> {
     return this.investors.findAll(query);
+  }
+
+  // Declared before @Get(':slug') so the literal path wins over the param route.
+  @Get('countries')
+  countries(): Promise<CountryFacet[]> {
+    return this.investors.countries();
   }
 
   // Declared before @Get(':slug') so the literal path wins over the param route.

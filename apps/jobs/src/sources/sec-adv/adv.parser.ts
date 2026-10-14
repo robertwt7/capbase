@@ -1,4 +1,4 @@
-import type { InvestorType } from '@repo/api';
+import { countryCodeFromName, type InvestorType } from '@repo/api';
 
 import type { CsvRow } from '../../util/csv';
 import { hostOf, identifyingDomain, isLinkedInHost, isSocialHost } from '../../util/domain';
@@ -148,6 +148,9 @@ export function mapAdvRows(rows: AdvRow[], types: readonly InvestorType[]): Norm
       legalName,
       type,
       hq,
+      // A dropdown on the form, so a structured field rather than an address
+      // read — but in the SEC's own spelling ("Korea, South"), hence by name.
+      countryCode: countryCodeFromName(row['Main Office Country']),
       websiteUrl,
       linkedinUrl,
       domain,

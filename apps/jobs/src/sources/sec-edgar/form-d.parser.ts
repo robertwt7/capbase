@@ -31,6 +31,9 @@ export interface ParsedFormD {
   entityName: string;
   city: string;
   state: string;
+  /** The raw EDGAR location code (`stateOrCountry`, e.g. CA, X0) — what the
+   *  ISO country is read from. `state` above is its display description. */
+  stateOrCountry: string;
   yearOfInc: number;
   industry: string;
   /** Total amount sold to date in USD (0 if undisclosed). */
@@ -70,6 +73,7 @@ export function parseFormD(xml: string): ParsedFormD | null {
   const address = issuer.issuerAddress ?? {};
   const city = str(address.city);
   const state = str(address.stateOrCountryDescription) || str(address.stateOrCountry);
+  const stateOrCountry = str(address.stateOrCountry);
 
   const yearOfInc = num(issuer.yearOfInc?.value);
 
@@ -95,6 +99,7 @@ export function parseFormD(xml: string): ParsedFormD | null {
     entityName,
     city,
     state,
+    stateOrCountry,
     yearOfInc,
     industry,
     amountSoldUsd,

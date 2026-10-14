@@ -6,7 +6,7 @@ export default function Loading() {
     <DirectorySkeleton
       title="Companies"
       label="companies"
-      controls={['w-[170px]', 'w-[150px]', 'w-[150px]', 'w-[170px]']}
+      controls={['w-[170px]', 'w-[150px]', 'w-[150px]', 'w-[190px]', 'w-[170px]']}
       cols={COMPANY_COLUMNS}
       cells={['left', 'right', 'right']}
       logo

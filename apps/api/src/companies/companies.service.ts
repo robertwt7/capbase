@@ -17,6 +17,7 @@ import {
   type CompanyHistoryResponse,
   type CompanyListQuery,
   type CompanySlugEntry,
+  type CountryFacet,
   type EntityIdentifierRef,
   type FeaturedCompaniesResponse,
   type Paginated,
@@ -28,6 +29,7 @@ import {
 import type { Prisma } from '@repo/db';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { toFacets } from '../prisma/country-facets';
 import { MAX_MERGE_HOPS, PUBLIC_COMPANY } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
@@ -90,6 +92,10 @@ const FEATURED_POOL = 120;
 /** The pool is a full-table aggregate; recompute it at most this often. */
 const FEATURED_POOL_TTL_MS = 15 * 60_000;
 
+/** The country facet is a full-table GROUP BY that only moves when an ingest
+ *  runs; recompute it at most this often, like the featured pool. */
+const COUNTRY_FACET_TTL_MS = 15 * 60_000;
+
 /** Fisher–Yates; returns a new array. */
 const shuffled = <T>(items: readonly T[], random = Math.random): T[] => {
   const out = [...items];
@@ -103,6 +109,7 @@ const shuffled = <T>(items: readonly T[], random = Math.random): T[] => {
 @Injectable()
 export class CompaniesService {
   private featuredPool: { ids: string[]; expiresAt: number } | null = null;
+  private countryFacet: { items: CountryFacet[]; expiresAt: number } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -203,6 +210,7 @@ export class CompaniesService {
       ...(query.sector && { primarySector: query.sector }),
       ...(query.stage && { stage: query.stage }),
       ...(query.status && { status: query.status }),
+      ...(query.country && { countryCode: query.country }),
     };
 
     const orderBy: Prisma.CompanyOrderByWithRelationInput =
@@ -223,6 +231,23 @@ export class CompaniesService {
     ]);
 
     return { items: rows.map((row) => toCompany(row)), total, page, pageSize };
+  }
+
+  /**
+   * How many public companies each country holds, most first — the directory's
+   * country filter. Countries with no public company are absent, and so are
+   * rows with no stated country.
+   */
+  async countries(): Promise<CountryFacet[]> {
+    if (this.countryFacet && this.countryFacet.expiresAt > Date.now()) return this.countryFacet.items;
+    const rows = await this.prisma.company.groupBy({
+      by: ['countryCode'],
+      where: { ...PUBLIC_COMPANY, countryCode: { not: null } },
+      _count: { _all: true },
+    });
+    const items = toFacets(rows);
+    this.countryFacet = { items, expiresAt: Date.now() + COUNTRY_FACET_TTL_MS };
+    return items;
   }
 
   /** Every approved company's slug + last update, for the web sitemap. */

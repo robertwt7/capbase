@@ -123,11 +123,11 @@ db-tunnel: ## [laptop] SSH-tunnel the VPS Postgres to localhost (VPS=user@host [
 
 # ---------------------------------------------------------------------------
 # Ingestion (SEC EDGAR Form D/S-1, Wikidata, SEC Form ADV + Schedule D funds,
-# SEC Form C, SBIR awards)
+# SEC Form C, SBIR awards, Innovate UK grants, Companies House)
 # ---------------------------------------------------------------------------
 
 .PHONY: ingest
-ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1)
+ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|INNOVATE_UK|COMPANIES_HOUSE|SEC_S1)
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
@@ -159,6 +159,23 @@ ingest-funds: ## Rebuild the private-fund universe (SEC Form ADV Schedule D 7.B.
 ingest-funds-prod: ## [VPS] Rebuild the private-fund universe inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 1000000 SEC_ADV_FUNDS
 
+# Innovate UK before Companies House: the register sweep keeps every number the
+# grantees (and Wikidata's P2622) already hold, whatever the company's size.
+.PHONY: ingest-uk
+ingest-uk: ## Ingest the UK sources (Innovate UK → Companies House)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill.js 1 1000000 INNOVATE_UK
+	cd apps/jobs && node dist/backfill.js 1 1000000 COMPANIES_HOUSE
+
+.PHONY: ingest-uk-prod
+ingest-uk-prod: ## [VPS] Ingest UK sources inside the deployed jobs container (Innovate UK → Companies House)
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 1000000 INNOVATE_UK
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 1000000 COMPANIES_HOUSE
+
+.PHONY: wikidata-prod
+wikidata-prod: ## [VPS] Re-run the Wikidata enrichment inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill.js 1 1000000 WIKIDATA
+
 .PHONY: ingest-all
 ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See docs/DATA_REBUILD.md
 # Order is forced: funds need their managers (SEC_ADV) to exist, and the Form D
@@ -170,8 +187,13 @@ ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See d
 	cd apps/jobs && node dist/backfill.js 1 1000000 WIKIDATA
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_FORM_C
 	cd apps/jobs && node dist/backfill.js 1 1000000 SBIR
+# UK after WIKIDATA (whose P2622 numbers the register sweep must already know),
+# and Innovate UK before Companies House for the same reason.
+	cd apps/jobs && node dist/backfill.js 1 1000000 INNOVATE_UK
+	cd apps/jobs && node dist/backfill.js 1 1000000 COMPANIES_HOUSE
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_S1
 	cd apps/jobs && node dist/backfill-sectors.js
+	cd apps/jobs && node dist/backfill-geography.js
 # Identifiers before merge detection (the detector reads them), and both before
 # citations, which is unchanged.
 	cd apps/jobs && node dist/backfill-identifiers.js
@@ -189,6 +211,15 @@ backfill-sectors: ## Fill missing Company.primarySector from stored industry val
 .PHONY: backfill-sectors-prod
 backfill-sectors-prod: ## [VPS] Fill missing sectors inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-sectors.js
+
+.PHONY: backfill-geography
+backfill-geography: ## Fill missing Company/Investor countryCode from stored hq values (no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-geography.js
+
+.PHONY: backfill-geography-prod
+backfill-geography-prod: ## [VPS] Fill missing countries inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-geography.js
 
 .PHONY: backfill-citations
 backfill-citations: ## Mint Source/Citation rows for every ingested row (no network; re-runnable)

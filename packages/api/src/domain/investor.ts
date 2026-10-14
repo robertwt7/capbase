@@ -12,6 +12,8 @@ export interface Investor {
   legalName?: string | null;
   type: InvestorType;
   hq?: string | null;
+  /** ISO 3166-1 alpha-2, same contract as Company.countryCode. */
+  countryCode?: string | null;
   websiteUrl?: string | null;
   linkedinUrl?: string | null;
   /** Used to resolve the logo, same as Company.domain. */

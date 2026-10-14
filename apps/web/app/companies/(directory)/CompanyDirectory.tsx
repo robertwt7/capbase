@@ -8,10 +8,12 @@ import {
   SECTORS,
   STAGES,
   type Company,
+  type CountryFacet,
   type Paginated,
 } from '@repo/api';
 
 import { CompanyTable } from '@/components/CompanyTable';
+import { ALL_COUNTRIES, CountryFilter } from '@/components/CountryFilter';
 import {
   Button,
   EmptyState,
@@ -74,9 +76,11 @@ function FilterSelect({
  */
 export function CompanyDirectory({
   result,
+  countries,
   initial,
 }: {
   result: Paginated<Company>;
+  countries: CountryFacet[];
   initial: Record<string, string | undefined>;
 }) {
   const router = useRouter();
@@ -87,6 +91,7 @@ export function CompanyDirectory({
   const [sector, setSector] = useState(initial.sector ?? ALL);
   const [stage, setStage] = useState(initial.stage ?? ALL);
   const [status, setStatus] = useState(initial.status ?? ALL);
+  const [country, setCountry] = useState(initial.country?.toUpperCase() ?? ALL_COUNTRIES);
   const [sort, setSort] = useState<Sort>(isSort(initial.sort) ? initial.sort : 'name');
 
   const filterQuery = (page?: number) => {
@@ -95,6 +100,7 @@ export function CompanyDirectory({
     if (sector !== ALL) params.set('sector', sector);
     if (stage !== ALL) params.set('stage', stage);
     if (status !== ALL) params.set('status', status);
+    if (country !== ALL_COUNTRIES) params.set('country', country);
     if (sort !== 'name') params.set('sort', sort);
     if (page && page > 1) params.set('page', String(page));
     const qs = params.toString();
@@ -119,16 +125,22 @@ export function CompanyDirectory({
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, sector, stage, status, sort, pathname, router]);
+  }, [q, sector, stage, status, country, sort, pathname, router]);
 
   const active =
-    q.trim() !== '' || sector !== ALL || stage !== ALL || status !== ALL || sort !== 'name';
+    q.trim() !== '' ||
+    sector !== ALL ||
+    stage !== ALL ||
+    status !== ALL ||
+    country !== ALL_COUNTRIES ||
+    sort !== 'name';
 
   const clear = () => {
     setQ('');
     setSector(ALL);
     setStage(ALL);
     setStatus(ALL);
+    setCountry(ALL_COUNTRIES);
     setSort('name');
   };
 
@@ -167,6 +179,12 @@ export function CompanyDirectory({
           allLabel="All statuses"
           options={COMPANY_STATUSES}
           className="w-[150px]"
+        />
+        <CountryFilter
+          value={country}
+          onChange={setCountry}
+          countries={countries}
+          className="w-[190px]"
         />
         <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
           <SelectTrigger className="w-[170px]" aria-label="Sort by">

@@ -21,6 +21,8 @@ export type IdentifierScheme =
   | 'UEI'
   /** Dun & Bradstreet number. */
   | 'DUNS'
+  /** UK Companies House company number (CRN), e.g. 05002194 or SC123456. */
+  | 'COMPANIES_HOUSE'
   /** Identifying web host (see apps/jobs/src/util/domain.ts for what counts). */
   | 'DOMAIN';
 
@@ -33,6 +35,7 @@ export const IDENTIFIER_SCHEMES: readonly IdentifierScheme[] = [
   'TICKER',
   'UEI',
   'DUNS',
+  'COMPANIES_HOUSE',
   'DOMAIN',
 ];
 
@@ -140,6 +143,16 @@ export function normalizeIdentifier(scheme: IdentifierScheme, raw: string): stri
       const padded = trimmed.padStart(9, '0');
       return padded === '000000000' ? null : padded;
     }
+    case 'COMPANIES_HOUSE': {
+      // Publishers drop leading zeros (Innovate UK writes 5002194) and some
+      // pad with spaces ("SC 123456"); the register's own form is 8 characters.
+      const upper = trimmed.toUpperCase().replace(/\s+/g, '');
+      const value = /^\d{1,8}$/.test(upper) ? upper.padStart(8, '0') : upper;
+      if (value === '00000000') return null;
+      // 8 digits (England & Wales), a two-letter register prefix + 6 digits
+      // (SC, NI, OC, SO, NC, FC, …), or the old Northern Ireland R + 7 digits.
+      return /^(\d{8}|[A-Z]{2}\d{6}|R\d{7})$/.test(value) ? value : null;
+    }
     case 'DOMAIN': {
       const lower = trimmed
         .toLowerCase()
@@ -170,6 +183,7 @@ const LINKED_URLS: Record<LinkedScheme, (value: string) => string> = {
   WIKIDATA: (v) => `https://www.wikidata.org/wiki/${v}`,
   OPENCORPORATES: (v) => `https://opencorporates.com/companies/${v}`,
   UEI: (v) => `https://sam.gov/entity/${v}`,
+  COMPANIES_HOUSE: (v) => `https://find-and-update.company-information.service.gov.uk/company/${v}`,
   DOMAIN: (v) => `https://${v}`,
 };
 

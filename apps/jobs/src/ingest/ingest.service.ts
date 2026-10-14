@@ -18,6 +18,7 @@ import {
   type NormalizedInvestorFirm,
   type NormalizedPerson,
   type NormalizedRecord,
+  type NormalizedRound,
   type SourceIdentifier,
 } from '../sources/ingestion-source';
 import { kebab } from '../util/slug';
@@ -53,8 +54,19 @@ interface MatchIndex {
   byIdentifier: Map<string, string>;
   /** domain → company id (first wins). */
   byDomain: Map<string, string>;
-  /** normalizeName(name) → company id (first wins). */
-  byName: Map<string, string>;
+  /** normalizeName(name) → every company id holding that name, in load order.
+   *  A list rather than first-wins, because the first holder may be in another
+   *  country: "Acme Ltd" (GB) must be able to skip "Acme Inc" (US). */
+  byName: Map<string, string[]>;
+  /** company id → its countryCode (null when no source has stated one). Kept
+   *  beside byName rather than inside it so filling a blank country updates
+   *  every name the row is listed under at once. */
+  countryOf: Map<string, string | null>;
+  /** company id → the Companies House number it holds. A company has exactly
+   *  one, so a row already holding a DIFFERENT number is a different legal
+   *  entity, however alike the names: Costain Limited 00610201 and 01393773
+   *  are two companies, and merging them on a name would be wrong. */
+  companyNumberOf: Map<string, string>;
   /** Every slug in use, to mint unique ones without extra queries. */
   slugs: Set<string>;
   /** What this run's identifier writes did, reported once at the end. */
@@ -223,7 +235,13 @@ export class IngestService {
 
     for (const source of active) {
       this.logger.log(`Ingesting from ${source.name} (days ${opts.days}, limit ${opts.limit})`);
-      const records = await source.fetch(opts);
+      // Rebuilt per source from the live index, so a number an earlier source
+      // in this run wrote (Wikidata P2622, an Innovate UK grantee) is known to
+      // the register source that follows it.
+      const records = await source.fetch({
+        ...opts,
+        knownCompanyNumbers: knownCompanyNumbers(index),
+      });
       processed += records.length;
       let done = 0;
       for (const record of records) {
@@ -326,6 +344,7 @@ export class IngestService {
         slug: true,
         name: true,
         domain: true,
+        countryCode: true,
         externalSource: true,
         externalId: true,
         mergedIntoId: true,
@@ -341,11 +360,21 @@ export class IngestService {
       byIdentifier: await this.loadIdentifiers('company', survivorOf),
       byDomain: new Map(),
       byName: new Map(),
+      countryOf: new Map(),
+      companyNumberOf: new Map(),
       slugs: new Set(),
       identifiers: emptyCounts(),
     };
     for (const c of existing) {
       index.slugs.add(c.slug);
+      index.countryOf.set(c.id, c.countryCode ?? null);
+    }
+    for (const [key, id] of index.byIdentifier) {
+      if (key.startsWith(COMPANY_NUMBER_PREFIX)) {
+        index.companyNumberOf.set(id, key.slice(COMPANY_NUMBER_PREFIX.length));
+      }
+    }
+    for (const c of existing) {
       const target = survivorOf.get(c.id);
       // A tombstone whose chain does not end at a live row is skipped entirely:
       // matching onto it would write to a row nobody can see.
@@ -354,8 +383,7 @@ export class IngestService {
         index.byKey.set(`${c.externalSource}:${c.externalId}`, target);
       }
       if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, target);
-      const norm = normalizeName(c.name);
-      if (norm && !index.byName.has(norm)) index.byName.set(norm, target);
+      addName(index, normalizeName(c.name), target);
     }
     return index;
   }
@@ -628,6 +656,7 @@ export class IngestService {
           date: new Date(round.date),
           amountUsd: BigInt(Math.round(round.amountUsd)),
           kind: round.kind ?? 'Equity',
+          ...roundMoney(round),
           externalSource: r.source,
           externalId: round.externalId,
           moderationStatus: 'APPROVED',
@@ -636,6 +665,7 @@ export class IngestService {
           amountUsd: BigInt(Math.round(round.amountUsd)),
           date: new Date(round.date),
           kind: round.kind ?? 'Equity',
+          ...roundMoney(round),
         },
       });
     }
@@ -888,6 +918,7 @@ export class IngestService {
       hq: firm.hq ?? null,
       websiteUrl: firm.websiteUrl ?? null,
       linkedinUrl: firm.linkedinUrl ?? null,
+      countryCode: firm.countryCode ?? null,
       domain,
       description: firm.description ?? null,
       crdNumber: firm.crdNumber ?? null,
@@ -1046,7 +1077,11 @@ export class IngestService {
     source: string,
     identifiers: SourceIdentifier[] | undefined,
     domain: string | null | undefined,
-    index: { byIdentifier: Map<string, string>; identifiers: IdentifierCounts },
+    index: {
+      byIdentifier: Map<string, string>;
+      identifiers: IdentifierCounts;
+      companyNumberOf?: Map<string, string>;
+    },
   ): Promise<void> {
     const all: SourceIdentifier[] = [
       ...(identifiers ?? []),
@@ -1065,6 +1100,14 @@ export class IngestService {
       if (outcome === 'written') {
         const normalized = normalizeIdentifier(scheme, value);
         if (normalized) index.byIdentifier.set(`${scheme}:${normalized}`, entityId);
+      }
+      // 'conflict' too: the row now claims this number even though another
+      // row holds it in the crosswalk, and must not attract a third.
+      if (scheme === 'COMPANIES_HOUSE' && index.companyNumberOf && outcome !== 'skipped') {
+        const normalized = normalizeIdentifier(scheme, value);
+        if (normalized && !index.companyNumberOf.has(entityId)) {
+          index.companyNumberOf.set(entityId, normalized);
+        }
       }
     }
   }
@@ -1085,20 +1128,29 @@ export class IngestService {
         industry: c.industry,
         stage: c.stage,
         totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
+        // Only when stated: a source that has no country must not erase one
+        // another source (or the geography backfill) recorded.
+        ...(c.countryCode ? { countryCode: c.countryCode } : {}),
       });
+      if (c.countryCode) index.countryOf.set(ownId, c.countryCode);
       await this.writeIdentifiers('company', ownId, r.source, c.identifiers, c.domain, index);
       return ownId;
     }
 
     // Identifier first: a CIK or a QID is a statement by the publisher about
     // which entity this is. A shared domain is a strong inference and a shared
-    // name a weak one, so both stay behind it.
+    // name a weak one, so both stay behind it — and the name match alone is
+    // scoped by country, since it is the only one that is an inference about a
+    // *different* publisher's row rather than a statement about this one.
+    const number = recordCompanyNumber(c.identifiers);
+    const byDomain = c.domain ? index.byDomain.get(c.domain) : undefined;
     const matchId =
       (await this.matchByIdentifier('company', c.identifiers, index)) ??
-      (c.domain ? index.byDomain.get(c.domain) : undefined) ??
-      index.byName.get(normalizeName(c.name));
+      (byDomain && sameEntityAllowed(index, byDomain, number) ? byDomain : undefined) ??
+      matchName(index, normalizeName(c.name), c.countryCode ?? null, number);
     if (matchId) {
       await this.enrich(matchId, r);
+      if (c.countryCode && !index.countryOf.get(matchId)) index.countryOf.set(matchId, c.countryCode);
       await this.writeIdentifiers('company', matchId, r.source, c.identifiers, c.domain, index);
       return matchId;
     }
@@ -1111,7 +1163,11 @@ export class IngestService {
         domain: c.domain ?? '',
         websiteUrl: c.websiteUrl ?? null,
         linkedinUrl: c.linkedinUrl ?? null,
+        legalName: c.legalName ?? null,
+        operatingStatus: c.operatingStatus ?? null,
+        companyType: c.companyType ?? null,
         primarySector: c.primarySector ?? null,
+        countryCode: c.countryCode ?? null,
         oneLiner: c.oneLiner ?? `${SEC_ONE_LINER_PREFIX} via SEC Form D.`,
         description: c.description ?? `${c.name} ${SEC_DESCRIPTION_MARKER} notice of exempt offering with the SEC.`,
         hq: c.hq || 'Undisclosed',
@@ -1129,8 +1185,8 @@ export class IngestService {
 
     index.byKey.set(key, created.id);
     if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, created.id);
-    const norm = normalizeName(c.name);
-    if (norm && !index.byName.has(norm)) index.byName.set(norm, created.id);
+    index.countryOf.set(created.id, c.countryCode ?? null);
+    addName(index, normalizeName(c.name), created.id);
     await this.writeIdentifiers('company', created.id, r.source, c.identifiers, c.domain, index);
     return created.id;
   }
@@ -1148,6 +1204,10 @@ export class IngestService {
     if (!row.websiteUrl && c.websiteUrl) data.websiteUrl = c.websiteUrl;
     if (!row.linkedinUrl && c.linkedinUrl) data.linkedinUrl = c.linkedinUrl;
     if (!row.primarySector && c.primarySector) data.primarySector = c.primarySector;
+    if (!row.countryCode && c.countryCode) data.countryCode = c.countryCode;
+    if (!row.legalName && c.legalName) data.legalName = c.legalName;
+    if (!row.operatingStatus && c.operatingStatus) data.operatingStatus = c.operatingStatus;
+    if (!row.companyType && c.companyType) data.companyType = c.companyType;
     if (row.founded === 0 && c.foundedYear) data.founded = c.foundedYear;
     if (row.headcount === 0 && c.headcount) data.headcount = c.headcount;
     if (c.oneLiner && row.oneLiner.startsWith(SEC_ONE_LINER_PREFIX)) data.oneLiner = c.oneLiner;
@@ -1225,26 +1285,112 @@ export class IngestService {
   }
 }
 
+/** Add one name → id entry, once. */
+function addName(index: MatchIndex, norm: string, id: string): void {
+  if (!norm) return;
+  const ids = index.byName.get(norm);
+  if (!ids) index.byName.set(norm, [id]);
+  else if (!ids.includes(id)) ids.push(id);
+}
+
+/**
+ * The first row holding this name whose country is compatible with the
+ * record's: equal, or unknown on either side. A known-and-different country
+ * never matches — a UK "Acme Ltd" is not a US "Acme Inc", and a name is too weak
+ * a signal to merge across a border on. Unknown stays permissive because most
+ * contributed and S-1 rows have no country, and refusing those would recreate
+ * every one of them.
+ */
+function matchName(
+  index: MatchIndex,
+  norm: string,
+  country: string | null,
+  companyNumber: string | null,
+): string | undefined {
+  if (!norm) return undefined;
+  return index.byName
+    .get(norm)
+    ?.find(
+      (id) =>
+        countriesCompatible(country, index.countryOf.get(id) ?? null) &&
+        sameEntityAllowed(index, id, companyNumber),
+    );
+}
+
+const COMPANY_NUMBER_PREFIX = 'COMPANIES_HOUSE:';
+
+/** The record's own Companies House number, normalized, or null. */
+function recordCompanyNumber(identifiers: SourceIdentifier[] | undefined): string | null {
+  const raw = identifiers?.find((i) => i.scheme === 'COMPANIES_HOUSE')?.value;
+  return raw ? normalizeIdentifier('COMPANIES_HOUSE', raw) : null;
+}
+
+/** Whether an inferred match (domain or name) may land on `id`: not when the
+ *  row already holds a different Companies House number than the record. The
+ *  pair is left for the merge detector to propose instead. */
+function sameEntityAllowed(index: MatchIndex, id: string, companyNumber: string | null): boolean {
+  if (!companyNumber) return true;
+  const held = index.companyNumberOf.get(id);
+  return !held || held === companyNumber;
+}
+
+/** The compatibility rule shared by ingest matching and the merge detector. */
+export function countriesCompatible(a: string | null, b: string | null): boolean {
+  return !a || !b || a === b;
+}
+
+/** Companies House numbers already held, read off the identifier index. */
+function knownCompanyNumbers(index: MatchIndex): Set<string> {
+  const out = new Set<string>();
+  for (const key of index.byIdentifier.keys()) {
+    if (key.startsWith(COMPANY_NUMBER_PREFIX)) out.add(key.slice(COMPANY_NUMBER_PREFIX.length));
+  }
+  return out;
+}
+
+/** A round's native-currency columns. USD rows store no local amount: their
+ *  amountUsd already IS the published figure. */
+function roundMoney(round: NormalizedRound): { currency: string; amountLocal: bigint | null } {
+  const currency = round.currency ?? 'USD';
+  return {
+    currency,
+    amountLocal:
+      currency !== 'USD' && round.amountLocal != null ? BigInt(Math.round(round.amountLocal)) : null,
+  };
+}
+
+/** Fold accents before any ASCII-only step: "Société Générale" must key as
+ *  "societe generale", not "socit gnrale". */
+function foldAccents(name: string): string {
+  return name.normalize('NFKD').replace(/\p{M}+/gu, '');
+}
+
 const LEGAL_SUFFIXES = new Set([
   'inc',
   'incorporated',
   'corp',
   'corporation',
   'llc',
+  'llp',
   'ltd',
   'limited',
   'co',
   'company',
   'plc',
+  'cic',
   'sa',
+  'sas',
   'ag',
+  'gmbh',
+  'bv',
+  'nv',
 ]);
 
-/** Company-name key for dedupe matching: lowercase, punctuation stripped
- *  (so "L.L.C." → "llc"), trailing legal suffixes dropped, whitespace
- *  collapsed. */
+/** Company-name key for dedupe matching: accents folded, lowercase,
+ *  punctuation stripped (so "L.L.C." → "llc"), trailing legal suffixes
+ *  dropped, whitespace collapsed. */
 export function normalizeName(name: string): string {
-  const tokens = name
+  const tokens = foldAccents(name)
     .toLowerCase()
     .replace(/[^a-z0-9\s]+/g, '')
     .split(/\s+/)
@@ -1285,7 +1431,7 @@ const INVESTOR_LEGAL_SUFFIXES = new Set([
 export function normalizeInvestorName(name: string): string {
   // Punctuation becomes a space, not nothing: "A.Capital Ventures" must read as
   // "a capital ventures", not "acapital ventures".
-  const raw = name
+  const raw = foldAccents(name)
     .toLowerCase()
     .replace(/[^a-z0-9\s]+/g, ' ')
     .split(/\s+/)

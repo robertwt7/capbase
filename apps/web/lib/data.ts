@@ -22,6 +22,7 @@ import {
   type CompanyHistoryResponse,
   type CompanyListQuery,
   type CompanySlugEntry,
+  type CountryFacet,
   type DiversitySignal,
   type ExitEvent,
   type FeaturedCompaniesResponse,
@@ -510,6 +511,7 @@ function paginateFallbackCompanies(query: CompanyListQuery): Paginated<Company> 
       return false;
     }
     if (query.sector && c.primarySector !== query.sector) return false;
+    if (query.country && c.countryCode !== query.country) return false;
     if (query.stage && c.stage !== query.stage) return false;
     if (query.status && c.status !== query.status) return false;
     return true;
@@ -646,6 +648,28 @@ export async function getCompanyHistory(
   }
 }
 
+/** The company directory's country filter: each country with how many public
+ *  companies it holds, most first. Empty when the API is unreachable — the
+ *  filter then offers "All countries" only, never mock countries. */
+export async function getCompanyCountries(): Promise<CountryFacet[]> {
+  try {
+    return await apiFetch<CountryFacet[]>('/companies/countries');
+  } catch (err) {
+    console.warn('[data] getCompanyCountries failed:', err);
+    return [];
+  }
+}
+
+/** The investor directory's country filter; same contract as companies. */
+export async function getInvestorCountries(): Promise<CountryFacet[]> {
+  try {
+    return await apiFetch<CountryFacet[]>('/investors/countries');
+  } catch (err) {
+    console.warn('[data] getInvestorCountries failed:', err);
+    return [];
+  }
+}
+
 /** Every approved company's slug + last update, for the sitemap. */
 export async function getCompanySlugs(): Promise<CompanySlugEntry[]> {
   try {
@@ -669,6 +693,7 @@ function paginateFallbackInvestors(query: InvestorListQuery): Paginated<Investor
   const list = fallbackInvestors.filter((inv) => {
     if (needle && !inv.name.toLowerCase().includes(needle)) return false;
     if (query.type && inv.type !== query.type) return false;
+    if (query.country && inv.countryCode !== query.country) return false;
     return true;
   });
   if (query.sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));

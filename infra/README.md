@@ -626,6 +626,66 @@ finds a backfill running logs `Ingest lock held by another process` and skips; a
 backfill that finds the cron running exits **75** and asks you to retry. The lock
 lives on a database session, so a crashed run can never leave it stuck.
 
+### Adding a data source to a live production
+
+Production is never restored over to add data. A new source arrives as **an
+additive migration** (applied by the api container's `prisma migrate deploy` during
+`deploy-all`, after the `predeploy` backup) plus **re-runnable `*-prod` make targets**
+run in the deployed jobs container. Every step below is idempotent: re-run it after
+a failure. The worked example is the UK release (`global_geography` migration,
+`INNOVATE_UK` + `COMPANIES_HOUSE` sources); the numbers are from the local
+rehearsal against a prod-shaped database.
+
+Read-only pre-checks:
+
+```sh
+ssh root@<vps>
+cd /root/Development/capbase && git status && git log --oneline -1   # clean, on the previous release
+df -h / && docker system df                                          # ≥ 15 GB free wanted
+make deploy-doctor
+```
+
+1. **Free disk if needed** — build cache only, never images or volumes:
+   `docker builder prune -f --filter until=72h`.
+2. **Deploy**: `git pull && make deploy-all`. Check the `predeploy` backup landed
+   (backup dir / R2), then `docker logs capbase-api 2>&1 | grep -i migrat` shows
+   `20261015000000_global_geography` applied and `make deploy-ps` is all healthy.
+   The migration is additive (nullable columns, a constant default, two indexes):
+   no table rewrite, and the old images still run against it.
+3. **Backfill country** on the rows already there: `make backfill-geography-prod`
+   (~20 s; SBIR, Form C and Form D end with no nulls; a second run derives 0).
+4. **Wikidata re-run** for P297 country codes and P2622 company numbers:
+   `make wikidata-prod` (~6 min). Run it after 06:00 UTC so it doesn't meet the daily
+   cron; a collision exits 75 and is safe to retry.
+5. **UK ingest**: `make ingest-uk-prod` — Innovate UK (~3 min, ~20.9k companies,
+   ~44.4k awards) then Companies House (~10–15 min: streams a ~494 MB zip, scans
+   5.7M rows, keeps ~107k). Watch `docker stats capbase-jobs`: V8's heap is capped
+   at ~549 MB inside the 1 GB container and both runs fit under it in rehearsal
+   (peak RSS ~790 MB).
+6. **Derived data**, in this order: `make backfill-identifiers-prod`,
+   `make merge-candidates-prod`, `make backfill-citations-prod` (the last is the
+   long one — one upsert per row across ~500k rows).
+7. **Turn on the monthly refresh**: set `MONTHLY_INGEST_SOURCES=INNOVATE_UK,COMPANIES_HOUSE`
+   (and optionally `MONTHLY_INGEST_HEARTBEAT_URL`, a healthchecks.io check with a
+   period of 31 days) in `infra/env/all.env`, then `make deploy-all SKIP_BACKUP=1`.
+   The jobs log then says `Scheduled monthly snapshot ingest [...] with cron "0 3 10 * *"`.
+
+Verification (`docker exec -i capbase-postgres psql -U capbase -d capbase`):
+
+```sql
+SELECT "countryCode", count(*) FROM "Company" GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
+SELECT "externalSource", count(*) FROM "Company" GROUP BY 1 ORDER BY 2 DESC;
+SELECT currency, count(*) FROM "FundingRound" GROUP BY 1;
+SELECT count(*) FROM "MergeCandidate" WHERE status = 'PENDING';
+SELECT pg_size_pretty(pg_database_size('capbase'));
+```
+
+**Rollback**: `make deploy-rollback SHA=<previous>` — the old code ignores the new
+columns and `currency` has a default, so it runs against the new schema as is. UK
+rows could be removed by `externalSource IN ('COMPANIES_HOUSE','INNOVATE_UK')` with
+cascades, but a row they *enriched* keeps its filled blanks; no destructive cleanup
+is scripted on purpose.
+
 TLS does not need re-running: certbot renews on a 12h check cycle and nginx
 reloads every 6h.
 

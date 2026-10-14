@@ -1419,8 +1419,202 @@ describe('normalizeName', () => {
     ['SpaceX', 'spacex'],
     ['The Boring Company', 'the boring'],
     ['Company', 'company'],
+    ['Société Générale', 'societe generale'],
+    ['Zürich Insurance Group AG', 'zurich insurance group'],
+    ['Acme Widgets LLP', 'acme widgets'],
+    ['Acme Widgets GmbH', 'acme widgets'],
   ])('normalizes %s → %s', (input, expected) => {
     expect(normalizeName(input)).toBe(expected);
+  });
+
+  it('folds accents for investor names too', () => {
+    expect(normalizeInvestorName('Société Générale Capital')).toBe('societe generale capital');
+  });
+});
+
+describe('IngestService country-scoped name matching', () => {
+  function uk(company: Partial<NormalizedRecord['company']> = {}): NormalizedRecord {
+    return record({
+      source: 'COMPANIES_HOUSE',
+      companyExternalId: '05002194',
+      company: {
+        name: 'Acme Ltd',
+        hq: 'London, United Kingdom',
+        foundedYear: 2004,
+        industry: [],
+        stage: 'Late stage',
+        totalRaisedUsd: 0,
+        countryCode: 'GB',
+        websiteUrl: 'https://acme.example.co.uk',
+        ...company,
+      },
+    });
+  }
+
+  it('creates a new row rather than enriching a same-name row in another country', async () => {
+    const prisma = mockPrisma([companyRow({ id: 'c-us', name: 'Acme Inc', countryCode: 'US' })]);
+    await serviceWith(prisma, [uk()]).run(RUN);
+
+    expect(prisma.company.update).not.toHaveBeenCalled();
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+    expect(prisma.company.create.mock.calls[0]![0].data).toMatchObject({ countryCode: 'GB' });
+  });
+
+  it('enriches a same-name row whose country is unknown, filling the country', async () => {
+    const prisma = mockPrisma([companyRow({ id: 'c-any', name: 'Acme', countryCode: null })]);
+    await serviceWith(prisma, [uk()]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    const update = prisma.company.update.mock.calls[0]![0] as unknown as {
+      where: { id: string };
+      data: Record<string, unknown>;
+    };
+    expect(update.where.id).toBe('c-any');
+    expect(update.data).toMatchObject({ countryCode: 'GB' });
+  });
+
+  it('skips the foreign holder of a name and enriches the compatible one behind it', async () => {
+    const prisma = mockPrisma([
+      companyRow({ id: 'c-us', name: 'Acme Inc', countryCode: 'US' }),
+      companyRow({ id: 'c-gb', name: 'ACME LIMITED', countryCode: 'GB', externalSource: 'X', externalId: '9' }),
+    ]);
+    await serviceWith(prisma, [uk()]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    const update = prisma.company.update.mock.calls[0]![0] as unknown as { where: { id: string } };
+    expect(update.where.id).toBe('c-gb');
+  });
+
+  it('still matches across countries on an identifier', async () => {
+    // An identifier is the publisher's statement about the entity; the
+    // country rule only constrains the name inference.
+    const prisma = mockPrisma(
+      [companyRow({ id: 'c-us', name: 'Something Else', countryCode: 'US' })],
+      [],
+      [],
+      [{ scheme: 'COMPANIES_HOUSE', value: '05002194', entityType: 'company', entityId: 'c-us', source: 'X' }],
+    );
+    await serviceWith(prisma, [uk({ identifiers: [{ scheme: 'COMPANIES_HOUSE', value: '5002194' }] })]).run(RUN);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+  });
+
+  it('writes the record’s country, legal name, status and type on create', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [
+      uk({ legalName: 'ACME LTD', operatingStatus: 'Active', companyType: 'For profit' }),
+    ]).run(RUN);
+
+    expect(prisma.company.create.mock.calls[0]![0].data).toMatchObject({
+      countryCode: 'GB',
+      legalName: 'ACME LTD',
+      operatingStatus: 'Active',
+      companyType: 'For profit',
+    });
+  });
+
+  it('adds a stated country on its own-key update, and never erases one', async () => {
+    const own = companyRow({ id: 'c-own', externalSource: 'STUB', externalId: 'X1', countryCode: 'US' });
+    const stated = mockPrisma([own]);
+    await serviceWith(stated, [record({ company: { ...record().company, countryCode: 'US' } })]).run(RUN);
+    const statedData = (stated.company.update.mock.calls[0]![0] as unknown as { data: Record<string, unknown> }).data;
+    expect(statedData.countryCode).toBe('US');
+
+    const silent = mockPrisma([own]);
+    await serviceWith(silent, [record()]).run(RUN);
+    const silentData = (silent.company.update.mock.calls[0]![0] as unknown as { data: Record<string, unknown> }).data;
+    expect(silentData).not.toHaveProperty('countryCode');
+  });
+
+  it('never name-matches a row that holds a different Companies House number', async () => {
+    // Costain Limited 00610201 and 01393773 are two legal entities; a name
+    // match must not fold the second into the first.
+    const prisma = mockPrisma(
+      [companyRow({ id: 'c-gb', name: 'Acme Limited', countryCode: 'GB' })],
+      [],
+      [],
+      [{ scheme: 'COMPANIES_HOUSE', value: '01393773', entityType: 'company', entityId: 'c-gb', source: 'X' }],
+    );
+    await serviceWith(prisma, [uk({ identifiers: [{ scheme: 'COMPANIES_HOUSE', value: '05002194' }] })]).run(RUN);
+
+    expect(prisma.company.update).not.toHaveBeenCalled();
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps two same-named records with different numbers apart within one run', async () => {
+    const prisma = mockPrisma();
+    let n = 0;
+    prisma.company.create.mockImplementation(async () => ({ id: `c-new-${++n}` }));
+    await serviceWith(prisma, [
+      uk({ identifiers: [{ scheme: 'COMPANIES_HOUSE', value: '00610201' }] }),
+      uk({ identifiers: [{ scheme: 'COMPANIES_HOUSE', value: '01393773' }] }),
+    ].map((r, i) => ({ ...r, companyExternalId: `k${i}` }))).run(RUN);
+
+    expect(prisma.company.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('still name-matches a row whose number is the record’s own, or that has none', async () => {
+    const prisma = mockPrisma([companyRow({ id: 'c-gb', name: 'Acme Limited', countryCode: 'GB' })]);
+    await serviceWith(prisma, [uk({ identifiers: [{ scheme: 'COMPANIES_HOUSE', value: '05002194' }] })]).run(RUN);
+    expect(prisma.company.create).not.toHaveBeenCalled();
+  });
+
+  it('passes the Companies House numbers already held to every source', async () => {
+    const prisma = mockPrisma(
+      [companyRow({ id: 'c-1' })],
+      [],
+      [],
+      [{ scheme: 'COMPANIES_HOUSE', value: '05002194', entityType: 'company', entityId: 'c-1', source: 'X' }],
+    );
+    let seen: ReadonlySet<string> | undefined;
+    const source: IngestionSource = {
+      name: 'STUB',
+      fetch: async (opts) => {
+        seen = opts.knownCompanyNumbers;
+        return [];
+      },
+    };
+    await new IngestService(prisma as unknown as PrismaService, [source], config()).run(RUN);
+
+    expect([...(seen ?? [])]).toEqual(['05002194']);
+  });
+});
+
+describe('IngestService round currency', () => {
+  it('stores a non-USD round’s published amount beside its USD equivalent', async () => {
+    const prisma = mockPrisma();
+    const r = record({
+      rounds: [
+        {
+          externalId: 'p-1:05002194',
+          name: 'Innovate UK grant',
+          date: '2022-04-01',
+          amountUsd: 553_000,
+          amountLocal: 425_000,
+          currency: 'GBP',
+          kind: 'Grant',
+        },
+      ],
+    });
+    await serviceWith(prisma, [r]).run(RUN);
+
+    const call = prisma.fundingRound.upsert.mock.calls[0]![0] as {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    };
+    expect(call.create).toMatchObject({ currency: 'GBP', amountLocal: 425_000n, amountUsd: 553_000n });
+    expect(call.update).toMatchObject({ currency: 'GBP', amountLocal: 425_000n });
+  });
+
+  it('defaults to USD with no local amount', async () => {
+    const prisma = mockPrisma();
+    const r = record({
+      rounds: [{ externalId: 'acc-1', name: 'Form D', date: '2026-06-15', amountUsd: 1_000, amountLocal: 999 }],
+    });
+    await serviceWith(prisma, [r]).run(RUN);
+
+    const call = prisma.fundingRound.upsert.mock.calls[0]![0] as { create: Record<string, unknown> };
+    expect(call.create).toMatchObject({ currency: 'USD', amountLocal: null });
   });
 });
 

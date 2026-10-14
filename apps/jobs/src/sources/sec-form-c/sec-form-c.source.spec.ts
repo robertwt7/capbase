@@ -48,6 +48,7 @@ describe('Form C toRecord', () => {
     expect(record.company).toMatchObject({
       name: 'Vigilante Gaming Bar, LLC',
       hq: 'Fresno, CA',
+      countryCode: 'US',
       foundedYear: 2018,
       domain: 'vigilantegaming.com',
       headcount: 4,

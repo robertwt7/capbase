@@ -9,6 +9,8 @@ export type SourceType =
   | 'Wikidata'
   /** A government bulk dataset — SBIR.gov award data, and future federal files. */
   | 'Government dataset'
+  /** A national company register — UK Companies House. */
+  | 'Company registry'
   | 'Company website'
   | 'Press'
   | 'Other';
@@ -17,6 +19,7 @@ export const SOURCE_TYPES: readonly SourceType[] = [
   'SEC filing',
   'Wikidata',
   'Government dataset',
+  'Company registry',
   'Company website',
   'Press',
   'Other',

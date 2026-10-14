@@ -4,6 +4,7 @@ import type {
   CompanyDetailResponse,
   CompanyHistoryResponse,
   CompanySlugEntry,
+  CountryFacet,
   FeaturedCompaniesResponse,
   Paginated,
 } from '@repo/api';
@@ -48,6 +49,12 @@ export class CompaniesController {
     @CurrentUser() user?: RequestUser,
   ): Promise<FeaturedCompaniesResponse> {
     return this.companies.findFeatured(query.limit, user);
+  }
+
+  // Declared before @Get(':slug') so the literal path wins over the param route.
+  @Get('countries')
+  countries(): Promise<CountryFacet[]> {
+    return this.companies.countries();
   }
 
   // Declared before @Get(':slug') so the literal path wins over the param route.

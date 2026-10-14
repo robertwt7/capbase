@@ -32,6 +32,7 @@ const FIELD_LABELS: Record<string, string> = {
   operatingStatus: 'Operating status',
   companyType: 'Company type',
   primarySector: 'Sector',
+  countryCode: 'Country',
 };
 
 export async function generateMetadata({

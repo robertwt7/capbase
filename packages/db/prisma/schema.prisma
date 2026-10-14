@@ -183,6 +183,10 @@ model Company {
   operatingStatus String? // 'Active' | 'Closed' (validated in DTO)
   companyType     String? // 'For profit' | 'Non-profit'
   primarySector   String? // one of SECTORS; shared vocab with MarketStat.sector
+  /// ISO 3166-1 alpha-2 (e.g. 'US', 'GB'), upper-case. Null when no source has
+  /// stated a country — never guessed from a city name. `hq` stays the display
+  /// string; this is the filterable fact.
+  countryCode     String?
   oneLiner    String
   description String
   hq          String
@@ -237,6 +241,7 @@ model Company {
   @@index([submittedById, moderationStatus, createdAt])
   // Server-side directory filters/sorts always scope to APPROVED first.
   @@index([moderationStatus, primarySector])
+  @@index([moderationStatus, countryCode])
   @@index([moderationStatus, stage])
   @@index([moderationStatus, status])
   @@index([moderationStatus, name])
@@ -299,6 +304,12 @@ model FundingRound {
   /// excluded from Company.totalRaisedUsd and from the market tape's deal count
   /// while still rendering on the funding ladder.
   kind         String   @default("Equity")
+  /// ISO 4217 of the amount as published. 'USD' for every pre-existing row.
+  currency     String   @default("USD")
+  /// The published amount in `currency`. Null when currency = 'USD' (then
+  /// amountUsd IS the published figure). amountUsd is the FX-converted,
+  /// comparable value every sort, total and bar width uses.
+  amountLocal  BigInt?
 
   // Provenance for ingested rows (e.g. SEC_EDGAR). Null for human contributions.
   externalSource String?
@@ -346,6 +357,8 @@ model Investor {
   legalName   String?
   type        String
   hq          String?
+  /// ISO 3166-1 alpha-2, same contract as Company.countryCode.
+  countryCode String?
   websiteUrl  String?
   linkedinUrl String?
   domain      String?
@@ -383,6 +396,7 @@ model Investor {
   @@index([mergedIntoId])
   @@index([moderationStatus])
   @@index([moderationStatus, type])
+  @@index([moderationStatus, countryCode])
   @@index([moderationStatus, name])
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Investor_name_trgm_idx")

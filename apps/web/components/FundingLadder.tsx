@@ -3,7 +3,7 @@ import type { Citation as CitationRow } from '@repo/api';
 import { Citation } from '@/components/Citation';
 import { Badge } from '@/components/ui';
 import type { FundingRound } from '@/lib/data';
-import { formatDate, formatUsd } from '@/lib/format';
+import { formatDate, formatMoney, formatUsd } from '@/lib/format';
 
 interface FundingLadderProps {
   rounds: FundingRound[];
@@ -14,6 +14,10 @@ interface FundingLadderProps {
 // The signature view: funding rounds are an ordered sequence, so we render them
 // as a vertical ledger where each rung's bar width encodes the capital raised.
 // Reading top to bottom traces the company's trajectory like a cap table.
+//
+// A round published in another currency (an Innovate UK grant in pounds) is
+// labelled in that currency, with its USD equivalent beside the date — but the
+// bar width stays on `amountUsd`, so rungs in two currencies remain comparable.
 export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
   const max = Math.max(...rounds.map((r) => r.amountUsd));
 
@@ -22,6 +26,10 @@ export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
       {rounds.map((round, i) => {
         const width = Math.max(8, Math.round((round.amountUsd / max) * 100));
         const last = i === rounds.length - 1;
+        const foreign =
+          round.currency && round.currency !== 'USD' && round.amountLocal != null
+            ? { currency: round.currency, amount: round.amountLocal }
+            : null;
         return (
           <li
             key={round.id}
@@ -56,6 +64,11 @@ export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
               </span>
               <span className="font-mono text-xs text-graphite-500">
                 {formatDate(round.date)}
+                {foreign && (
+                  <span className="ml-2" title="USD equivalent at the round's date (ECB reference rate)">
+                    ≈ {formatUsd(round.amountUsd)}
+                  </span>
+                )}
                 <Citation citations={citations} entityId={round.id} />
               </span>
             </div>
@@ -66,7 +79,7 @@ export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
                 style={{ width: `${width}%` }}
               >
                 <span className="font-mono text-[13px] font-medium text-paper">
-                  {formatUsd(round.amountUsd)}
+                  {foreign ? formatMoney(foreign.amount, foreign.currency) : formatUsd(round.amountUsd)}
                 </span>
               </div>
             </div>

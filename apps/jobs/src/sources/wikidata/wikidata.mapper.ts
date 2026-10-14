@@ -1,4 +1,10 @@
-import type { ExitType, RoleKind, Sector } from '@repo/api';
+import {
+  countryCodeFromName,
+  normalizeCountryCode,
+  type ExitType,
+  type RoleKind,
+  type Sector,
+} from '@repo/api';
 
 import type {
   NormalizedAcquisition,
@@ -105,6 +111,9 @@ function collectIdentifiers(
 
     if (b.lei?.value) push('LEI', b.lei.value);
     if (b.cik?.value) push('CIK', b.cik.value);
+    // P2622: the UK register's own number, which is what lets Companies House
+    // enrich this row instead of creating a second one.
+    if (b.chNumber?.value) push('COMPANIES_HOUSE', b.chNumber.value);
 
     const ticker = b.ticker?.value?.trim();
     const exchange = labelOf(b.exchangeLabel);
@@ -175,6 +184,7 @@ export function mapWikidata(bundle: WikidataBundle): NormalizedRecord[] {
         websiteUrl: website,
         linkedinUrl: linkedinId ? `https://www.linkedin.com/company/${linkedinId}` : null,
         primarySector: sectorFor(`${industryLabel} ${rawDescription}`),
+        countryCode: countryOf(d),
         oneLiner,
         description,
         headcount: numberOf(d.employees?.value) ?? 0,
@@ -251,6 +261,7 @@ export function mapInvestorFirms(rows: SparqlBinding[]): NormalizedInvestorFirm[
       name,
       type: investorTypeForClasses(classes) ?? 'Venture',
       hq: hq || null,
+      countryCode: countryOf(row),
       websiteUrl: website,
       domain: identifyingDomain(website),
       linkedinUrl: linkedinId ? `https://www.linkedin.com/company/${linkedinId}` : null,
@@ -412,6 +423,12 @@ export function qidOf(term: { value: string } | undefined): string | null {
 }
 
 /** English label, or null when the label service echoed the bare QID back. */
+/** The P17 country's own P297 code; failing that its English label, which
+ *  catches a country item that lacks P297 (historical states mostly do). */
+function countryOf(b: SparqlBinding): string | null {
+  return normalizeCountryCode(b.countryCode?.value) ?? countryCodeFromName(labelOf(b.countryLabel));
+}
+
 function labelOf(term: { value: string } | undefined): string | null {
   const v = term?.value.trim() ?? '';
   return v && !/^Q\d+$/.test(v) ? v : null;

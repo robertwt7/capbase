@@ -12,6 +12,7 @@ export * from './domain/proposals';
 export * from './domain/watchlist';
 export * from './domain/provenance';
 export * from './domain/identifiers';
+export * from './domain/geography';
 export * from './domain/reports';
 export * from './domain/indexing';
 export * from './domain/search';

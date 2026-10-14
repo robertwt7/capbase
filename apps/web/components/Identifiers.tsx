@@ -24,6 +24,7 @@ const SCHEME_LABELS: Record<IdentifierScheme, string> = {
   TICKER: 'Ticker',
   UEI: 'SAM UEI',
   DUNS: 'DUNS',
+  COMPANIES_HOUSE: 'Companies House',
   DOMAIN: 'Domain',
 };
 
@@ -37,6 +38,7 @@ const SCHEME_TITLES: Record<IdentifierScheme, string> = {
   TICKER: 'Exchange-qualified stock ticker',
   UEI: 'SAM.gov Unique Entity ID — the federal contractor identity',
   DUNS: 'Dun & Bradstreet number',
+  COMPANIES_HOUSE: 'UK Companies House company number — the company on the UK register',
   DOMAIN: 'Primary web domain',
 };
 

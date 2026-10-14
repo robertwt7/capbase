@@ -166,6 +166,13 @@ describe('InvestorsService', () => {
       expect(result).toMatchObject({ page: 3, pageSize: 10, total: 0 });
     });
 
+    it('filters by country', async () => {
+      count.mockResolvedValue(0);
+      findMany.mockResolvedValue([]);
+      await service.findAll({ country: 'GB' });
+      expect(findMany.mock.calls[0]![0]).toMatchObject({ where: { countryCode: 'GB' } });
+    });
+
     it('counts only approved holdings on approved companies', async () => {
       count.mockResolvedValue(0);
       findMany.mockResolvedValue([]);

@@ -8,7 +8,7 @@ import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
 import { Badge, Button, EmptyState, SectionHeader } from '@/components/ui';
 import { getInvestor } from '@/lib/data';
-import { formatCount, formatUsd } from '@/lib/format';
+import { countryName, formatCount, formatUsd } from '@/lib/format';
 import { canonical } from '@/lib/metadata';
 import { investorBreadcrumbJsonLd, investorJsonLd } from '@/lib/schema';
 
@@ -52,6 +52,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   const { slug } = await params;
   const investor = await getInvestor(slug);
   if (!investor) notFound();
+  const country = countryName(investor.countryCode);
 
   const hasLinks = Boolean(investor.websiteUrl || investor.linkedinUrl);
 
@@ -94,6 +95,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
           {investor.hq && <Fact label="Headquarters" value={investor.hq} />}
+          {country && <Fact label="Country" value={country} />}
           {investor.foundedYear ? <Fact label="Founded" value={String(investor.foundedYear)} /> : null}
           {investor.fundCount ? <Fact label="Funds" value={formatCount(investor.fundCount)} /> : null}
           {investor.assetsUsd ? <Fact label="Fund assets" value={formatUsd(investor.assetsUsd)} /> : null}

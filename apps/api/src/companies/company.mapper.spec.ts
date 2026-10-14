@@ -27,6 +27,21 @@ describe('company.mapper row identity', () => {
     expect(round.id).toBe('r1');
   });
 
+  it('carries a round’s native currency beside its USD figure', () => {
+    const round = toFundingRound({
+      id: 'r2',
+      name: 'Innovate UK grant',
+      date: new Date('2022-04-01'),
+      amountUsd: 553_000n,
+      currency: 'GBP',
+      amountLocal: 425_000n,
+      postMoneyUsd: null,
+      lead: null,
+      investors: [],
+    } as never);
+    expect(round).toMatchObject({ amountUsd: 553_000, currency: 'GBP', amountLocal: 425_000 });
+  });
+
   it('emits id from toPerson', () => {
     expect(toPerson({ id: 'p1', name: 'Mara', role: 'CEO', since: 2016 } as never).id).toBe('p1');
   });

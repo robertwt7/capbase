@@ -7,8 +7,8 @@ Workspaces:
 - `apps/web` — Next.js 16 frontend (public site + `/admin` moderation portal).
 - `apps/api` — NestJS REST API (auth, moderation, public reads).
 - `apps/jobs` — NestJS worker that ingests public filings and bulk datasets (SEC
-  Form D on a cron; Form C, SBIR, Form S-1, Form ADV + its Schedule D funds, and
-  Wikidata by hand).
+  Form D on a daily cron; Innovate UK + Companies House on an opt-in monthly cron;
+  Form C, SBIR, Form S-1, Form ADV + its Schedule D funds, and Wikidata by hand).
 - `packages/api` (`@repo/api`) — shared domain types consumed by every app.
 - `packages/db` (`@repo/db`) — shared Prisma schema, migrations, seed, client.
 - `packages/{ui,eslint-config,jest-config,typescript-config}` — shared tooling.
@@ -56,10 +56,14 @@ anymore).
   - `font-mono` → IBM Plex Mono. Every financial figure / number (tabular) **and**
     every meta label (uppercase, tracked) — the mono carries the "terminal" identity.
 - All money/number formatting goes through `lib/format.ts` (`formatUsd`,
-  `formatCount`, `formatDate`, `signedPct`). Don't format inline.
+  `formatMoney(amount, currency)`, `formatCount`, `formatDate`, `signedPct`,
+  `countryName`). Don't format inline. Countries render as **text, never flag emoji**
+  (emoji are colour).
 - The signature element is the **Funding Ladder** (`components/FundingLadder.tsx`):
   rounds as a vertical ledger with bar widths encoding round size. Keep it as the
-  one bold element; surrounding sections stay quiet.
+  one bold element; surrounding sections stay quiet. A non-USD round (an Innovate UK
+  grant) is labelled in its own currency (`£425K`) with `≈ $553K` beside the date;
+  **bar widths always use `amountUsd`**, so rungs in two currencies stay comparable.
 - Radii: `rounded-sm` 6px, `rounded-md` 10px, `rounded-lg` 12px, `rounded-full` for
   pills (set via `@theme`). Use them, don't hardcode pixel radii.
 
@@ -593,6 +597,22 @@ keyword heuristic (SBIR falls back to `AGENCY_SECTOR_MAP`, which is null for the
 every sector). Form C has no industry field, so those rows are honestly unclassified.
 `make backfill-sectors` fills missing sectors from stored `industry[]`.
 
+**Geography and currency.** `Company.countryCode` / `Investor.countryCode` hold an ISO 3166-1
+alpha-2 code (`COUNTRY_CODES`, `normalizeCountryCode`, `countryCodeFromName` in `@repo/api`
+`domain/geography.ts`; the 249 officially assigned codes, `UK`→`GB`/`EL`→`GR` aliased). `hq` stays
+the display string; `countryCode` is the filterable fact, set **only when a source states a
+country structurally** — an EDGAR location code (`sec-edgar/edgar-locations.ts`; `GEORGIA` as a
+description reads as the US state), a Form ADV dropdown, Wikidata's P17→P297, SBIR (US by statute),
+Innovate UK/Companies House (GB by construction) — never read off a city name. Contributed and S-1
+rows stay null. `make backfill-geography` (`ingest/derive-country.ts`, no network, re-runnable,
+no revisions) derives it for rows that predate the column. `/companies` and `/investors` filter on
+`?country=` (`@IsIn(COUNTRY_CODES)`, so an unassigned code is a 400) and `GET /companies/countries`
+/ `GET /investors/countries` return the `CountryFacet[]` the filter lists (15-min in-process cache).
+`FundingRound.currency` (ISO 4217, default `USD`) + `amountLocal` (the published amount, null for
+USD) carry a non-USD round; `amountUsd` is the FX-converted comparable figure (ECB reference rate on
+the round's date, `apps/jobs/src/util/fx.ts`) and is what every sort, total and bar width reads.
+Every other money column stays USD-only.
+
 **`FundingRound.kind`** (`Equity | Debt | Grant`, `ROUND_KINDS` in `@repo/api`) says what sort of
 capital a round is. Grants — SBIR/STTR awards — are real capital events but not raises, so they are
 excluded from `Company.totalRaisedUsd` (the SBIR source writes 0) and from `MarketService`'s deal
@@ -601,7 +621,7 @@ The column is ingest-only: it defaults to `Equity` and no contribution form sets
 
 ## Jobs (apps/jobs)
 
-NestJS worker (port 3002, health endpoint) with seven pluggable `IngestionSource`s
+NestJS worker (port 3002, health endpoint) with nine pluggable `IngestionSource`s
 (`src/sources/`, add OpenCorporates etc. later). A source contributes a
 `NormalizedRecord` whose `rounds[]` is **plural** — a Reg CF issuer runs several offerings and an
 SBIR grantee wins many awards, and one record per round would re-run the company upsert and let the
@@ -666,17 +686,46 @@ last one clobber `totalRaisedUsd`:
   the table of contents) and scores each row on structural signals only
   (`S1_MIN_CONFIDENCE`, default 0.6). Contributes **no** rounds and no money — an S-1
   says who owns the company, not what it raised.
+- **INNOVATE_UK** — the UK analogue of SBIR: every business that took Innovate UK money
+  since 2004 (~20.9k companies, ~44k awards), from the two workbooks behind UKRI's
+  "funded projects" page (scraped for the links; the file names change). Keyed **only** on
+  the participant's Companies House number (`CRN`) — no name fallback. Businesses only
+  (`Enterprise Size` Micro/Small/Medium/Large; universities, PSOs, RTOs, Catapults dropped).
+  `Participant Withdrawn From Project` = `Closed` means **finished**, not withdrawn (half of
+  all real awards) — only the withdrawn states and `Pending` are dropped. Awards land as
+  `kind: 'Grant'` in GBP with the ECB-converted `amountUsd`; the few `Innovation Loans` land
+  as `Debt`. The xlsx is read by `util/xlsx.ts`, a streaming regex reader — the new-file sheet
+  is ~96 MB of XML and a DOM parse would not fit the worker.
+- **COMPANIES_HOUSE** — the UK register's large-company slice from the monthly Free
+  Company Data Product (one ~494 MB zip, ~2.8 GB CSV, 5.7M rows), read by HTTP range
+  request through `util/zip-range.ts` like the ADV archives and **streamed**: only kept
+  rows are materialised. Kept = active Private/Public Limited Companies filing FULL /
+  GROUP / MEDIUM accounts (~90k), **plus every company number already held**
+  (`FetchOptions.knownCompanyNumbers` — grantees, Wikidata P2622) whatever its size.
+  `CH_SNAPSHOT=YYYY-MM-01` pins one; otherwise this month, then last month. Sector from
+  `SICCode.SicText_1` via `companies-house/sic-sector.ts` (deterministic; holding
+  companies and fund vehicles stay null). `stage` is `Public` for a PLC, `Late stage` for
+  the size slice, `Seed` for a known small company. No rounds, no people.
 
 The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
-SEC Form D only — every other source is a snapshot, run by hand). Cron and `backfill.ts`
+SEC Form D only). A second, **monthly** job (`MONTHLY_CRON_SCHEDULE`, default `0 3 10 * *`)
+runs `MONTHLY_INGEST_SOURCES` and then the citation pass in-process
+(`ingest/citation-backfill.ts`, shared with the `backfill-citations` CLI); it is **not
+registered at all while `MONTHLY_INGEST_SOURCES` is empty**, pings its own
+`MONTHLY_INGEST_HEARTBEAT_URL`, and shares the daily job's `running` flag and lock. Every
+other source is a snapshot run by hand. **A multi-source run follows `IngestModule`
+registration order, not the env's order** — `INNOVATE_UK` is registered before
+`COMPANIES_HOUSE`, and both after `WIKIDATA`, so the register sweep already knows every
+number it must keep. Cron and `backfill.ts`
 share a Postgres advisory lock (`ingest/ingest-lock.ts`, a dedicated `pg` client because
 advisory locks are per-session): a cron tick skips while a backfill runs, and a backfill
 exits 75 while the cron runs. Failed ingests are reported to GlitchTip; a cron run that
 **succeeds** POSTs `INGEST_HEARTBEAT_URL` (a dead man's switch, no-op if unset), so a cron
 that never fires alerts too. Failed and skipped runs send no ping. Backfills:
-`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|SEC_S1`
+`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|INNOVATE_UK|COMPANIES_HOUSE|SEC_S1`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
-(ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D) and `make ingest-all`
+(ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D), `make ingest-uk` (Innovate UK →
+Companies House) and `make ingest-all`
 (everything, in a **forced order**: managers → their funds → the Form D walk that
 dates and sizes them). All ingested rows — companies, rounds, the child entities
 (people/investors/acquisitions/exits), standalone investor firms and funds —
@@ -687,7 +736,15 @@ that row's blank fields instead of creating a duplicate (never overwriting
 name/stage/status or human-written copy). The same match-and-enrich runs for
 investor firms, keyed on domain then `normalizeInvestorName` (which strips legal
 suffixes only — "Greylock Partners" and "Greylock Capital Management" are
-different firms).
+different firms). Both name keys fold accents first ("Société Générale" → `societe generale`).
+
+**A company name match is scoped by country, and never crosses a registry number.** Identifier
+and domain matches are statements about the entity and stay global; the *name* match only lands
+on a row whose country is compatible (`countriesCompatible`: equal, or either side null — a UK
+"Acme Ltd" never enriches a US "Acme Inc"). And no inferred match (domain or name) may land on a
+row that already holds a **different** `COMPANIES_HOUSE` number — Costain Limited 00610201 and
+01393773 are two legal entities. Such pairs are left to the merge detector, whose name sweep
+applies the same country rule (`sweep(…, { scopeByCountry: true })`); its domain sweep does not.
 
 **Domains are a match key, so they must identify the entity.** `src/util/domain.ts`
 classifies a URL host as identifying, social, or platform; sources publish a
@@ -702,15 +759,17 @@ uses `normalizePersonName`. The pure matcher lives in `ingest/person-matcher.ts`
 tested without booting a Nest context. Idempotent: a role already carrying a `personId` is
 skipped.
 
-`make backfill-citations` (`src/backfill-citations.ts`, the last step of `ingest-all`)
-mints `Source`/`Citation` rows for the whole corpus with **no network access** — the URLs
-are constructed from stored identifiers via `sources/sec-edgar/edgar.urls.ts`,
-`sources/sbir/sbir.urls.ts`, `sources/sec-s1/s1.urls.ts` and
+`make backfill-citations` (`src/backfill-citations.ts` → `ingest/citation-backfill.ts`, the
+last step of `ingest-all`) mints `Source`/`Citation` rows for the whole corpus with **no network
+access** — the URLs are constructed from stored identifiers via `sources/sec-edgar/edgar.urls.ts`,
+`sources/sbir/sbir.urls.ts`, `sources/sec-s1/s1.urls.ts`, `sources/innovate-uk/innovate-uk.urls.ts`,
+`sources/companies-house/companies-house.urls.ts` and
 `sources/wikidata/wikidata.urls.ts` (CIK + accession → the Form D archive path, QID →
 the Wikidata page, CRD → the IAPD firm summary, EDGAR file number → the Reg CF offering,
-CIK → a filer's Form C / S-1 history). SBIR has no derivable per-award page, so those
-rows cite the **dataset itself** (`sourceType: 'Government dataset'`, rendered `[GOV]`)
-with the contract number as the reference. Idempotent, so re-run it after each
+CIK → a filer's Form C / S-1 history, company number → the Companies House page, rendered
+`[REG]` as `sourceType: 'Company registry'`). SBIR and Innovate UK have no derivable per-award
+page, so those rows cite the **dataset itself** (`sourceType: 'Government dataset'`, rendered
+`[GOV]`) with the contract / project number on the citation note. Idempotent, so re-run it after each
 ingest. A row with no derivable URL is skipped and counted rather than given a guessed
 link. `INGEST_RECORD_REVISIONS=false` turns off timeline writes for a from-scratch
 rebuild (see `docs/DATA_REBUILD.md`).

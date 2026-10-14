@@ -112,6 +112,13 @@ services:
       SENTRY_DSN: ${JOBS_SENTRY_DSN:-}
       # Dead man's switch, POSTed after every successful scheduled ingest; empty = off.
       INGEST_HEARTBEAT_URL: ${INGEST_HEARTBEAT_URL:-}
+      # Monthly snapshot sources (e.g. INNOVATE_UK,COMPANIES_HOUSE). Empty = the
+      # monthly job is not registered at all.
+      MONTHLY_INGEST_SOURCES: ${MONTHLY_INGEST_SOURCES:-}
+      MONTHLY_CRON_SCHEDULE: ${MONTHLY_CRON_SCHEDULE:-0 3 10 * *}
+      MONTHLY_INGEST_HEARTBEAT_URL: ${MONTHLY_INGEST_HEARTBEAT_URL:-}
+      # Pin one Companies House snapshot (YYYY-MM-01); empty = newest available.
+      CH_SNAPSHOT: ${CH_SNAPSHOT:-}
       GIT_SHA: ${GIT_SHA:-}
     healthcheck:
       test:

@@ -4,7 +4,14 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { INVESTOR_TYPES, type InvestorSummary, type Paginated } from '@repo/api';
+import {
+  INVESTOR_TYPES,
+  type CountryFacet,
+  type InvestorSummary,
+  type Paginated,
+} from '@repo/api';
+
+import { ALL_COUNTRIES, CountryFilter } from '@/components/CountryFilter';
 
 import {
   Badge,
@@ -38,9 +45,11 @@ const isSort = (v: string | undefined): v is Sort => v === 'portfolio' || v === 
  */
 export function InvestorDirectory({
   result,
+  countries,
   initial,
 }: {
   result: Paginated<InvestorSummary>;
+  countries: CountryFacet[];
   initial: Record<string, string | undefined>;
 }) {
   const router = useRouter();
@@ -49,12 +58,14 @@ export function InvestorDirectory({
 
   const [q, setQ] = useState(initial.q ?? '');
   const [type, setType] = useState(initial.type ?? ALL);
+  const [country, setCountry] = useState(initial.country?.toUpperCase() ?? ALL_COUNTRIES);
   const [sort, setSort] = useState<Sort>(isSort(initial.sort) ? initial.sort : 'portfolio');
 
   const filterQuery = (page?: number) => {
     const params = new URLSearchParams();
     if (q.trim()) params.set('q', q.trim());
     if (type !== ALL) params.set('type', type);
+    if (country !== ALL_COUNTRIES) params.set('country', country);
     if (sort !== 'portfolio') params.set('sort', sort);
     if (page && page > 1) params.set('page', String(page));
     const qs = params.toString();
@@ -78,12 +89,14 @@ export function InvestorDirectory({
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, type, sort, pathname, router]);
+  }, [q, type, country, sort, pathname, router]);
 
-  const active = q.trim() !== '' || type !== ALL || sort !== 'portfolio';
+  const active =
+    q.trim() !== '' || type !== ALL || country !== ALL_COUNTRIES || sort !== 'portfolio';
   const clear = () => {
     setQ('');
     setType(ALL);
+    setCountry(ALL_COUNTRIES);
     setSort('portfolio');
   };
 
@@ -115,6 +128,12 @@ export function InvestorDirectory({
             ))}
           </SelectContent>
         </Select>
+        <CountryFilter
+          value={country}
+          onChange={setCountry}
+          countries={countries}
+          className="w-[190px]"
+        />
         <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
           <SelectTrigger className="w-[170px]" aria-label="Sort by">
             <SelectValue />

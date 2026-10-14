@@ -467,3 +467,49 @@ describe('CompaniesService.findFeatured (landing shop window)', () => {
     expect(items).toHaveLength(4);
   });
 });
+
+describe('CompaniesService country filter and facet', () => {
+  it('scopes the directory to one country', async () => {
+    const findMany = jest.fn(async () => []);
+    const count = jest.fn(async () => 0);
+    const prisma = {
+      company: { findMany, count },
+      $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    } as unknown as PrismaService;
+    const service = new CompaniesService(prisma, {} as UsersService);
+
+    await service.findAllApproved({ country: 'GB' });
+
+    expect(count).toHaveBeenCalledWith({
+      where: { moderationStatus: 'APPROVED', mergedIntoId: null, countryCode: 'GB' },
+    });
+  });
+
+  it('counts public rows with a stated country only, most first, and caches the result', async () => {
+    const groupBy = jest.fn(async () => [
+      { countryCode: 'GB', _count: { _all: 120_000 } },
+      { countryCode: 'US', _count: { _all: 29_000 } },
+      { countryCode: 'CA', _count: { _all: 189 } },
+      { countryCode: 'BE', _count: { _all: 189 } },
+    ]);
+    const prisma = { company: { groupBy } } as unknown as PrismaService;
+    const service = new CompaniesService(prisma, {} as UsersService);
+
+    const facets = await service.countries();
+    await service.countries();
+
+    expect(groupBy).toHaveBeenCalledTimes(1);
+    expect(groupBy).toHaveBeenCalledWith({
+      by: ['countryCode'],
+      // Merged-away and unapproved rows never count.
+      where: { moderationStatus: 'APPROVED', mergedIntoId: null, countryCode: { not: null } },
+      _count: { _all: true },
+    });
+    expect(facets).toEqual([
+      { code: 'GB', count: 120_000 },
+      { code: 'US', count: 29_000 },
+      { code: 'BE', count: 189 },
+      { code: 'CA', count: 189 },
+    ]);
+  });
+});

@@ -59,6 +59,7 @@ describe('SbirAggregator', () => {
     expect(record!.company).toMatchObject({
       name: 'BUSEK CO., INC.',
       hq: 'NATICK, Massachusetts',
+      countryCode: 'US',
       headcount: 110,
       domain: 'busek.com',
       stage: 'Seed',

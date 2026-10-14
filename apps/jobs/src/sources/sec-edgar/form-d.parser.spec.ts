@@ -102,6 +102,7 @@ describe('parseFormD', () => {
       entityName: 'Acme Robotics, Inc.',
       city: 'San Francisco',
       state: 'CALIFORNIA',
+      stateOrCountry: 'CA',
       yearOfInc: 2021,
       industry: 'Other Technology',
       amountSoldUsd: 7500000,

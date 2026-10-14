@@ -144,6 +144,9 @@ function toRecord(firm: FirmAccumulator): NormalizedRecord {
     company: {
       name,
       hq: [(row.City ?? '').trim(), (row.State ?? '').trim()].filter(Boolean).join(', '),
+      // SBIR/STTR awardees must be US small businesses (15 U.S.C. 638) — a
+      // fact about the programme, not a reading of the address.
+      countryCode: 'US',
       // SBIR does not disclose a founding year; 0 is "not recorded" and lets a
       // later source fill it in.
       foundedYear: 0,

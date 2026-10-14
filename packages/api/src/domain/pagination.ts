@@ -2,6 +2,7 @@
 // server-side; clients pass query params and receive one page plus the total.
 
 import type { CompanyStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
+import type { CountryCode } from './geography';
 
 export interface Paginated<T> {
   items: T[];
@@ -27,6 +28,8 @@ export interface CompanyListQuery {
   sector?: Sector;
   stage?: Stage;
   status?: CompanyStatus;
+  /** ISO 3166-1 alpha-2. */
+  country?: CountryCode;
   sort?: CompanySort;
   page?: number;
   pageSize?: number;
@@ -41,6 +44,8 @@ export const INVESTOR_SORTS: readonly InvestorSort[] = ['portfolio', 'name'];
 export interface InvestorListQuery {
   q?: string;
   type?: InvestorType;
+  /** ISO 3166-1 alpha-2. */
+  country?: CountryCode;
   sort?: InvestorSort;
   page?: number;
   pageSize?: number;

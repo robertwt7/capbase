@@ -10,6 +10,7 @@ import type {
 } from '../ingestion-source';
 import { kebab } from '../../util/slug';
 import { EdgarClient, type FormDRef } from './edgar.client';
+import { countryFromEdgarCode, countryFromEdgarDescription } from './edgar-locations';
 import { parseFormD, roleKind } from './form-d.parser';
 import { fundStrategyForFormD } from './fund-strategy';
 import { secSector } from './sector-map';
@@ -128,6 +129,8 @@ export class SecEdgarSource implements IngestionSource {
         foundedYear: parsed.yearOfInc,
         industry: parsed.industry ? [parsed.industry] : [],
         primarySector: parsed.industry ? secSector(parsed.industry) : null,
+        countryCode:
+          countryFromEdgarCode(parsed.stateOrCountry) ?? countryFromEdgarDescription(parsed.state),
         stage: stageFromAmount(parsed.amountSoldUsd),
         totalRaisedUsd: parsed.amountSoldUsd,
         identifiers: [{ scheme: 'CIK', value: ref.cik }],

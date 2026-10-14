@@ -151,7 +151,14 @@ export interface FundingRound {
   /** Round label, e.g. "Series B". Rounds are an ordered sequence. */
   name: string;
   date: string; // ISO date the round was announced
-  amountUsd: number; // capital raised in this round
+  /** Capital in this round, in USD — FX-converted at the round's date when it
+   *  was published in another currency. The comparable figure: every sort,
+   *  total and bar width reads this. */
+  amountUsd: number;
+  /** ISO 4217 of the amount as published ('USD' for most rows). */
+  currency?: string;
+  /** The published amount in `currency`; null when that is USD. */
+  amountLocal?: number | null;
   /** Equity unless the source says otherwise. */
   kind: RoundKind;
   postMoneyUsd: number | null; // post-money valuation, when disclosed
@@ -242,6 +249,9 @@ export interface Company {
   operatingStatus?: OperatingStatus | null;
   companyType?: CompanyType | null;
   primarySector?: Sector | null;
+  /** ISO 3166-1 alpha-2 (geography.ts). Null when no source stated a country;
+   *  `hq` stays the display string. */
+  countryCode?: string | null;
   oneLiner: string;
   description: string;
   hq: string;

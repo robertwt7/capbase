@@ -10,6 +10,7 @@ import type {
   NormalizedRecord,
   NormalizedRound,
 } from '../ingestion-source';
+import { countryFromEdgarCode } from '../sec-edgar/edgar-locations';
 import { FormCClient } from './form-c.client';
 import {
   SEC_FORM_C,
@@ -147,6 +148,8 @@ export function toRecord(cik: string, group: FormCOffering[]): NormalizedRecord 
       // rather than guessed into a sector from the issuer's name.
       industry: [],
       primarySector: null,
+      // STATEORCOUNTRY is the raw EDGAR location code, not ISO.
+      countryCode: countryFromEdgarCode(info.STATEORCOUNTRY),
       stage: REG_CF_STAGE,
       status: 'Private',
       totalRaisedUsd,

@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 
+import { CompaniesHouseClient } from '../sources/companies-house/companies-house.client';
+import { CompaniesHouseSource } from '../sources/companies-house/companies-house.source';
+import { InnovateUkClient } from '../sources/innovate-uk/innovate-uk.client';
+import { InnovateUkSource } from '../sources/innovate-uk/innovate-uk.source';
 import { INGESTION_SOURCES } from '../sources/ingestion-source';
 import { SbirClient } from '../sources/sbir/sbir.client';
 import { SbirSource } from '../sources/sbir/sbir.source';
@@ -33,12 +37,20 @@ import { IngestService } from './ingest.service';
     SecFormCSource,
     SbirClient,
     SbirSource,
+    InnovateUkClient,
+    InnovateUkSource,
+    CompaniesHouseClient,
+    CompaniesHouseSource,
     S1Client,
     SecS1Source,
     IngestService,
     IngestLock,
     IngestScheduler,
     // Pluggable list of sources — add OpenCorporates etc. here later.
+    // ORDER IS RUN ORDER: IngestService.run filters this list by membership,
+    // so a multi-source run follows registration, not INGEST_SOURCES. Innovate
+    // UK must precede any UK register source, so the grantees' Companies House
+    // numbers are known before the register is swept.
     {
       provide: INGESTION_SOURCES,
       useFactory: (
@@ -48,8 +60,10 @@ import { IngestService } from './ingest.service';
         advFunds: SecAdvFundsSource,
         formC: SecFormCSource,
         sbir: SbirSource,
+        innovateUk: InnovateUkSource,
+        companiesHouse: CompaniesHouseSource,
         s1: SecS1Source,
-      ) => [sec, wikidata, adv, advFunds, formC, sbir, s1],
+      ) => [sec, wikidata, adv, advFunds, formC, sbir, innovateUk, companiesHouse, s1],
       inject: [
         SecEdgarSource,
         WikidataSource,
@@ -57,6 +71,8 @@ import { IngestService } from './ingest.service';
         SecAdvFundsSource,
         SecFormCSource,
         SbirSource,
+        InnovateUkSource,
+        CompaniesHouseSource,
         SecS1Source,
       ],
     },

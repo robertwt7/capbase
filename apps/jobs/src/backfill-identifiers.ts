@@ -10,6 +10,8 @@ import {
   type IdentifierWriterClient,
 } from './ingest/identifier.writer';
 import { PrismaService } from './prisma/prisma.service';
+import { COMPANIES_HOUSE } from './sources/companies-house/companies-house.parser';
+import { INNOVATE_UK } from './sources/innovate-uk/innovate-uk.parser';
 import { SBIR } from './sources/sbir/sbir.parser';
 import { SEC_EDGAR } from './sources/sec-edgar/sec-edgar.source';
 import { SEC_FORM_C } from './sources/sec-form-c/form-c.parser';
@@ -20,6 +22,10 @@ const BATCH = 500;
 
 /** Sources whose Company.externalId *is* an SEC Central Index Key. */
 const CIK_SOURCES = new Set<string>([SEC_EDGAR, SEC_FORM_C, SEC_S1]);
+
+/** Sources whose Company.externalId *is* a Companies House number — Innovate
+ *  UK keys its grantees on the CRN it publishes, the register on its own. */
+const COMPANY_NUMBER_SOURCES = new Set<string>([COMPANIES_HOUSE, INNOVATE_UK]);
 
 /** Written on every row this pass mints, so a later run can tell a derived
  *  identifier from one a source or an admin supplied. */
@@ -74,6 +80,8 @@ function companyIdentifiers(row: {
       out.push({ scheme: 'CIK', value: id });
     } else if (source === WIKIDATA) {
       out.push({ scheme: 'WIKIDATA', value: id });
+    } else if (COMPANY_NUMBER_SOURCES.has(source)) {
+      out.push({ scheme: 'COMPANIES_HOUSE', value: id });
     } else if (source === SBIR) {
       // SBIR keys a firm on UEI → DUNS → normalized name. The first two are
       // identifiers; a normalized name is not, so a `name:` key yields nothing,

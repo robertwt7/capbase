@@ -20,6 +20,7 @@ export function toInvestor(row: DbInvestor): Investor {
     legalName: row.legalName,
     type: row.type as InvestorType,
     hq: row.hq,
+    countryCode: row.countryCode,
     websiteUrl: row.websiteUrl,
     linkedinUrl: row.linkedinUrl,
     domain: row.domain,

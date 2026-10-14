@@ -346,6 +346,33 @@ describe('mapWikidata identifiers', () => {
     ]);
   });
 
+  it('collects the Companies House number (P2622)', () => {
+    const r = mapWikidata(bundle({ details: [{ ...STRIPE_DETAILS, chNumber: lit('02557590') }] }))[0]!;
+    expect(r.company.identifiers).toContainEqual({ scheme: 'COMPANIES_HOUSE', value: '02557590' });
+  });
+
+  it('reads the country from the country item’s P297 code', () => {
+    const r = mapWikidata(
+      bundle({ details: [{ ...STRIPE_DETAILS, countryLabel: lit('United Kingdom'), countryCode: lit('GB') }] }),
+    )[0]!;
+    expect(r.company.countryCode).toBe('GB');
+  });
+
+  it('falls back to the country label when the item has no P297', () => {
+    // Historical states (Kingdom of England) carry no ISO code.
+    const r = mapWikidata(
+      bundle({ details: [{ ...STRIPE_DETAILS, countryLabel: lit('Kingdom of England') }] }),
+    )[0]!;
+    expect(r.company.countryCode).toBe('GB');
+    expect(mapWikidata(bundle({ details: [STRIPE_DETAILS] }))[0]!.company.countryCode).toBe('US');
+  });
+
+  it('leaves the country null when Wikidata states none', () => {
+    const { countryLabel: _omit, ...noCountry } = STRIPE_DETAILS;
+    void _omit;
+    expect(mapWikidata(bundle({ details: [noCountry] }))[0]!.company.countryCode).toBeNull();
+  });
+
   it('accumulates identifiers across the repeated rows one QID produces', () => {
     // Each multi-valued property produces its own row. The record builder takes
     // the FIRST row for its scalar fields, so reading identifiers off that row

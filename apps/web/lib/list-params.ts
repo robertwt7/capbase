@@ -5,6 +5,7 @@
 import {
   COMPANY_SORTS,
   COMPANY_STATUSES,
+  COUNTRY_CODES,
   FUND_SORTS,
   FUND_STRATEGIES,
   INVESTOR_SORTS,
@@ -23,6 +24,10 @@ type SearchParams = Record<string, string | undefined>;
 const pick = <T extends string>(v: string | undefined, allowed: readonly T[]): T | undefined =>
   allowed.includes(v as T) ? (v as T) : undefined;
 
+/** Upper-cased first, so `?country=gb` works; then the same allow-list rule. */
+const countryOf = (v: string | undefined): string | undefined =>
+  pick(v?.trim().toUpperCase(), COUNTRY_CODES);
+
 const pageOf = (v: string | undefined): number | undefined => {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 ? n : undefined;
@@ -34,6 +39,7 @@ export function companyListQuery(sp: SearchParams): CompanyListQuery {
     sector: pick(sp.sector, SECTORS),
     stage: pick(sp.stage, STAGES),
     status: pick(sp.status, COMPANY_STATUSES),
+    country: countryOf(sp.country),
     sort: pick(sp.sort, COMPANY_SORTS),
     page: pageOf(sp.page),
   };
@@ -43,6 +49,7 @@ export function investorListQuery(sp: SearchParams): InvestorListQuery {
   return {
     q: sp.q?.trim() || undefined,
     type: pick(sp.type, INVESTOR_TYPES),
+    country: countryOf(sp.country),
     sort: pick(sp.sort, INVESTOR_SORTS),
     page: pageOf(sp.page),
   };

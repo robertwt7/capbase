@@ -3,6 +3,7 @@ import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import {
   COMPANY_SORTS,
   COMPANY_STATUSES,
+  COUNTRY_CODES,
   MAX_FEATURED_LIMIT,
   MAX_PAGE_SIZE,
   SECTORS,
@@ -10,6 +11,7 @@ import {
   type CompanyListQuery,
   type CompanySort,
   type CompanyStatus,
+  type CountryCode,
   type Sector,
   type Stage,
 } from '@repo/api';
@@ -30,6 +32,11 @@ export class ListCompaniesDto implements CompanyListQuery {
   @IsOptional()
   @IsIn([...COMPANY_STATUSES])
   status?: CompanyStatus;
+
+  /** ISO alpha-2, upper-case — an unassigned code is a 400, not an empty page. */
+  @IsOptional()
+  @IsIn([...COUNTRY_CODES])
+  country?: CountryCode;
 
   @IsOptional()
   @IsIn([...COMPANY_SORTS])

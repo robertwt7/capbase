@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import {
   DEFAULT_PAGE_SIZE,
   type Citation,
+  type CountryFacet,
   type EntityIdentifierRef,
   type InvestorDetailResponse,
   type InvestorListQuery,
@@ -13,6 +14,7 @@ import type { Prisma } from '@repo/db';
 
 import { toPerson } from '../companies/company.mapper';
 import { toFund } from '../funds/fund.mapper';
+import { toFacets } from '../prisma/country-facets';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   MAX_MERGE_HOPS,
@@ -59,13 +61,32 @@ const INDEXABLE_INVESTOR = {
   ],
 } satisfies Prisma.InvestorWhereInput;
 
+/** Same cadence as the company facet: the investor table only moves on ingest. */
+const COUNTRY_FACET_TTL_MS = 15 * 60_000;
+
 const COMPANY_SELECT = {
   select: { slug: true, name: true, domain: true, primarySector: true },
 };
 
 @Injectable()
 export class InvestorsService {
+  private countryFacet: { items: CountryFacet[]; expiresAt: number } | null = null;
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /** How many public investors each country holds, most first — the
+   *  directory's country filter. Same contract as CompaniesService.countries. */
+  async countries(): Promise<CountryFacet[]> {
+    if (this.countryFacet && this.countryFacet.expiresAt > Date.now()) return this.countryFacet.items;
+    const rows = await this.prisma.investor.groupBy({
+      by: ['countryCode'],
+      where: { ...PUBLIC_INVESTOR, countryCode: { not: null } },
+      _count: { _all: true },
+    });
+    const items = toFacets(rows);
+    this.countryFacet = { items, expiresAt: Date.now() + COUNTRY_FACET_TTL_MS };
+    return items;
+  }
 
   /**
    * One page of investors, read straight from the Investor table.
@@ -82,6 +103,7 @@ export class InvestorsService {
       ...PUBLIC_INVESTOR,
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
       ...(query.type && { type: query.type }),
+      ...(query.country && { countryCode: query.country }),
     };
 
     const [total, rows] = await this.prisma.$transaction([

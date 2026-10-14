@@ -62,6 +62,47 @@ describe('sweep', () => {
   });
 });
 
+describe('sweep scoped by country', () => {
+  const named = (id: string, name: string, countryCode: string | null): DetectRow => ({
+    id,
+    name,
+    domain: null,
+    countryCode,
+  });
+  const byName = (r: DetectRow) => detectorNameKey(r.name);
+
+  it('never pairs two rows whose known countries differ', () => {
+    const rows = [named('gb', 'Acme Ltd', 'GB'), named('us', 'Acme Inc', 'US')];
+    expect(sweep(rows, byName, 8, { scopeByCountry: true }).pairs).toEqual([]);
+  });
+
+  it('pairs a known country with an unknown one', () => {
+    const rows = [named('gb', 'Acme Ltd', 'GB'), named('xx', 'Acme', null)];
+    expect(sweep(rows, byName, 8, { scopeByCountry: true }).pairs).toEqual([
+      { aId: 'gb', bId: 'xx', evidence: 'acme' },
+    ]);
+  });
+
+  it('splits a mixed group and proposes each country-less pair once', () => {
+    const rows = [
+      named('gb', 'Acme Ltd', 'GB'),
+      named('us', 'Acme Inc', 'US'),
+      named('n1', 'Acme', null),
+      named('n2', 'ACME', null),
+    ];
+    const ids = sweep(rows, byName, 8, { scopeByCountry: true }).pairs.map((p) => `${p.aId}-${p.bId}`);
+    expect(ids.sort()).toEqual(['gb-n1', 'gb-n2', 'n1-n2', 'us-n1', 'us-n2']);
+  });
+
+  it('is off unless asked for, so the domain sweep still pairs across borders', () => {
+    const rows = [
+      { id: 'gb', name: 'A', domain: 'acme.com', countryCode: 'GB' },
+      { id: 'us', name: 'B', domain: 'acme.com', countryCode: 'US' },
+    ];
+    expect(sweep(rows, byDomain, 8).pairs).toHaveLength(1);
+  });
+});
+
 describe('detectorNameKey', () => {
   it('closes the punctuation gap the company matcher leaves open', () => {
     // These two are ONE SEC filer (same CIK), spelled two ways. normalizeName

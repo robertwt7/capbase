@@ -12,7 +12,14 @@ import { SaveCompanyButton } from '@/components/SaveCompanyButton';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
-import { formatCount, formatDate, formatUsd, foundedYear, signedPct } from '@/lib/format';
+import {
+  countryName,
+  formatCount,
+  formatDate,
+  formatUsd,
+  foundedYear,
+  signedPct,
+} from '@/lib/format';
 import { canonical } from '@/lib/metadata';
 import { companyBreadcrumbJsonLd, companyJsonLd } from '@/lib/schema';
 import { getSavedStatus } from '@/lib/watchlist';
@@ -71,6 +78,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
   const cite = (field: string) => (
     <Citation citations={citations} entityId={companyId} field={field} />
   );
+  const country = countryName(company.countryCode);
   const signedIn = session !== null;
   const saved = signedIn
     ? (await getSavedStatus(slug).catch(() => ({ saved: false }))).saved
@@ -146,6 +154,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
           <Fact label="Founded" value={foundedYear(company.founded) ?? '—'} cite={cite('founded')} />
           <Fact label="Headquarters" value={company.hq} cite={cite('hq')} />
+          {country && <Fact label="Country" value={country} cite={cite('countryCode')} />}
           <Fact label="Headcount" value={formatCount(company.headcount)} cite={cite('headcount')} />
           <Fact label="Stage" value={company.stage} />
           {company.primarySector && <Fact label="Sector" value={company.primarySector} />}

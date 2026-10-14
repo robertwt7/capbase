@@ -35,11 +35,11 @@ async function main() {
     // candidate for merging again, and proposing it would undo the decision.
     const companies: DetectRow[] = await prisma.company.findMany({
       where: { mergedIntoId: null },
-      select: { id: true, name: true, domain: true },
+      select: { id: true, name: true, domain: true, countryCode: true },
     });
     const investors: DetectRow[] = await prisma.investor.findMany({
       where: { mergedIntoId: null },
-      select: { id: true, name: true, domain: true },
+      select: { id: true, name: true, domain: true, countryCode: true },
     });
 
     logger.log(`Scanning ${companies.length} companies and ${investors.length} investors`);
@@ -49,10 +49,12 @@ async function main() {
     total += await run(client, logger, 'investor', 'domain', investors, (r) => r.domain ?? '');
     // The name key is TypeScript, not SQL, so the grouping happens in memory.
     // 43k {id, name} rows is a few MB for one CLI invocation. It is looser than
-    // the matcher's own key on purpose — see detectorNameKey.
+    // the matcher's own key on purpose — see detectorNameKey. Name pairs are
+    // country-scoped exactly as the matcher is; a shared domain is not, being
+    // evidence about the entity itself.
     const nameKey = (r: DetectRow) => detectorNameKey(r.name);
-    total += await run(client, logger, 'company', 'name', companies, nameKey);
-    total += await run(client, logger, 'investor', 'name', investors, nameKey);
+    total += await run(client, logger, 'company', 'name', companies, nameKey, true);
+    total += await run(client, logger, 'investor', 'name', investors, nameKey, true);
     total += await runPeople(prisma, client, logger);
 
     logger.log(`Detection done: ${total} candidate pairs recorded or upgraded`);
@@ -128,8 +130,9 @@ async function run(
   signal: Extract<MergeSignal, 'domain' | 'name'>,
   rows: DetectRow[],
   key: (row: DetectRow) => string,
+  scopeByCountry = false,
 ): Promise<number> {
-  const { pairs, skipped } = sweep(rows, key, GROUP_LIMIT);
+  const { pairs, skipped } = sweep(rows, key, GROUP_LIMIT, { scopeByCountry });
 
   for (const pair of pairs) {
     await recordCandidate(client, {

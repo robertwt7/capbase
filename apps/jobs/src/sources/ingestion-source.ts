@@ -1,9 +1,11 @@
 import type {
   CompanyStatus,
+  CompanyType,
   ExitType,
   FundStrategy,
   IdentifierScheme,
   InvestorType,
+  OperatingStatus,
   RoleKind,
   RoundKind,
   Sector,
@@ -29,9 +31,15 @@ export interface NormalizedRound {
   name: string;
   /** ISO date (YYYY-MM-DD). */
   date: string;
+  /** The comparable figure — FX-converted when the source publishes another
+   *  currency. Every sort, total and bar width reads this. */
   amountUsd: number;
   /** Defaults to 'Equity'. */
   kind?: RoundKind;
+  /** ISO 4217 of `amountLocal`. Omitted = USD, and `amountLocal` is ignored. */
+  currency?: string;
+  /** The amount as published, in `currency`. */
+  amountLocal?: number;
 }
 
 /** An executive/director/founder attached to a company or an investor firm. */
@@ -132,6 +140,12 @@ export interface NormalizedRecord {
     headcount?: number;
     /** Defaults to 'Private'. */
     status?: CompanyStatus;
+    /** ISO 3166-1 alpha-2, already normalized by the source. Only when the
+     *  source states a country structurally — never read off a city name. */
+    countryCode?: string | null;
+    legalName?: string | null;
+    operatingStatus?: OperatingStatus | null;
+    companyType?: CompanyType | null;
     /** External identifiers the source read off the document. Matched against
      *  the crosswalk *before* domain and name, because an identifier is a
      *  statement by the publisher about which entity this is, where a domain is
@@ -167,6 +181,8 @@ export interface NormalizedInvestorFirm {
   legalName?: string | null;
   type: InvestorType;
   hq?: string | null;
+  /** Same contract as NormalizedRecord['company'].countryCode. */
+  countryCode?: string | null;
   websiteUrl?: string | null;
   linkedinUrl?: string | null;
   /** Match key and logo source. Sources MUST leave this null when the website's
@@ -226,6 +242,10 @@ export interface FetchOptions {
    *  uses it to discard filings by managers we don't hold, before they cost
    *  any memory. Absent for sources that produce no funds. */
   knownManagerCrds?: ReadonlySet<string>;
+  /** Companies House numbers already held as COMPANIES_HOUSE identifiers on
+   *  company rows. The bulk register source keeps these regardless of its size
+   *  filter, so a grantee or Wikidata company is always enriched. */
+  knownCompanyNumbers?: ReadonlySet<string>;
 }
 
 /** Contract every ingestion source implements. */

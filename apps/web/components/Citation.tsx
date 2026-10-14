@@ -7,6 +7,7 @@ const SOURCE_LABELS: Record<SourceType, string> = {
   'SEC filing': 'SEC',
   Wikidata: 'WD',
   'Government dataset': 'GOV',
+  'Company registry': 'REG',
   'Company website': 'WEB',
   Press: 'PR',
   Other: 'SRC',

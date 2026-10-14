@@ -7,7 +7,9 @@
  * P17 country, P452 industry, P1128 employees, P4264 LinkedIn id,
  * P112 founder, P169 CEO, P127 owned-by, P793 significant event
  * (Q184680 = IPO), P414 stock exchange, P31 instance-of, P4103 assets under
- * management, P1278 LEI, P5531 CIK; qualifiers P580 start, P585 point,
+ * management, P1278 LEI, P5531 CIK, P2622 Companies House company ID,
+ * P297 ISO 3166-1 alpha-2 (read off the P17 country item); qualifiers P580
+ * start, P585 point,
  * P249 ticker symbol (on a P414 stock-exchange statement).
  *
  * Note P4103 (assets under management) is the AUM property — NOT P2403, which
@@ -42,17 +44,18 @@ export function seedQuery(): string {
 
 /** Company metadata (all OPTIONAL; multi-valued rows deduped first-wins downstream). */
 export function detailsQuery(qids: string[]): string {
-  return `SELECT ?company ?companyLabel ?companyDescription ?website ?inception ?hqLabel ?countryLabel ?industryLabel ?employees ?linkedinId ?lei ?cik ?ticker ?exchangeLabel WHERE {
+  return `SELECT ?company ?companyLabel ?companyDescription ?website ?inception ?hqLabel ?countryLabel ?countryCode ?industryLabel ?employees ?linkedinId ?lei ?cik ?chNumber ?ticker ?exchangeLabel WHERE {
   ${values(qids)}
   OPTIONAL { ?company wdt:P856 ?website . }
   OPTIONAL { ?company wdt:P571 ?inception . }
   OPTIONAL { ?company wdt:P159 ?hq . }
-  OPTIONAL { ?company wdt:P17 ?country . }
+  OPTIONAL { ?company wdt:P17 ?country . OPTIONAL { ?country wdt:P297 ?countryCode . } }
   OPTIONAL { ?company wdt:P452 ?industry . }
   OPTIONAL { ?company wdt:P1128 ?employees . }
   OPTIONAL { ?company wdt:P4264 ?linkedinId . }
   OPTIONAL { ?company wdt:P1278 ?lei . }
   OPTIONAL { ?company wdt:P5531 ?cik . }
+  OPTIONAL { ?company wdt:P2622 ?chNumber . }
   # A listing, not a bare symbol: AAPL on two exchanges is two instruments, so
   # normalizeIdentifier('TICKER', …) rejects an unqualified symbol. Wikidata
   # models this with the EXCHANGE as the statement (P414) and the ticker as its
@@ -88,17 +91,18 @@ export function investorsQuery(qids: string[]): string {
  *  whether Wikidata records any P1951 edge for it. This is the investor-universe
  *  pass: it yields firms we can list even with an empty portfolio. */
 export function investorFirmsQuery(): string {
-  return `SELECT ?investor ?investorLabel ?investorDescription ?class ?website ?inception ?hqLabel ?countryLabel ?aum ?linkedinId ?lei ?cik WHERE {
+  return `SELECT ?investor ?investorLabel ?investorDescription ?class ?website ?inception ?hqLabel ?countryLabel ?countryCode ?aum ?linkedinId ?lei ?cik ?chNumber WHERE {
   VALUES ?class { ${INVESTOR_FIRM_CLASSES.map((q) => `wd:${q}`).join(' ')} }
   ?investor wdt:P31 ?class .
   OPTIONAL { ?investor wdt:P856 ?website . }
   OPTIONAL { ?investor wdt:P571 ?inception . }
   OPTIONAL { ?investor wdt:P159 ?hq . }
-  OPTIONAL { ?investor wdt:P17 ?country . }
+  OPTIONAL { ?investor wdt:P17 ?country . OPTIONAL { ?country wdt:P297 ?countryCode . } }
   OPTIONAL { ?investor wdt:P4103 ?aum . }
   OPTIONAL { ?investor wdt:P4264 ?linkedinId . }
   OPTIONAL { ?investor wdt:P1278 ?lei . }
   OPTIONAL { ?investor wdt:P5531 ?cik . }
+  OPTIONAL { ?investor wdt:P2622 ?chNumber . }
   FILTER (?investor NOT IN (${EXCLUDED_INVESTOR_QIDS.map((q) => `wd:${q}`).join(', ')}))
   ${LABEL_SERVICE}
 }`;

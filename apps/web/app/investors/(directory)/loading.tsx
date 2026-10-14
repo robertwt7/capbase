@@ -7,7 +7,7 @@ export default function Loading() {
     <DirectorySkeleton
       title="Investors"
       label="investors"
-      controls={['w-[170px]', 'w-[170px]']}
+      controls={['w-[170px]', 'w-[190px]', 'w-[170px]']}
       cols={INVESTOR_COLUMNS}
       cells={['right', 'left', 'left']}
       collapseAt={820}

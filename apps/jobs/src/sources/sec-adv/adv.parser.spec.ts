@@ -174,6 +174,7 @@ describe('mapAdvRows', () => {
       legalName: 'Next Coast Ventures GP, LLC',
       type: 'Venture',
       hq: 'Austin, TX, United States',
+      countryCode: 'US',
       websiteUrl: 'http://WWW.NEXTCOASTVENTURES.COM',
       domain: 'nextcoastventures.com',
       crdNumber: '283699',
