@@ -8,6 +8,7 @@ import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { parseTrustProxy } from './throttle/throttle';
+import { setupApiDocs } from './v1/docs';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -16,6 +17,8 @@ async function bootstrap() {
   // spoofed by a direct caller. validateEnv has already rejected a bad value.
   app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
   app.use(helmet());
+  // Swagger UI at /v1/docs and the OpenAPI document at /v1/openapi.json, public.
+  setupApiDocs(app);
   // The API is internal: only the web server calls it, server-side, so the
   // browser never needs CORS. Opt in with CORS_ORIGIN when exposing it.
   if (process.env.CORS_ORIGIN) {

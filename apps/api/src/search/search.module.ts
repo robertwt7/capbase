@@ -6,5 +6,6 @@ import { SearchService } from './search.service';
 @Module({
   controllers: [SearchController],
   providers: [SearchService],
+  exports: [SearchService],
 })
 export class SearchModule {}

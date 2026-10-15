@@ -13,13 +13,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
+  ApiKeySummary,
   AuthResponse,
   AuthUser,
+  CreatedApiKey,
   MyContributionsResponse,
   SavedCompanyItem,
   SavedStatus,
 } from '@repo/api';
 
+import { ApiKeysService } from '../api-keys/api-keys.service';
+import { CreateApiKeyDto } from '../api-keys/dto/create-api-key.dto';
 import { UsersService } from '../users/users.service';
 import { AuthService, toAuthUser } from './auth.service';
 import { CurrentUser, type RequestUser } from './decorators/current-user.decorator';
@@ -39,6 +43,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly users: UsersService,
+    private readonly apiKeys: ApiKeysService,
     private readonly config: ConfigService,
   ) {}
 
@@ -163,5 +168,30 @@ export class AuthController {
     @Param('slug') slug: string,
   ): Promise<SavedStatus> {
     return this.users.unsaveCompany(current.id, slug);
+  }
+
+  /** The caller's own active API keys (never the secrets). */
+  @UseGuards(JwtAuthGuard)
+  @Get('me/api-keys')
+  listApiKeys(@CurrentUser() current: RequestUser): Promise<ApiKeySummary[]> {
+    return this.apiKeys.list(current.id);
+  }
+
+  /** Mint a key. The response is the only time its secret is ever sent. */
+  @AuthThrottle()
+  @UseGuards(JwtAuthGuard)
+  @Post('me/api-keys')
+  createApiKey(
+    @CurrentUser() current: RequestUser,
+    @Body() dto: CreateApiKeyDto,
+  ): Promise<CreatedApiKey> {
+    return this.apiKeys.create(current, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me/api-keys/:id')
+  @HttpCode(204)
+  async revokeApiKey(@CurrentUser() current: RequestUser, @Param('id') id: string): Promise<void> {
+    await this.apiKeys.revoke(current.id, id);
   }
 }

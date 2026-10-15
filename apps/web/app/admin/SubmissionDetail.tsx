@@ -7,12 +7,14 @@ import type {
   DiversitySignal,
   ExitEvent,
   FundingRound,
+  InvestorEditFields,
   InvestorHolding,
+  InvestorProposalReview,
   PendingSubmission,
   Person,
 } from '@repo/api';
 
-import { formatCount, formatDate, formatUsd, signedPct } from '../../lib/format';
+import { countryName, formatCount, formatDate, formatUsd, signedPct } from '../../lib/format';
 import { cn } from '../../lib/utils';
 
 interface Field {
@@ -196,30 +198,83 @@ function formatEditValue(key: keyof CompanyEditFields, value: unknown): string {
   return String(value);
 }
 
+const INVESTOR_EDIT_FIELD_LABELS: Record<keyof InvestorEditFields, string> = {
+  name: 'Name',
+  legalName: 'Legal name',
+  type: 'Type',
+  hq: 'HQ',
+  countryCode: 'Country',
+  websiteUrl: 'Website',
+  linkedinUrl: 'LinkedIn',
+  domain: 'Domain',
+  description: 'Description',
+  foundedYear: 'Founded',
+};
+
+function formatInvestorEditValue(key: keyof InvestorEditFields, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  // Countries render as text, never a flag.
+  if (key === 'countryCode') return countryName(String(value)) ?? String(value);
+  return String(value);
+}
+
+interface DiffRow {
+  key: string;
+  label: string;
+  current: string;
+  proposed: string;
+}
+
 /** Field / current → proposed rows for an edit proposal, one per changed field.
  *  Stacks under `sm`, the arrow turning to point down at the proposed value. */
-function ProposalDiff({ review }: { review: ChangeProposalReview }) {
-  const keys = Object.keys(review.changes) as (keyof CompanyEditFields)[];
+function DiffTable({ rows }: { rows: DiffRow[] }) {
   return (
     <div className="grid grid-cols-[7.5rem_1fr_auto_1fr] items-baseline gap-x-4 gap-y-2 max-sm:grid-cols-1 max-sm:gap-y-0.5">
-      {keys.map((key) => (
-        <Fragment key={key}>
-          <span className={cn(LABEL, 'max-sm:not-first:mt-3')}>{EDIT_FIELD_LABELS[key] ?? key}</span>
-          <span className={cn(VALUE, 'text-graphite-500')}>
-            {formatEditValue(key, review.current[key])}
-          </span>
+      {rows.map((row) => (
+        <Fragment key={row.key}>
+          <span className={cn(LABEL, 'max-sm:not-first:mt-3')}>{row.label}</span>
+          <span className={cn(VALUE, 'text-graphite-500')}>{row.current}</span>
           <span
             className="font-mono text-[12px] text-graphite-500 max-sm:justify-self-start max-sm:rotate-90"
             aria-hidden="true"
           >
             →
           </span>
-          <span className={cn(VALUE, 'font-medium')}>
-            {formatEditValue(key, review.changes[key])}
-          </span>
+          <span className={cn(VALUE, 'font-medium')}>{row.proposed}</span>
         </Fragment>
       ))}
     </div>
+  );
+}
+
+function ProposalDiff({ review }: { review: ChangeProposalReview }) {
+  const keys = Object.keys(review.changes) as (keyof CompanyEditFields)[];
+  return (
+    <DiffTable
+      rows={keys.map((key) => ({
+        key,
+        label: EDIT_FIELD_LABELS[key] ?? key,
+        current: formatEditValue(key, review.current[key]),
+        proposed: formatEditValue(key, review.changes[key]),
+      }))}
+    />
+  );
+}
+
+/** An investor-firm edit. Once approved, "current" is the edit itself, so the left
+ *  column shows the values the approval replaced (kept on the proposal) instead. */
+function InvestorProposalDiff({ review }: { review: InvestorProposalReview }) {
+  const keys = Object.keys(review.changes) as (keyof InvestorEditFields)[];
+  const before = review.previous ?? review.current;
+  return (
+    <DiffTable
+      rows={keys.map((key) => ({
+        key,
+        label: INVESTOR_EDIT_FIELD_LABELS[key] ?? key,
+        current: formatInvestorEditValue(key, before[key]),
+        proposed: formatInvestorEditValue(key, review.changes[key]),
+      }))}
+    />
   );
 }
 
@@ -255,12 +310,16 @@ export function SubmissionDetail({ item }: { item: PendingSubmission }) {
     ? [{ label: 'Source', wide: true, value: extLink(item.sourceUrl) }]
     : [];
 
-  if (item.type === 'proposal') {
-    const review = item.data as ChangeProposalReview;
+  if (item.type === 'proposal' || item.type === 'investorProposal') {
+    const review = item.data as ChangeProposalReview | InvestorProposalReview;
     return (
       <div className="flex flex-col gap-4">
         {source.length ? <FieldList fields={source} /> : null}
-        <ProposalDiff review={review} />
+        {item.type === 'proposal' ? (
+          <ProposalDiff review={review as ChangeProposalReview} />
+        ) : (
+          <InvestorProposalDiff review={review as InvestorProposalReview} />
+        )}
         {review.note ? (
           <FieldList fields={[{ label: "Submitter's note", wide: true, value: review.note }]} />
         ) : null}

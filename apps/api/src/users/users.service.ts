@@ -249,6 +249,7 @@ export class UsersService {
       this.prisma.exitEvent.findFirst(opts),
       this.prisma.diversitySignal.findFirst(opts),
       this.prisma.changeProposal.findFirst(opts),
+      this.prisma.investorChangeProposal.findFirst(opts),
     ]);
     const dates = rows
       .map((r) => r?.createdAt)
@@ -269,6 +270,7 @@ export class UsersService {
       this.prisma.exitEvent.count({ where }),
       this.prisma.diversitySignal.count({ where }),
       this.prisma.changeProposal.count({ where }),
+      this.prisma.investorChangeProposal.count({ where }),
     ]);
     return counts.reduce((a, b) => a + b, 0);
   }
@@ -281,14 +283,17 @@ export class UsersService {
 
   /**
    * The contribution gate for one viewer — the single definition every gated
-   * read uses. Anonymous is locked; an admin is unlocked without a query;
-   * anyone else is unlocked while their latest approved contribution is inside
+   * read uses. Anonymous is locked; an admin or a contributor (a role only an
+   * admin grants, for the people pushing data through /v1) is unlocked without
+   * a query; anyone else is unlocked while their latest approved contribution is inside
    * the rolling window. `unlockedUntil` is reported even after it lapses, so
    * the UI can say when access expired.
    */
   async accessFor(viewer?: { id: string; role: Role }): Promise<ViewerAccess> {
     if (!viewer) return { unlocked: false, unlockedUntil: null };
-    if (viewer.role === 'ADMIN') return { unlocked: true, unlockedUntil: null };
+    if (viewer.role === 'ADMIN' || viewer.role === 'CONTRIBUTOR') {
+      return { unlocked: true, unlockedUntil: null };
+    }
     const last = await this.lastContributionAt(viewer.id);
     if (!last) return { unlocked: false, unlockedUntil: null };
     const until = new Date(last.getTime() + WINDOW_MS);
@@ -301,8 +306,17 @@ export class UsersService {
     const order = { orderBy: { createdAt: 'desc' as const } };
     const withCompany = { include: { company: { select: { slug: true, name: true } } }, ...order };
 
-    const [companies, rounds, people, investors, acquisitions, exits, diversity, proposals] =
-      await Promise.all([
+    const [
+      companies,
+      rounds,
+      people,
+      investors,
+      acquisitions,
+      exits,
+      diversity,
+      proposals,
+      investorProposals,
+    ] = await Promise.all([
         this.prisma.company.findMany({ where, ...order }),
         this.prisma.fundingRound.findMany({ where, ...withCompany }),
         this.prisma.personRole.findMany({ where, ...withCompany }),
@@ -311,6 +325,11 @@ export class UsersService {
         this.prisma.exitEvent.findMany({ where, ...withCompany }),
         this.prisma.diversitySignal.findMany({ where, ...withCompany }),
         this.prisma.changeProposal.findMany({ where, ...withCompany }),
+        this.prisma.investorChangeProposal.findMany({
+          where,
+          include: { investor: { select: { slug: true, name: true } } },
+          ...order,
+        }),
       ]);
 
     const items: MyContribution[] = [
@@ -324,6 +343,15 @@ export class UsersService {
       ...proposals.map((p) =>
         this.toItem('proposal', p, p.company, `Edit: ${Object.keys(p.changes as object).join(', ')}`),
       ),
+      ...investorProposals.map((p) =>
+        this.toItem(
+          'investorProposal',
+          p,
+          null,
+          `Edit ${p.investor.name}: ${Object.keys(p.changes as object).join(', ')}`,
+          p.investor,
+        ),
+      ),
     ];
     return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
@@ -333,6 +361,7 @@ export class UsersService {
     row: ContributionRow,
     company: CompanyRef,
     label: string,
+    investor: CompanyRef = null,
   ): MyContribution {
     return {
       type,
@@ -340,6 +369,8 @@ export class UsersService {
       label,
       companySlug: company?.slug ?? null,
       companyName: company?.name ?? null,
+      investorSlug: investor?.slug ?? null,
+      investorName: investor?.name ?? null,
       moderationStatus: row.moderationStatus,
       createdAt: row.createdAt.toISOString(),
     };

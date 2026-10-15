@@ -1,4 +1,8 @@
-export type Role = 'USER' | 'ADMIN';
+/** CONTRIBUTOR is granted by an admin only: it may mint contributor API keys for /v1 and always
+ *  sees complete company profiles, but moderates nothing. */
+export type Role = 'USER' | 'CONTRIBUTOR' | 'ADMIN';
+
+export const ROLES: readonly Role[] = ['USER', 'CONTRIBUTOR', 'ADMIN'];
 
 export interface RegisterInput {
   email: string;

@@ -25,6 +25,7 @@ const COLUMNS: { label: string; links: { label: string; href: string }[] }[] = [
       { label: 'FAQ', href: '/faq' },
       { label: 'Data & sources', href: '/data' },
       { label: 'Contribute', href: '/contribute' },
+      { label: 'API', href: '/developers' },
     ],
   },
   {

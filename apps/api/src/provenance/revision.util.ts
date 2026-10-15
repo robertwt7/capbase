@@ -8,7 +8,7 @@ export { toJsonValue, type JsonColumnValue };
 
 /** Everything citable/revisable — the reviewable types minus `proposal`, which
     is a change rather than a row a change can land on. */
-export type RevisableType = Exclude<ReviewableType, 'proposal'>;
+export type RevisableType = Exclude<ReviewableType, 'proposal' | 'investorProposal'>;
 
 /** One row of the `Revision` table, in `createMany` shape. */
 export interface RevisionInput {

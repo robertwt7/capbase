@@ -1,6 +1,6 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import { HttpException, type ExecutionContext } from '@nestjs/common';
-import { MAX_PENDING_SUBMISSIONS } from '@repo/api';
+import { MAX_PENDING_API_SUBMISSIONS, MAX_PENDING_SUBMISSIONS } from '@repo/api';
 
 import type { UsersService } from '../../users/users.service';
 import type { RequestUser } from '../decorators/current-user.decorator';
@@ -29,6 +29,20 @@ describe('PendingCapGuard', () => {
     const { guard } = guardWith(MAX_PENDING_SUBMISSIONS);
     const err = await guard.canActivate(contextFor(user)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpException);
+    expect((err as HttpException).getStatus()).toBe(429);
+  });
+
+  it('gives API-key traffic the larger cap', async () => {
+    const keyed: RequestUser = { ...user, apiKey: { id: 'k1', scope: 'contributor', prefix: 'cbk_x' } };
+    await expect(guardWith(MAX_PENDING_SUBMISSIONS).guard.canActivate(contextFor(keyed))).resolves.toBe(
+      true,
+    );
+    await expect(
+      guardWith(MAX_PENDING_API_SUBMISSIONS - 1).guard.canActivate(contextFor(keyed)),
+    ).resolves.toBe(true);
+    const err = await guardWith(MAX_PENDING_API_SUBMISSIONS)
+      .guard.canActivate(contextFor(keyed))
+      .catch((e: unknown) => e);
     expect((err as HttpException).getStatus()).toBe(429);
   });
 

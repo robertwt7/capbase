@@ -26,6 +26,7 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.11",
+    "@nestjs/swagger": "^11.4.7",
     "@nestjs/throttler": "^6.7.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@repo/api": "*",
@@ -67,6 +68,6 @@
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "5.5.4"
+    "typescript": "5.9.3"
   }
 }

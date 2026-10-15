@@ -655,7 +655,19 @@ describe('AdminService.listSubmissions (paging)', () => {
     company: null,
   }));
 
-  function makeService() {
+  // A ninth table: investor-firm edits sort after exits ('investorProposal' > 'exit').
+  const investorEdits: Row[] = Array.from({ length: 20 }, (_, i) => ({
+    id: `i${String(i).padStart(3, '0')}`,
+    moderationStatus: 'APPROVED',
+    createdAt: at(i),
+    changes: { websiteUrl: 'https://firm.example' },
+    previous: { websiteUrl: null },
+    note: null,
+    sourceUrl: null,
+    investor: { slug: 'firm', name: 'Firm Capital', websiteUrl: 'https://firm.example' },
+  }));
+
+  function makeService(withInvestorEdits = false) {
     const prisma = {
       company: table([]),
       fundingRound: table([]),
@@ -665,6 +677,7 @@ describe('AdminService.listSubmissions (paging)', () => {
       exitEvent: table(exits),
       diversitySignal: table(diversity),
       changeProposal: table([]),
+      investorChangeProposal: table(withInvestorEdits ? investorEdits : []),
       citation: { findMany: jest.fn(async () => []) },
     };
     return {
@@ -707,6 +720,31 @@ describe('AdminService.listSubmissions (paging)', () => {
     expect(seen).toEqual(expected);
   });
 
+  it('pages across all nine tables, investor edits included', async () => {
+    const { service } = makeService(true);
+    const { seen } = await walk(service);
+    expect(seen).toHaveLength(150);
+    expect(new Set(seen).size).toBe(150);
+    expect(seen.filter((id) => id.startsWith('i'))).toHaveLength(20);
+
+    const res = await service.listSubmissions('APPROVED', 'investorProposal');
+    expect(res.total).toBe(20);
+    expect(res.countsByType.investorProposal).toBe(20);
+    expect(res.items[0]).toMatchObject({
+      type: 'investorProposal',
+      companySlug: null,
+      investorSlug: 'firm',
+      investorName: 'Firm Capital',
+      label: 'Edit websiteUrl · Firm Capital',
+      data: {
+        investor: { slug: 'firm', name: 'Firm Capital' },
+        changes: { websiteUrl: 'https://firm.example' },
+        current: { websiteUrl: 'https://firm.example' },
+        previous: { websiteUrl: null },
+      },
+    });
+  });
+
   it('reports true totals, not the page size', async () => {
     const { service } = makeService();
     const res = await service.listSubmissions('APPROVED');
@@ -746,6 +784,7 @@ describe('AdminService.pendingCount', () => {
       exitEvent: 4,
       diversitySignal: 0,
       changeProposal: 5,
+      investorChangeProposal: 1,
     };
     const prisma = Object.fromEntries(
       Object.entries(counts).map(([model, count]) => [
@@ -758,9 +797,133 @@ describe('AdminService.pendingCount', () => {
         },
       ]),
     );
-    await expect(newService(prisma).pendingCount()).resolves.toBe(15);
+    await expect(newService(prisma).pendingCount()).resolves.toBe(16);
     expect(prisma.company.aggregate).toHaveBeenCalledWith(
       expect.objectContaining({ where: { moderationStatus: 'PENDING' } }),
+    );
+  });
+});
+
+describe('AdminService.moderate (investor proposal)', () => {
+  const firm = {
+    id: 'inv1',
+    slug: 'sequoia',
+    name: 'Sequoia Capital',
+    legalName: null,
+    type: 'Venture',
+    hq: 'Menlo Park',
+    countryCode: 'US',
+    websiteUrl: 'http://old.example',
+    linkedinUrl: null,
+    domain: 'old.example',
+    description: null,
+    foundedYear: 1972,
+    crdNumber: '12345',
+  };
+
+  function makeInvestorPrisma(changes: Record<string, unknown>, submittedBy: unknown = null) {
+    const tx = {
+      investorChangeProposal: {
+        findUniqueOrThrow: jest.fn(async () => ({
+          id: 'ip1',
+          investorId: 'inv1',
+          changes,
+          investor: firm,
+        })),
+        update: jest.fn(async () => ({})),
+      },
+      investor: { update: jest.fn(async () => ({})) },
+      revision: { create: jest.fn(), createMany: jest.fn() },
+      citation: { createMany: jest.fn() },
+      source: { upsert: jest.fn() },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+      investorChangeProposal: {
+        update: jest.fn(async () => ({})),
+        findUnique: jest.fn(async () => ({
+          moderationStatus: 'PENDING',
+          changes,
+          investor: { slug: firm.slug, name: firm.name },
+          submittedBy,
+        })),
+      },
+      investor: { update: jest.fn(async () => ({})) },
+    };
+    return { prisma, tx };
+  }
+
+  it('approving applies only the changed fields and keeps the replaced values', async () => {
+    const changes = { websiteUrl: 'https://www.sequoiacap.com', hq: 'Menlo Park, CA' };
+    const { prisma, tx } = makeInvestorPrisma(changes);
+    const result = await newService(prisma).moderate('investorProposal', 'ip1', 'APPROVED', 'a1');
+
+    expect(result).toEqual({ id: 'ip1', type: 'investorProposal', moderationStatus: 'APPROVED' });
+    expect(tx.investor.update).toHaveBeenCalledWith({ where: { id: 'inv1' }, data: changes });
+    expect(tx.investorChangeProposal.update).toHaveBeenCalledWith({
+      where: { id: 'ip1' },
+      data: {
+        moderationStatus: 'APPROVED',
+        previous: { websiteUrl: 'http://old.example', hq: 'Menlo Park' },
+      },
+    });
+    // A firm has no company timeline and no firm-level citations.
+    expect(tx.revision.create).not.toHaveBeenCalled();
+    expect(tx.revision.createMany).not.toHaveBeenCalled();
+    expect(tx.citation.createMany).not.toHaveBeenCalled();
+  });
+
+  it('never applies a key outside the editable whitelist', async () => {
+    const { prisma, tx } = makeInvestorPrisma({ description: 'New', crdNumber: '999' });
+    await newService(prisma).moderate('investorProposal', 'ip1', 'APPROVED', 'a1');
+    expect(tx.investor.update).toHaveBeenCalledWith({
+      where: { id: 'inv1' },
+      data: { description: 'New' },
+    });
+  });
+
+  it('rejecting flips the proposal and leaves the firm untouched', async () => {
+    const { prisma, tx } = makeInvestorPrisma({ websiteUrl: 'https://x.example' });
+    await newService(prisma).moderate('investorProposal', 'ip1', 'REJECTED', 'a1');
+    expect(prisma.investorChangeProposal.update).toHaveBeenCalledWith({
+      where: { id: 'ip1' },
+      data: { moderationStatus: 'REJECTED' },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.investor.update).not.toHaveBeenCalled();
+    expect(prisma.investor.update).not.toHaveBeenCalled();
+  });
+
+  it("emails the contributor a link to the firm's profile", async () => {
+    const submitter = {
+      email: 'c@test.dev',
+      name: 'Cy',
+      role: 'CONTRIBUTOR',
+      bannedAt: null,
+      emailVerifiedAt: new Date(),
+    };
+    const { prisma } = makeInvestorPrisma(
+      { websiteUrl: 'https://www.sequoiacap.com', hq: 'Menlo Park, CA' },
+      submitter,
+    );
+    const mail = makeMail();
+    await newService(prisma, mail).moderate('investorProposal', 'ip1', 'APPROVED', 'a1');
+    expect(mail.sendSubmissionApprovedEmail).toHaveBeenCalledWith(
+      'c@test.dev',
+      'Cy',
+      "an edit to Sequoia Capital's website and headquarters",
+      '/investors/sequoia',
+    );
+
+    const rejected = makeInvestorPrisma({ websiteUrl: 'https://x.example' }, submitter);
+    const mail2 = makeMail();
+    await newService(rejected.prisma, mail2).moderate('investorProposal', 'ip1', 'REJECTED', 'a1');
+    expect(mail2.sendSubmissionRejectedEmail).toHaveBeenCalledWith(
+      'c@test.dev',
+      'Cy',
+      "an edit to Sequoia Capital's website",
+      DEFAULT_REJECTION_REASON,
+      '/developers',
     );
   });
 });

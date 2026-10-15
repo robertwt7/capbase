@@ -1,4 +1,10 @@
-import type { Investor, InvestorSummary, InvestorType } from '@repo/api';
+import {
+  INVESTOR_EDIT_FIELDS,
+  type Investor,
+  type InvestorEditFields,
+  type InvestorSummary,
+  type InvestorType,
+} from '@repo/api';
 import type { Investor as DbInvestor, InvestorHolding as DbInvestorHolding } from '@repo/db';
 
 type HoldingWithCompany = DbInvestorHolding & {
@@ -29,6 +35,34 @@ export function toInvestor(row: DbInvestor): Investor {
     assetsUsd: numN(row.assetsUsd),
     foundedYear: row.foundedYear,
   };
+}
+
+/** The editable fields of a firm row, as an investor proposal diffs them. */
+export function toInvestorEditFields(row: DbInvestor): InvestorEditFields {
+  const all: Required<InvestorEditFields> = {
+    name: row.name,
+    legalName: row.legalName,
+    type: row.type as InvestorType,
+    hq: row.hq,
+    countryCode: row.countryCode,
+    websiteUrl: row.websiteUrl,
+    linkedinUrl: row.linkedinUrl,
+    domain: row.domain,
+    description: row.description,
+    foundedYear: row.foundedYear,
+  };
+  return Object.fromEntries(INVESTOR_EDIT_FIELDS.map((k) => [k, all[k]])) as InvestorEditFields;
+}
+
+/** The firm's values for exactly the keys `changes` touches. */
+export function pickInvestorFields(
+  row: DbInvestor,
+  changes: InvestorEditFields,
+): InvestorEditFields {
+  const view = toInvestorEditFields(row);
+  return Object.fromEntries(
+    Object.keys(changes).map((k) => [k, view[k as keyof InvestorEditFields]]),
+  ) as InvestorEditFields;
 }
 
 /**

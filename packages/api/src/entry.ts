@@ -6,6 +6,7 @@ export * from './domain/market';
 export * from './domain/pagination';
 export * from './domain/inputs';
 export * from './domain/auth';
+export * from './domain/api-keys';
 export * from './domain/moderation';
 export * from './domain/contributions';
 export * from './domain/proposals';

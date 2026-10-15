@@ -1,4 +1,4 @@
-import type { AdminUser } from '@repo/api';
+import { ROLES, type AdminUser, type Role } from '@repo/api';
 
 import { Badge, Button, Input, PageContainer, Pagination } from '../../../components/ui';
 import { getUsers } from '../../../lib/admin';
@@ -37,7 +37,9 @@ export default async function AdminUsers({
         <p className="mt-2 max-w-[68ch] text-[15px] text-graphite-700">
           Banning signs the account out everywhere, blocks sign-in, and rejects
           everything it still has pending. Lifting a ban restores access but not
-          the rejected submissions.
+          the rejected submissions. Contributors can mint API keys for the public
+          API; demoting or banning someone revokes the keys their new role no
+          longer allows.
         </p>
       </header>
 
@@ -99,6 +101,21 @@ export default async function AdminUsers({
   );
 }
 
+const ROLE_LABEL: Record<Role, string> = {
+  USER: 'User',
+  CONTRIBUTOR: 'Contributor',
+  ADMIN: 'Admin',
+};
+
+/** Why a role change matters, as a tooltip on its button. */
+function roleChangeTitle(from: Role, to: Role): string | undefined {
+  const rank = ROLES.indexOf(to) - ROLES.indexOf(from);
+  if (rank >= 0) return undefined;
+  return to === 'USER'
+    ? 'Revokes every API key this account holds'
+    : 'Revokes this account’s admin API keys';
+}
+
 function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
   const banned = user.bannedAt !== null;
   return (
@@ -117,9 +134,9 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1.5">
-          {user.role === 'ADMIN' ? (
+          {user.role !== 'USER' ? (
             <Badge variant="box" mono>
-              Admin
+              {ROLE_LABEL[user.role]}
             </Badge>
           ) : null}
           {banned ? (
@@ -139,18 +156,20 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
             You
           </span>
         ) : (
-          <div className="flex items-center justify-end gap-3">
-            <form
-              action={setRoleAction.bind(
-                null,
-                user.id,
-                user.role === 'ADMIN' ? 'USER' : 'ADMIN',
-              )}
-            >
-              <Button variant="ghost" shape="box" size="sm" type="submit">
-                {user.role === 'ADMIN' ? 'Revoke admin' : 'Make admin'}
-              </Button>
-            </form>
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            {ROLES.filter((role) => role !== user.role).map((role) => (
+              <form key={role} action={setRoleAction.bind(null, user.id, role)}>
+                <Button
+                  variant="ghost"
+                  shape="box"
+                  size="sm"
+                  type="submit"
+                  title={roleChangeTitle(user.role, role)}
+                >
+                  Make {ROLE_LABEL[role].toLowerCase()}
+                </Button>
+              </form>
+            ))}
             <form action={setBannedAction.bind(null, user.id, !banned)}>
               <Button variant="outline" shape="box" size="sm" type="submit">
                 {banned ? 'Lift ban' : 'Ban'}

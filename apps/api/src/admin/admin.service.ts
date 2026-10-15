@@ -5,6 +5,8 @@ import {
   SUBMISSION_PAGE_SIZE,
   type ChangeProposalReview,
   type CompanyEditFields,
+  type InvestorEditFields,
+  type InvestorProposalReview,
   type PendingSubmission,
   type PendingSubmissionsResponse,
   type ReviewableType,
@@ -24,6 +26,7 @@ import {
   toInvestorHolding,
   toPerson,
 } from '../companies/company.mapper';
+import { pickInvestorFields } from '../investors/investor.mapper';
 import { createRevision, toJsonValue, type RevisableType } from '../provenance/revision.util';
 import {
   DEFAULT_REJECTION_REASON,
@@ -37,6 +40,7 @@ const submittedBy = { select: { id: true, name: true, email: true } } as const;
 
 type Submitter = { id: string; name: string; email: string } | null;
 type CompanyRef = { slug: string; name: string } | null;
+type InvestorRef = { slug: string; name: string } | null;
 
 /** The company's live values for exactly the keys a proposal touches, so the
     reviewer diffs against what the row says now (not at submit time). */
@@ -47,6 +51,38 @@ function pickCurrent(company: DbCompany, changes: CompanyEditFields): CompanyEdi
     (current as Record<string, unknown>)[key] = view[key];
   }
   return current;
+}
+
+/** Investor update payload from a proposal diff: the whitelisted fields verbatim (the DTO
+    already validated them), never anything else stored in the JSON. */
+function investorDataFromChanges(changes: InvestorEditFields): Prisma.InvestorUpdateInput {
+  const {
+    name,
+    legalName,
+    type,
+    hq,
+    countryCode,
+    websiteUrl,
+    linkedinUrl,
+    domain,
+    description,
+    foundedYear,
+  } = changes;
+  const data: Prisma.InvestorUpdateInput = {
+    name,
+    legalName,
+    type,
+    hq,
+    countryCode,
+    websiteUrl,
+    linkedinUrl,
+    domain,
+    description,
+    foundedYear,
+  };
+  return Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined),
+  ) as Prisma.InvestorUpdateInput;
 }
 
 /** Company update payload from a proposal diff: BigInt money conversions, all
@@ -317,6 +353,7 @@ export class AdminService {
       exits,
       diversity,
       proposals,
+      investorProposals,
       countsByType,
     ] = await Promise.all([
       only('company', (where) =>
@@ -363,6 +400,13 @@ export class AdminService {
           ...page,
         }),
       ),
+      only('investorProposal', (where) =>
+        this.prisma.investorChangeProposal.findMany({
+          where,
+          include: { submittedBy, investor: true },
+          ...page,
+        }),
+      ),
       this.countSubmissions(status),
     ]);
 
@@ -398,6 +442,27 @@ export class AdminService {
           p.sourceUrl,
         );
       }),
+      ...investorProposals.map((p) => {
+        const changes = p.changes as InvestorEditFields;
+        const firm = { slug: p.investor.slug, name: p.investor.name };
+        const review: InvestorProposalReview = {
+          investor: firm,
+          changes,
+          current: pickInvestorFields(p.investor, changes),
+          previous: (p.previous as InvestorEditFields | null) ?? null,
+          note: p.note,
+        };
+        return this.item(
+          'investorProposal',
+          p,
+          null,
+          `Edit ${Object.keys(changes).join(', ')} · ${p.investor.name}`,
+          review,
+          // Firm-level citations don't exist; the URL only ever lives on the row.
+          p.sourceUrl,
+          firm,
+        );
+      }),
     ].sort(bySubmissionOrder);
 
     const hasMore = items.length > SUBMISSION_PAGE_SIZE;
@@ -419,18 +484,38 @@ export class AdminService {
   /** Rows per type in a status — one `count` per table, never the rows. */
   private async countSubmissions(status: ReviewStatus): Promise<Record<ReviewableType, number>> {
     const where = { moderationStatus: status };
-    const [company, round, person, investor, acquisition, exit, diversity, proposal] =
-      await Promise.all([
-        this.prisma.company.count({ where }),
-        this.prisma.fundingRound.count({ where }),
-        this.prisma.personRole.count({ where }),
-        this.prisma.investorHolding.count({ where }),
-        this.prisma.acquisitionDeal.count({ where }),
-        this.prisma.exitEvent.count({ where }),
-        this.prisma.diversitySignal.count({ where }),
-        this.prisma.changeProposal.count({ where }),
-      ]);
-    return { company, round, person, investor, acquisition, exit, diversity, proposal };
+    const [
+      company,
+      round,
+      person,
+      investor,
+      acquisition,
+      exit,
+      diversity,
+      proposal,
+      investorProposal,
+    ] = await Promise.all([
+      this.prisma.company.count({ where }),
+      this.prisma.fundingRound.count({ where }),
+      this.prisma.personRole.count({ where }),
+      this.prisma.investorHolding.count({ where }),
+      this.prisma.acquisitionDeal.count({ where }),
+      this.prisma.exitEvent.count({ where }),
+      this.prisma.diversitySignal.count({ where }),
+      this.prisma.changeProposal.count({ where }),
+      this.prisma.investorChangeProposal.count({ where }),
+    ]);
+    return {
+      company,
+      round,
+      person,
+      investor,
+      acquisition,
+      exit,
+      diversity,
+      proposal,
+      investorProposal,
+    };
   }
 
   async moderate(
@@ -455,6 +540,15 @@ export class AdminService {
             data: { moderationStatus: status },
           });
         }
+      } else if (type === 'investorProposal') {
+        if (status === 'APPROVED') {
+          await this.applyInvestorProposal(id);
+        } else {
+          await this.prisma.investorChangeProposal.update({
+            where: { id },
+            data: { moderationStatus: status },
+          });
+        }
       } else {
         await this.moderateRow(type, id, status, adminUserId);
       }
@@ -475,18 +569,16 @@ export class AdminService {
     note: string | null | undefined,
   ): void {
     const { email, name } = notice.submitter;
-    const slug = encodeURIComponent(notice.companySlug);
     try {
       const sent =
         status === 'APPROVED'
-          ? this.mail.sendSubmissionApprovedEmail(email, name, notice.summary, `/companies/${slug}`)
+          ? this.mail.sendSubmissionApprovedEmail(email, name, notice.summary, notice.viewPath)
           : this.mail.sendSubmissionRejectedEmail(
               email,
               name,
               notice.summary,
               note?.trim() || DEFAULT_REJECTION_REASON,
-              // A rejected profile has no page; offer the form it came from.
-              notice.isCompany ? '/contribute' : `/companies/${slug}/contribute`,
+              notice.retryPath,
             );
       sent.catch((err: unknown) => this.logNotifyFailure(err));
     } catch (err) {
@@ -586,11 +678,43 @@ export class AdminService {
     });
   }
 
+  /**
+   * Approving an investor proposal applies its diff to the Investor row and keeps the values it
+   * replaced on the proposal (`previous`), atomically. No Revision (Revision.companyId is
+   * required; a firm has no company) and no Citation (no firm-level citable type) — the proposal
+   * row is the record. Re-approving re-applies the diff and overwrites `previous` with the
+   * then-current values, like a re-approved company proposal records a no-op revision.
+   */
+  private async applyInvestorProposal(id: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const proposal = await tx.investorChangeProposal.findUniqueOrThrow({
+        where: { id },
+        include: { investor: true },
+      });
+      const changes = proposal.changes as InvestorEditFields;
+      // Captured inside the transaction, before the update: the diff destroys what it replaces.
+      const previous = pickInvestorFields(proposal.investor, changes);
+      await tx.investor.update({
+        where: { id: proposal.investorId },
+        data: investorDataFromChanges(changes),
+      });
+      await tx.investorChangeProposal.update({
+        where: { id },
+        data: {
+          moderationStatus: 'APPROVED',
+          previous: previous as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+
   /** Fill in the source each contributed row cites, so a moderator can check it
       before approving. One query for the whole queue; proposals already carry
       theirs on the row. */
   private async fillCitedSources(items: PendingSubmission[]): Promise<void> {
-    const pending = items.filter((i) => i.sourceUrl === null && i.type !== 'proposal');
+    const pending = items.filter(
+      (i) => i.sourceUrl === null && i.type !== 'proposal' && i.type !== 'investorProposal',
+    );
     if (pending.length === 0) return;
 
     const citations = await this.prisma.citation.findMany({
@@ -608,6 +732,7 @@ export class AdminService {
     label: string,
     data: unknown,
     sourceUrl: string | null = null,
+    investor: InvestorRef = null,
   ): PendingSubmission {
     return {
       type,
@@ -615,6 +740,8 @@ export class AdminService {
       label,
       companySlug: company?.slug ?? null,
       companyName: company?.name ?? null,
+      investorSlug: investor?.slug ?? null,
+      investorName: investor?.name ?? null,
       moderationStatus: row.moderationStatus,
       submittedBy: row.submittedBy ?? null,
       createdAt: row.createdAt.toISOString(),

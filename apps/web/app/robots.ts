@@ -19,6 +19,8 @@ export default function robots(): MetadataRoute.Robots {
         '/companies/*/contribute',
         '/report/',
         '/verify-email',
+        // The key-authenticated API: every route but its docs answers 401 to a crawler.
+        '/v1/',
       ],
     },
     // The index; it points at the per-entity child sitemaps, which are paged

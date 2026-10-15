@@ -25,10 +25,10 @@ export const SOURCE_TYPES: readonly SourceType[] = [
   'Other',
 ];
 
-/** Everything reviewable is citable, except a proposal (which is itself a
+/** Everything reviewable is citable, except a proposal of either kind (which is itself a
  *  change) — plus `fund`, which is citable without being reviewable: funds are
  *  ingest-only, so they never enter the moderation queue. */
-export type CitableType = Exclude<ReviewableType, 'proposal'> | 'fund';
+export type CitableType = Exclude<ReviewableType, 'proposal' | 'investorProposal'> | 'fund';
 
 export const CITABLE_TYPES: readonly CitableType[] = [
   'company',

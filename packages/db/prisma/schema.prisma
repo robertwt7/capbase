@@ -10,6 +10,9 @@ datasource db {
 
 enum Role {
   USER
+  /// Granted by an admin only: may mint contributor API keys for /v1 and always sees
+  /// complete company profiles. Moderates nothing.
+  CONTRIBUTOR
   ADMIN
 }
 
@@ -94,6 +97,8 @@ model User {
   mergeDecisions MergeCandidate[]
   merges         MergeRecord[]
   reportsResolved Report[]
+  apiKeys         ApiKey[]
+  investorProposals InvestorChangeProposal[]
 }
 
 /// A primary document a fact came from. Deduplicated by URL, so many citations
@@ -251,6 +256,8 @@ model Company {
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_name_trgm_idx")
   @@index([oneLiner(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_oneLiner_trgm_idx")
+  /// `GET /v1/companies?domain=`: the pre-create de-duplication lookup is a point read.
+  @@index([domain])
 }
 
 // A company pinned to a user's personal watchlist.
@@ -286,6 +293,31 @@ model ChangeProposal {
   updatedAt        DateTime     @updatedAt
 
   @@index([companyId])
+  @@index([moderationStatus, createdAt, id])
+  @@index([submittedById, moderationStatus, createdAt])
+}
+
+/// A field-level edit to an Investor firm (public API only). Unlike ChangeProposal it writes no
+/// Revision (Revision.companyId is required and a firm has no company), so the values it replaced
+/// are kept here, captured inside the approving transaction.
+model InvestorChangeProposal {
+  id         String   @id @default(cuid())
+  investorId String
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  changes    Json
+  /// The firm's values for the changed fields just before approval; null until approved.
+  previous   Json?
+  note       String?
+  /// The contributor's source. Stored here only: firm-level citations don't exist.
+  sourceUrl  String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  submittedById    String?
+  submittedBy      User?        @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([investorId])
   @@index([moderationStatus, createdAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
@@ -391,6 +423,7 @@ model Investor {
   roundPositions RoundInvestor[]
   funds          Fund[]
   people         PersonRole[]
+  proposals      InvestorChangeProposal[]
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
@@ -768,4 +801,26 @@ model Report {
 
   @@index([status, createdAt])
   @@index([entityType, entityId])
+}
+
+/// A personal API key for /v1. Only the sha256 of the token is stored; the token is shown once.
+/// The key's scope is a ceiling: the owner's CURRENT role must still permit it (ApiKeyGuard).
+model ApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// 'contributor' | 'admin' (ApiKeyScope in @repo/api).
+  scope        String
+  /// `cbk_` + 8 random base62 chars; the lookup handle, safe to display.
+  prefix       String    @unique
+  /// sha256 hex of the full token. A high-entropy secret needs no slow hash.
+  hash         String
+  /// CIDRs the key may be used from; empty means any address.
+  allowedCidrs String[]  @default([])
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, revokedAt])
 }

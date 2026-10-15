@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import {
   MAX_PAGE_SIZE,
+  ROLES,
   type AdminUserListQuery,
   type Role,
   type UpdateUserInput,
@@ -33,6 +34,6 @@ export class UpdateUserDto implements UpdateUserInput {
   banned?: boolean;
 
   @IsOptional()
-  @IsIn(['USER', 'ADMIN'])
+  @IsIn([...ROLES])
   role?: Role;
 }

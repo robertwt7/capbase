@@ -6,7 +6,7 @@ import { PeopleService } from './people.service';
 @Module({
   controllers: [PeopleController],
   providers: [PeopleService],
-  // The admin suppression endpoints call straight into this service.
+  // The admin suppression endpoints and the public API (/v1) call straight into it.
   exports: [PeopleService],
 })
 export class PeopleModule {}

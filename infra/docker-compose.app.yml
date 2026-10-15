@@ -45,8 +45,8 @@ services:
       # on). Empty = private + loopback ranges, i.e. the web container. Never true.
       TRUST_PROXY: ${TRUST_PROXY:-}
       GIT_SHA: ${GIT_SHA:-}
-    # Internal only — the browser never hits the API (API_URL is server-side).
-    # Uncomment to expose on localhost for debugging:
+    # No published port: nginx reaches it over the compose network, and only
+    # for /v1/ (the public API). Uncomment to expose on localhost for debugging:
     # ports: ['127.0.0.1:3000:3000']
     healthcheck:
       test:
@@ -137,8 +137,10 @@ services:
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 128m
+    # api too: nginx proxies /v1/ (the public API) straight to it.
     depends_on:
       - web
+      - api
     ports:
       - '80:80'
       - '443:443'

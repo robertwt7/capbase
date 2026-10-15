@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import { InvestorsService } from './investors.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -342,6 +342,66 @@ describe('InvestorsService', () => {
         { funds: { some: include._count.select.funds.where } },
         { people: { some: include.people.where } },
       ]);
+    });
+  });
+});
+
+describe('InvestorsService.proposeChange', () => {
+  function serviceWith(firm: Record<string, unknown> | null) {
+    const findFirst = jest.fn(async () => firm);
+    const create = jest.fn(async (args: { data: Record<string, unknown> }) => ({
+      id: 'ip1',
+      moderationStatus: args.data.moderationStatus,
+    }));
+    const prisma = {
+      investor: { findFirst },
+      investorChangeProposal: { create },
+    } as unknown as PrismaService;
+    return { service: new InvestorsService(prisma), findFirst, create };
+  }
+
+  const input = (changes: Record<string, unknown>) =>
+    ({ changes, attested: true, sourceUrl: 'https://sec.gov/x' }) as never;
+
+  it('stores only the keys that differ from the firm, PENDING, with the source', async () => {
+    const { service, create } = serviceWith(investorRow());
+    const result = await service.proposeChange(
+      'sequoia-capital',
+      input({ name: 'Sequoia Capital', hq: 'Menlo Park', domain: 'https://www.Sequoia.com/' }),
+      'u1',
+    );
+    expect(result).toEqual({ id: 'ip1', moderationStatus: 'PENDING' });
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        investorId: 'i-1',
+        changes: { hq: 'Menlo Park', domain: 'sequoia.com' },
+        note: null,
+        sourceUrl: 'https://sec.gov/x',
+        moderationStatus: 'PENDING',
+        submittedById: 'u1',
+      },
+    });
+  });
+
+  it('answers 400 when nothing would change', async () => {
+    const { service, create } = serviceWith(investorRow());
+    await expect(
+      service.proposeChange(
+        'sequoia-capital',
+        input({ name: 'Sequoia Capital', domain: 'SEQUOIACAP.com' }),
+        'u1',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a hidden or merged-away firm, looking only at public rows', async () => {
+    const { service, findFirst } = serviceWith(null);
+    await expect(
+      service.proposeChange('gone', input({ hq: 'x' }), 'u1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { slug: 'gone', moderationStatus: 'APPROVED', mergedIntoId: null },
     });
   });
 });

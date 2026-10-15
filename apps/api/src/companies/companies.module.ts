@@ -8,5 +8,7 @@ import { CompaniesService } from './companies.service';
   imports: [UsersModule],
   controllers: [CompaniesController],
   providers: [CompaniesService],
+  // The public API (/v1) calls straight into it.
+  exports: [CompaniesService],
 })
 export class CompaniesModule {}

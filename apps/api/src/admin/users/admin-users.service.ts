@@ -8,6 +8,7 @@ import {
 } from '@repo/api';
 import { Prisma } from '@repo/db';
 
+import { ApiKeysService } from '../../api-keys/api-keys.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const userSelect = {
@@ -29,6 +30,7 @@ const CONTRIBUTION_TABLES = [
   'ExitEvent',
   'DiversitySignal',
   'ChangeProposal',
+  'InvestorChangeProposal',
 ] as const;
 
 type UserRow = Prisma.UserGetPayload<{ select: typeof userSelect }>;
@@ -36,7 +38,10 @@ type UserRow = Prisma.UserGetPayload<{ select: typeof userSelect }>;
 /** The user-moderation half of the admin portal: list, ban, change role. */
 @Injectable()
 export class AdminUsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly apiKeys: ApiKeysService,
+  ) {}
 
   async list(query: AdminUserListQuery = {}): Promise<Paginated<AdminUser>> {
     const page = query.page ?? 1;
@@ -76,14 +81,20 @@ export class AdminUsersService {
    * spammer's backlog leaves the queue with them. Unbanning restores access but
    * not the rejected rows. Rejection writes no revisions — nothing went public.
    *
-   * An admin can't ban or demote themselves: that is how a site ends up with no
-   * admin at all.
+   * A ban, or a role that no longer permits a key's scope, revokes those API keys in
+   * the same transaction (USER: all, CONTRIBUTOR: the admin keys).
+   *
+   * An admin can't ban or demote themselves (to either lower role): that is how a
+   * site ends up with no admin at all.
    */
   async update(id: string, input: UpdateUserInput, actorId: string): Promise<AdminUser> {
     if (input.banned === undefined && input.role === undefined) {
       throw new BadRequestException('Nothing to update');
     }
-    if (id === actorId && (input.banned === true || input.role === 'USER')) {
+    if (
+      id === actorId &&
+      (input.banned === true || (input.role !== undefined && input.role !== 'ADMIN'))
+    ) {
       throw new BadRequestException("You can't ban or demote your own account");
     }
     const existing = await this.prisma.user.findUnique({ where: { id }, select: userSelect });
@@ -98,7 +109,11 @@ export class AdminUsersService {
 
     const row = await this.prisma.$transaction(async (tx) => {
       if (banning) await this.rejectPending(tx, id);
-      return tx.user.update({ where: { id }, data, select: userSelect });
+      const updated = await tx.user.update({ where: { id }, data, select: userSelect });
+      if (input.role !== undefined || input.banned !== undefined) {
+        await this.apiKeys.revokeForRole(tx, id, updated.role, updated.bannedAt !== null);
+      }
+      return updated;
     });
     const pending = await this.pendingCounts([id]);
     return this.toAdminUser(row, pending.get(id) ?? 0);
@@ -116,6 +131,7 @@ export class AdminUsersService {
       tx.exitEvent.updateMany({ where, data }),
       tx.diversitySignal.updateMany({ where, data }),
       tx.changeProposal.updateMany({ where, data }),
+      tx.investorChangeProposal.updateMany({ where, data }),
     ]);
   }
 

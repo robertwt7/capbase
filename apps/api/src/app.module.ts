@@ -17,6 +17,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SearchModule } from './search/search.module';
 import { DEFAULT_LIMIT, THROTTLE_MESSAGE } from './throttle/throttle';
 import { UsersModule } from './users/users.module';
+import { V1Module } from './v1/v1.module';
 
 import { AppService } from './app.service';
 import { AppController } from './app.controller';
@@ -42,6 +43,7 @@ import { HealthController } from './health.controller';
     MarketModule,
     AdminModule,
     ReportsModule,
+    V1Module,
   ],
   controllers: [AppController, HealthController],
   providers: [

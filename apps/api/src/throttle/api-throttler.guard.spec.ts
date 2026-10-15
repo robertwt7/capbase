@@ -7,9 +7,17 @@ import { Test } from '@nestjs/testing';
 import { SkipThrottle, Throttle, ThrottlerModule } from '@nestjs/throttler';
 import request from 'supertest';
 
+import { API_KEY_LIMITS, type ApiKeyScope } from '@repo/api';
+
+import { ApiKeysService, type KeyedRequest } from '../api-keys/api-keys.service';
 import { UsersService } from '../users/users.service';
 import { ApiThrottlerGuard } from './api-throttler.guard';
-import { DEFAULT_TRUST_PROXY, parseTrustProxy, THROTTLE_MESSAGE } from './throttle';
+import {
+  DEFAULT_TRUST_PROXY,
+  parseTrustProxy,
+  THROTTLE_MESSAGE,
+  V1ReadThrottle,
+} from './throttle';
 
 @Controller('t')
 class TestController {
@@ -25,6 +33,12 @@ class TestController {
     return { ok: true };
   }
 
+  @V1ReadThrottle()
+  @Get('v1')
+  v1() {
+    return { ok: true };
+  }
+
   @SkipThrottle()
   @Get('health')
   health() {
@@ -33,6 +47,21 @@ class TestController {
 }
 
 type Row = { role: 'USER' | 'ADMIN'; bannedAt: Date | null; tokenVersion: number };
+
+/** Test keys: `cbk_<name>` → its id and scope. Anything else starting `cbk_` is dead. */
+const KEYS: Record<string, { id: string; scope: ApiKeyScope }> = {
+  cbk_contrib1: { id: 'kc1', scope: 'contributor' },
+  cbk_contrib2: { id: 'kc2', scope: 'contributor' },
+  cbk_admin: { id: 'ka', scope: 'admin' },
+};
+const fakeApiKeys = {
+  authenticateRequest: jest.fn(async (req: KeyedRequest) => {
+    const token = String(req.headers.authorization).slice(7);
+    const key = KEYS[token];
+    if (!key) throw new Error('dead key');
+    return { key: { ...key, prefix: token }, user: {} };
+  }),
+};
 
 /** A Nest app with only the throttler in front of three test routes. `trustProxy`
  *  decides whether supertest's loopback socket counts as the web container. */
@@ -49,6 +78,7 @@ async function makeApp(trustProxy: string, users: Record<string, Row> = {}) {
     controllers: [TestController],
     providers: [
       { provide: UsersService, useValue: { findById } },
+      { provide: ApiKeysService, useValue: fakeApiKeys },
       { provide: APP_GUARD, useClass: ApiThrottlerGuard },
     ],
   }).compile();
@@ -154,6 +184,53 @@ describe('ApiThrottlerGuard', () => {
       await http().get('/t/read').set('authorization', token('carol'));
       expect(findById).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('ApiThrottlerGuard with API keys', () => {
+  let close: (() => Promise<void>) | undefined;
+  afterEach(async () => {
+    await close?.();
+    close = undefined;
+  });
+  // The web's trust settings, so loopback counts as a trusted proxy: a key read must
+  // still be counted even though it carries no X-Forwarded-For.
+  const start = async () => {
+    const ctx = await makeApp(DEFAULT_TRUST_PROXY);
+    close = () => ctx.app.close();
+    return ctx;
+  };
+  const read = (http: Awaited<ReturnType<typeof makeApp>>['http'], key: string) => () =>
+    http().get('/t/v1').set('authorization', `Bearer ${key}`);
+
+  it('gives each key its own bucket, sized by scope; an admin key is not exempt', async () => {
+    const { http } = await start();
+    const limit = API_KEY_LIMITS.contributor.read;
+    const codes = await statuses(limit + 1, read(http, 'cbk_contrib1'));
+    expect(codes.slice(0, limit).every((c) => c === 200)).toBe(true);
+    expect(codes[limit]).toBe(429);
+    // Same IP, another key: a fresh bucket.
+    expect(await statuses(1, read(http, 'cbk_contrib2'))).toEqual([200]);
+    // An admin key gets the larger budget, but a budget all the same.
+    const admin = await statuses(limit + 1, read(http, 'cbk_admin'));
+    expect(admin.every((c) => c === 200)).toBe(true);
+  });
+
+  it('caps an admin key at its own limit', async () => {
+    const { http } = await start();
+    const limit = API_KEY_LIMITS.admin.read;
+    const codes = await statuses(limit + 1, read(http, 'cbk_admin'));
+    expect(codes[limit - 1]).toBe(200);
+    expect(codes[limit]).toBe(429);
+  });
+
+  it('counts a dead key on the IP', async () => {
+    const { http } = await start();
+    const limit = API_KEY_LIMITS.contributor.read;
+    const codes = await statuses(limit + 1, read(http, 'cbk_dead1'));
+    expect(codes[limit]).toBe(429);
+    // Another dead key from the same address shares that IP bucket.
+    expect(await statuses(1, read(http, 'cbk_dead2'))).toEqual([429]);
   });
 });
 

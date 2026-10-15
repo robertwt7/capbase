@@ -6,5 +6,6 @@ import { InvestorsService } from './investors.service';
 @Module({
   controllers: [InvestorsController],
   providers: [InvestorsService],
+  exports: [InvestorsService],
 })
 export class InvestorsModule {}

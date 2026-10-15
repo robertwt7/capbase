@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtModule, type JwtSignOptions } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 
+import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { MailModule } from '../mail/mail.module';
 import { ApiThrottlerGuard } from '../throttle/api-throttler.guard';
 import { UsersModule } from '../users/users.module';
@@ -14,6 +15,7 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [
     UsersModule,
+    ApiKeysModule,
     MailModule,
     PassportModule,
     JwtModule.registerAsync({

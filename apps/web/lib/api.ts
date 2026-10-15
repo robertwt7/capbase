@@ -50,5 +50,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     }
     throw new ApiError(res.status, `API ${path} responded ${res.status}`, body);
   }
+  // No Content (e.g. revoking an API key): there is no body to parse.
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

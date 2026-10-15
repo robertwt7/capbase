@@ -12,7 +12,9 @@ export type ReviewableType =
   | 'acquisition'
   | 'exit'
   | 'diversity'
-  | 'proposal';
+  | 'proposal'
+  /** An edit to an investor firm (public API only). */
+  | 'investorProposal';
 
 export const REVIEWABLE_TYPES: readonly ReviewableType[] = [
   'company',
@@ -23,6 +25,7 @@ export const REVIEWABLE_TYPES: readonly ReviewableType[] = [
   'exit',
   'diversity',
   'proposal',
+  'investorProposal',
 ];
 
 /** A single row awaiting (or having undergone) moderation. */
@@ -31,9 +34,13 @@ export interface PendingSubmission {
   id: string;
   /** Human-readable summary of what the row represents. */
   label: string;
-  /** The company this contribution belongs to (absent for a brand-new company). */
+  /** The company this contribution belongs to (absent for a brand-new company and for an
+   *  investor proposal). */
   companySlug: string | null;
   companyName: string | null;
+  /** The investor firm an `investorProposal` edits; null for every other type. */
+  investorSlug: string | null;
+  investorName: string | null;
   moderationStatus: ReviewStatus;
   submittedBy: { id: string; name: string; email: string } | null;
   createdAt: string;
@@ -57,7 +64,7 @@ export interface PendingSubmissionsResponse {
   /** One page, newest first, at most `SUBMISSION_PAGE_SIZE`. */
   items: PendingSubmission[];
   /** Pass back as `before` for the next (older) page; null on the last one.
-   *  A cursor, not a page number: the queue merges eight tables, and an offset
+   *  A cursor, not a page number: the queue merges nine tables, and an offset
    *  would have to load every row above it from each of them. */
   nextCursor: string | null;
 }

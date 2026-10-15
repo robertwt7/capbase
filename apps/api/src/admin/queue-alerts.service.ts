@@ -28,6 +28,7 @@ const LABELS: Record<ReviewableType, string> = {
   exit: 'Exits',
   diversity: 'Diversity signals',
   proposal: 'Edits',
+  investorProposal: 'Investor edits',
 };
 
 export interface QueueStats {
@@ -47,18 +48,38 @@ export async function pendingQueueStats(prisma: PrismaService): Promise<QueueSta
     _count: { _all: true },
     _min: { createdAt: true },
   } as const;
-  const [company, round, person, investor, acquisition, exit, diversity, proposal] =
-    await Promise.all([
-      prisma.company.aggregate(args),
-      prisma.fundingRound.aggregate(args),
-      prisma.personRole.aggregate(args),
-      prisma.investorHolding.aggregate(args),
-      prisma.acquisitionDeal.aggregate(args),
-      prisma.exitEvent.aggregate(args),
-      prisma.diversitySignal.aggregate(args),
-      prisma.changeProposal.aggregate(args),
-    ]);
-  const byType = { company, round, person, investor, acquisition, exit, diversity, proposal };
+  const [
+    company,
+    round,
+    person,
+    investor,
+    acquisition,
+    exit,
+    diversity,
+    proposal,
+    investorProposal,
+  ] = await Promise.all([
+    prisma.company.aggregate(args),
+    prisma.fundingRound.aggregate(args),
+    prisma.personRole.aggregate(args),
+    prisma.investorHolding.aggregate(args),
+    prisma.acquisitionDeal.aggregate(args),
+    prisma.exitEvent.aggregate(args),
+    prisma.diversitySignal.aggregate(args),
+    prisma.changeProposal.aggregate(args),
+    prisma.investorChangeProposal.aggregate(args),
+  ]);
+  const byType = {
+    company,
+    round,
+    person,
+    investor,
+    acquisition,
+    exit,
+    diversity,
+    proposal,
+    investorProposal,
+  };
 
   const countsByType = Object.fromEntries(
     Object.entries(byType).map(([type, agg]) => [type, agg._count._all]),

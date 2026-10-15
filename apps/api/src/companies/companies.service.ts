@@ -9,6 +9,7 @@ import {
   DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
+  normalizeDomain,
   type CitableType,
   type Citation,
   type Company,
@@ -211,6 +212,11 @@ export class CompaniesService {
       ...(query.stage && { stage: query.stage }),
       ...(query.status && { status: query.status }),
       ...(query.country && { countryCode: query.country }),
+      // Public API only (V1ListCompaniesDto). Stored domains are normalised on write; the
+      // `www.` variant catches rows written before that. An input with no host matches nothing.
+      ...(query.domain !== undefined && {
+        domain: { in: domainVariants(query.domain) },
+      }),
     };
 
     const orderBy: Prisma.CompanyOrderByWithRelationInput =
@@ -559,7 +565,8 @@ export class CompaniesService {
       data: {
         slug,
         name: dto.name,
-        domain: dto.domain,
+        // A domain is a match key (de-duplication, `?domain=`, logos): store the bare host.
+        domain: normalizeDomain(dto.domain) || dto.domain.trim(),
         oneLiner: dto.oneLiner,
         description: dto.description,
         hq: dto.hq,
@@ -734,8 +741,14 @@ export class CompaniesService {
     const current = toCompanyEditFields(company);
 
     const cleaned: CompanyEditFields = {};
-    for (const key of Object.keys(dto.changes) as (keyof CompanyEditFields)[]) {
-      const value = dto.changes[key];
+    const changes: CompanyEditFields = {
+      ...dto.changes,
+      ...(dto.changes.domain !== undefined && {
+        domain: normalizeDomain(dto.changes.domain) || dto.changes.domain.trim(),
+      }),
+    };
+    for (const key of Object.keys(changes) as (keyof CompanyEditFields)[]) {
+      const value = changes[key];
       if (value === undefined) continue;
       if (sameValue(value, current[key])) continue;
       (cleaned as Record<string, unknown>)[key] = value;
@@ -784,6 +797,12 @@ export class CompaniesService {
     }
     return slug;
   }
+}
+
+/** The stored spellings `?domain=` matches: the bare host, and its legacy `www.` form. */
+function domainVariants(raw: string): string[] {
+  const host = normalizeDomain(raw);
+  return host ? [host, `www.${host}`] : [];
 }
 
 function slugBase(name: string, fallback: string): string {

@@ -13,6 +13,7 @@ const MODELS = [
   'exitEvent',
   'diversitySignal',
   'changeProposal',
+  'investorChangeProposal',
 ] as const;
 
 function prismaWith(findFirsts: Partial<Record<(typeof MODELS)[number], unknown>>) {
@@ -41,6 +42,13 @@ describe('UsersService.accessFor (the contribution gate)', () => {
   it('is unlocked for an admin, without a query', async () => {
     const prisma = prismaWith({});
     const access = await new UsersService(prisma).accessFor({ id: 'a1', role: 'ADMIN' });
+    expect(access).toEqual({ unlocked: true, unlockedUntil: null });
+    expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
+  });
+
+  it('is unlocked for a contributor, without a query', async () => {
+    const prisma = prismaWith({});
+    const access = await new UsersService(prisma).accessFor({ id: 'c1', role: 'CONTRIBUTOR' });
     expect(access).toEqual({ unlocked: true, unlockedUntil: null });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
   });
@@ -96,6 +104,13 @@ describe('UsersService.hasRecentContribution', () => {
 
   it('counts an edit proposal as a contribution', async () => {
     const service = new UsersService(prismaWith({ changeProposal: { createdAt: new Date() } }));
+    await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
+  });
+
+  it('counts an approved investor edit like any other contribution', async () => {
+    const service = new UsersService(
+      prismaWith({ investorChangeProposal: { createdAt: new Date() } }),
+    );
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
   });
 

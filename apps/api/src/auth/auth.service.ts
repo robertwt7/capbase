@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import type { AuthResponse, AuthUser } from '@repo/api';
+import type { AuthResponse, AuthUser, Role } from '@repo/api';
 
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
@@ -25,7 +25,7 @@ type UserRecord = {
   id: string;
   email: string;
   name: string;
-  role: 'USER' | 'ADMIN';
+  role: Role;
   passwordHash: string;
   tokenVersion: number;
   bannedAt: Date | null;

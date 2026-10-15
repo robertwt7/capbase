@@ -21,13 +21,16 @@ browser ──▶ nginx :80/:443 ──▶ web :3001 ──▶ api :3000 │
 ```
 
 - **Only nginx binds a public port** (80/443). `web` reaches the API at
-  `http://api:3000` on the internal Docker network.
+  `http://api:3000` on the internal Docker network; nginx also proxies `/v1/`
+  (the public API, for scripts) straight to it.
 - **Postgres is loopback-only.** The compose default is
   `POSTGRES_BIND=127.0.0.1`, so nothing off the box can reach it. For remote
   `psql`, use [`make db-tunnel`](#remote-database-access) — not an open port.
-- **api and jobs are never exposed to the internet.** The browser never talks to
-  the API: `API_URL` is a server-only env var (`apps/web/lib/api.ts`) — all API
-  calls happen server-side in Next.js. No CORS, no public API surface.
+- **jobs is never exposed; the api only under `/v1/`.** The website never sends the
+  browser to the API: `API_URL` is a server-only env var (`apps/web/lib/api.ts`) —
+  all of the site's API calls happen server-side in Next.js. The one public API
+  surface is the key-authenticated `/v1` (see [Public API](#public-api-v1)); nginx
+  forwards nothing else, so `/auth`, `/admin` and the rest stay internal. No CORS.
 - **HTTPS is required, not optional**: login cookies are `secure`-only in
   production (`apps/web/app/api/*/login/route.ts`), so admin/user login silently
   breaks over plain HTTP.
@@ -442,6 +445,34 @@ read-only, not a rendered template. The domain is hardcoded in it.
   ```sh
   CERT_DOMAINS='capbase.fyi www.capbase.fyi' FORCE=1 make deploy-tls
   ```
+
+### Public API (`/v1`)
+
+`location ^~ /v1/` proxies straight to `api:3000` (the web is not involved). It has
+its own per-IP zone, `apikeys` (10 r/s, burst 40), deliberately **not** `crawlers`:
+that zone buckets every `curl`/`python-requests` caller on earth into one 30 r/m
+bucket. Behind it the API throttles per key (`API_KEY_LIMITS` in `@repo/api`).
+nginx **overwrites** `X-Forwarded-For` with `$remote_addr` there — the API trusts
+this hop (`TRUST_PROXY`) and keys both rate limits and per-key IP allowlists on it,
+so an appended, client-supplied value would let anyone spoof their address.
+
+Smoke test after a deploy:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://capbase.fyi/v1/me             # 401
+curl -s https://capbase.fyi/v1/me -H 'Authorization: Bearer cbk_…'              # 200, your user
+curl -s -o /dev/null -w '%{http_code}\n' https://capbase.fyi/v1/openapi.json  # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://capbase.fyi/auth/me          # 404 (web, not the API)
+```
+
+and open `https://capbase.fyi/v1/docs` (Swagger UI; "Authorize" with a key, then
+"Try it out" on `GET /v1/me`).
+
+**A leaked key**: the owner revokes it on `/profile/api-keys` (it dies on the next
+request). If they can't, an admin demotes the owner to *User* or bans them on
+`/admin/users` — either revokes every key they hold, in the same transaction. Keys
+start with `cbk_`, so a secret scanner or a `grep` finds one pasted somewhere it
+shouldn't be.
 
 ### Putting Cloudflare in front (optional)
 

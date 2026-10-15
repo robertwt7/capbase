@@ -1,4 +1,6 @@
+import type { ExecutionContext } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { API_KEY_LIMITS, type ApiKeyScope } from '@repo/api';
 
 /**
  * App-level rate limits. nginx is the front line (per-IP zones in
@@ -23,6 +25,21 @@ export const AuthThrottle = () => Throttle({ default: AUTH_LIMIT });
 /** The paginated directory endpoints (`GET /companies`, `/investors`, `/people`, `/funds`)
  *  and the header typeahead (`GET /search`). */
 export const SearchThrottle = () => Throttle({ default: SEARCH_LIMIT });
+
+/** Where ApiThrottlerGuard leaves a resolved API key's scope on the request, for the
+ *  per-scope limits below. Set before the limits are read (in `shouldSkip`). */
+export const KEY_SCOPE = Symbol('apiKeyScope');
+
+/** A dead key never resolves a scope; it is counted on the IP at the contributor rate. */
+const keyScope = (ctx: ExecutionContext): ApiKeyScope =>
+  ctx.switchToHttp().getRequest<{ [KEY_SCOPE]?: ApiKeyScope }>()[KEY_SCOPE] ?? 'contributor';
+
+/** /v1 reads: per key, sized by the key's scope (API_KEY_LIMITS). */
+export const V1ReadThrottle = () =>
+  Throttle({ default: { ttl: MINUTE, limit: (ctx) => API_KEY_LIMITS[keyScope(ctx)].read } });
+/** /v1 writes and moderation: per key, sized by the key's scope (API_KEY_LIMITS). */
+export const V1WriteThrottle = () =>
+  Throttle({ default: { ttl: MINUTE, limit: (ctx) => API_KEY_LIMITS[keyScope(ctx)].write } });
 
 /**
  * Which hops may set X-Forwarded-For (Express `trust proxy`). The default trusts

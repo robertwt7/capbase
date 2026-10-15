@@ -513,3 +513,48 @@ describe('CompaniesService country filter and facet', () => {
     ]);
   });
 });
+
+describe('CompaniesService domain lookup (public API de-duplication)', () => {
+  const service = () => {
+    const findMany = jest.fn(async () => []);
+    const count = jest.fn(async () => 0);
+    const prisma = {
+      company: { findMany, count },
+      $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    } as unknown as PrismaService;
+    return { service: new CompaniesService(prisma, {} as UsersService), count };
+  };
+
+  it('matches the normalised host and its legacy www. form', async () => {
+    const { service: s, count } = service();
+    await s.findAllApproved({ domain: 'https://WWW.Example.com/about' });
+    expect(count).toHaveBeenCalledWith({
+      where: {
+        moderationStatus: 'APPROVED',
+        mergedIntoId: null,
+        domain: { in: ['example.com', 'www.example.com'] },
+      },
+    });
+  });
+
+  it('matches nothing for an input with no host, never the empty-domain rows', async () => {
+    const { service: s, count } = service();
+    await s.findAllApproved({ domain: '  ' });
+    expect(count).toHaveBeenCalledWith({
+      where: { moderationStatus: 'APPROVED', mergedIntoId: null, domain: { in: [] } },
+    });
+  });
+
+  it('stores a contributed domain as the bare lower-case host', async () => {
+    const create = jest.fn(async () => ({ id: 'c1', slug: 'acme', moderationStatus: 'PENDING' }));
+    const prisma = {
+      company: { create, findUnique: jest.fn(async () => null) },
+    } as unknown as PrismaService;
+    await new CompaniesService(prisma, {} as UsersService).createCompany(
+      { name: 'Acme', domain: 'https://www.Acme.com/', industry: [], totalRaisedUsd: 0 } as never,
+      'u1',
+    );
+    const { data } = (create.mock.calls[0] as unknown[])[0] as { data: { domain: string } };
+    expect(data.domain).toBe('acme.com');
+  });
+});

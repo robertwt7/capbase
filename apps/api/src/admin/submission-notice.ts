@@ -1,4 +1,10 @@
-import type { CompanyEditFields, ReviewableType, ReviewStatus } from '@repo/api';
+import type {
+  CompanyEditFields,
+  InvestorEditFields,
+  ReviewableType,
+  ReviewStatus,
+  Role,
+} from '@repo/api';
 
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -30,6 +36,26 @@ const FIELD_LABELS: Record<keyof CompanyEditFields, string> = {
   primarySector: 'sector',
 };
 
+/** The same, for an investor-firm edit. */
+const INVESTOR_FIELD_LABELS: Record<keyof InvestorEditFields, string> = {
+  name: 'name',
+  legalName: 'legal name',
+  type: 'investor type',
+  hq: 'headquarters',
+  countryCode: 'country',
+  websiteUrl: 'website',
+  linkedinUrl: 'LinkedIn',
+  domain: 'domain',
+  description: 'description',
+  foundedYear: 'founding year',
+};
+
+/** "a, b and c". */
+function listOf(items: string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 /**
  * Everything the contributor email needs about one submission, read before the
  * decision so the email can say what it was and the service can tell a real
@@ -40,25 +66,29 @@ export interface SubmissionNotice {
   submitter: {
     email: string;
     name: string;
-    role: 'USER' | 'ADMIN';
+    role: Role;
     bannedAt: Date | null;
     emailVerifiedAt: Date | null;
   } | null;
   /** A noun phrase: "the Series B round for Helia". */
   summary: string;
-  companySlug: string;
-  /** True for a whole new company profile, whose rejection points back at /contribute. */
-  isCompany: boolean;
+  /** The page the contribution shows on once approved: `/companies/<slug>` or
+   *  `/investors/<slug>`. */
+  viewPath: string;
+  /** Where a rejected contributor can try again: the company's contribute page, /contribute
+   *  for a whole new profile (which has no page), or /developers for an API-only investor edit. */
+  retryPath: string;
 }
 
 const submittedBy = {
   select: { email: true, name: true, role: true, bannedAt: true, emailVerifiedAt: true },
 } as const;
 const company = { select: { slug: true, name: true } } as const;
+const investor = { select: { slug: true, name: true } } as const;
 
 /**
  * Load one submission for its notice, or null when it doesn't exist (the
- * decision itself then 404s) or has no company to link to.
+ * decision itself then 404s) or has no company (or firm) to link to.
  *
  * Every contribution is a single row — a round carries its investors, an edit
  * proposal all its fields — so one decision is one email, never one per field.
@@ -79,8 +109,12 @@ export async function loadSubmissionNotice(
           status: row.moderationStatus as ReviewStatus,
           submitter: row.submittedBy,
           summary: summary(on.name),
-          companySlug: on.slug,
-          isCompany: type === 'company',
+          viewPath: `/companies/${encodeURIComponent(on.slug)}`,
+          // A rejected profile has no page; offer the form it came from.
+          retryPath:
+            type === 'company'
+              ? '/contribute'
+              : `/companies/${encodeURIComponent(on.slug)}/contribute`,
         }
       : null;
 
@@ -143,6 +177,23 @@ export async function loadSubmissionNotice(
       const fields = Object.keys(row.changes as CompanyEditFields) as (keyof CompanyEditFields)[];
       const labels = fields.map((f) => FIELD_LABELS[f] ?? f).join(', ');
       return notice(row, row.company, (c) => `an edit to ${c} (${labels})`);
+    }
+    case 'investorProposal': {
+      const row = await prisma.investorChangeProposal.findUnique({
+        where,
+        select: { moderationStatus: true, changes: true, investor, submittedBy },
+      });
+      if (!row) return null;
+      const fields = Object.keys(row.changes as InvestorEditFields) as (keyof InvestorEditFields)[];
+      const labels = listOf(fields.map((f) => INVESTOR_FIELD_LABELS[f] ?? f));
+      return {
+        status: row.moderationStatus as ReviewStatus,
+        submitter: row.submittedBy,
+        summary: `an edit to ${row.investor.name}'s ${labels}`,
+        viewPath: `/investors/${encodeURIComponent(row.investor.slug)}`,
+        // Investor edits are API-only: there is no web form to send them back to.
+        retryPath: '/developers',
+      };
     }
   }
 }

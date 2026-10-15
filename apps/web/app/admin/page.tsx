@@ -18,6 +18,10 @@ import { SubmissionDetail } from './SubmissionDetail';
 
 const STATUSES: ReviewStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
 
+/** Display names where the API's type key doesn't read as one (pill, then card badge). */
+const TYPE_PILL: Partial<Record<ReviewableType, string>> = { investorProposal: 'Investor edits' };
+const TYPE_BADGE: Partial<Record<ReviewableType, string>> = { investorProposal: 'investor edit' };
+
 export const dynamic = 'force-dynamic';
 
 export default async function AdminQueue({
@@ -78,11 +82,12 @@ export default async function AdminQueue({
               href={`/admin?status=${active}&type=${t}`}
               active={t === activeType}
             >
-              {t} ({queue.countsByType[t]})
+              {TYPE_PILL[t] ?? t} ({queue.countsByType[t]})
             </FilterLink>
           ))}
         <span className="ml-auto font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase">
-          {shownCount} {active.toLowerCase()} {activeType ? `${activeType} ` : ''}
+          {shownCount} {active.toLowerCase()}{' '}
+          {activeType ? `${TYPE_PILL[activeType]?.toLowerCase() ?? activeType} ` : ''}
           {shownCount === 1 ? 'item' : 'items'}
           {before || queue.nextCursor ? ' · newest first · 50 per page' : ''}
         </span>
@@ -129,11 +134,19 @@ export default async function AdminQueue({
  *  the decision. Nothing needs a click to be read. */
 function SubmissionCard({ item }: { item: PendingSubmission }) {
   const cited = Boolean(item.sourceUrl);
-  // A new company has no public profile until it is approved; every other
-  // submission (proposals included) hangs off a live one.
+  // A new company has no public profile until it is approved; an investor edit
+  // hangs off a live firm; every other submission (proposals included) off a live company.
   const company =
     item.type === 'company' ? (
       'New company'
+    ) : item.investorSlug && item.investorName ? (
+      <Link
+        prefetch={false}
+        href={`/investors/${item.investorSlug}`}
+        className="text-ink underline underline-offset-[3px]"
+      >
+        {item.investorName}
+      </Link>
     ) : item.companySlug && item.companyName ? (
       <Link
         prefetch={false}
@@ -152,7 +165,7 @@ function SubmissionCard({ item }: { item: PendingSubmission }) {
       {/* Line 1: type, what it is, provenance, when — triage at a glance. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <Badge variant="box" mono>
-          {item.type}
+          {TYPE_BADGE[item.type] ?? item.type}
         </Badge>
         <span className="font-display text-[17px] font-semibold text-ink [overflow-wrap:anywhere]">
           {item.label}

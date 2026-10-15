@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { MyContribution } from '@repo/api';
+import type { MyContribution, Role } from '@repo/api';
 
 import { Badge, Button, Card } from '../../../components/ui';
 import { VerifyEmailBanner } from '../../../components/VerifyEmailBanner';
@@ -29,9 +29,9 @@ export default async function ProfilePage() {
         <div>
           <h1 className={styles.name}>
             {user.name}
-            {user.role === 'ADMIN' ? (
+            {user.role !== 'USER' ? (
               <Badge variant="pill" mono className={styles.roleTag}>
-                Admin
+                {user.role === 'ADMIN' ? 'Admin' : 'Contributor'}
               </Badge>
             ) : null}
           </h1>
@@ -44,6 +44,11 @@ export default async function ProfilePage() {
           <Button variant="outline" shape="pill" size="sm" href="/profile/settings">
             Account settings
           </Button>
+          {user.role !== 'USER' ? (
+            <Button variant="outline" shape="pill" size="sm" href="/profile/api-keys">
+              API keys
+            </Button>
+          ) : null}
           <form action={logout}>
             <Button variant="ghost" size="sm" type="submit">
               Sign out
@@ -84,14 +89,16 @@ function AccessPanel({
   hasPending,
 }: {
   access: { unlocked: boolean; unlockedUntil: string | null };
-  role: 'USER' | 'ADMIN';
+  role: Role;
   hasPending: boolean;
 }) {
-  if (role === 'ADMIN') {
+  if (role !== 'USER') {
     return (
       <Card emphasis className={styles.access}>
         <p className={styles.accessTitle}>Full access</p>
-        <p className={styles.accessNote}>Admins always see complete company profiles.</p>
+        <p className={styles.accessNote}>
+          {role === 'ADMIN' ? 'Admins' : 'Contributors'} always see complete company profiles.
+        </p>
       </Card>
     );
   }
@@ -126,7 +133,7 @@ function ContributionRow({ item }: { item: MyContribution }) {
   return (
     <div className={styles.item}>
       <Badge variant="box" mono className={styles.itemType}>
-        {item.type}
+        {item.type === 'investorProposal' ? 'investor edit' : item.type}
       </Badge>
       <span className={styles.itemLabel}>
         {item.label}
@@ -134,6 +141,11 @@ function ContributionRow({ item }: { item: MyContribution }) {
           <Link prefetch={false} href={`/companies/${item.companySlug}`} className={styles.itemCompany}>
             {' · '}
             {item.companyName}
+          </Link>
+        ) : item.investorName && item.investorSlug ? (
+          <Link prefetch={false} href={`/investors/${item.investorSlug}`} className={styles.itemCompany}>
+            {' · '}
+            {item.investorName}
           </Link>
         ) : null}
       </span>

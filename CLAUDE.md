@@ -240,7 +240,18 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   open-data project's audit trail. `noindex, follow`, so it never competes with the
   profile in search.
 - `/admin/users` — account list: search, ban/unban (a ban revokes sessions and rejects
-  the user's pending queue), make/revoke admin.
+  the user's pending queue), and one "Make user / contributor / admin" button per other role
+  (a downgrade revokes the API keys the new role no longer permits; a ban revokes all).
+- `/profile/api-keys` — self-serve API keys for the public API (`/v1`, see Backend). A `USER`
+  sees an `EmptyState` saying admins grant access; an unverified contributor sees
+  `VerifyEmailBanner` and no form; a verified `CONTRIBUTOR`/`ADMIN` sees their active keys
+  (one revoke `<form>` per row) and `ApiKeyForm` (RHF + zod, `lib/validation/api-key.ts`; a
+  scope `SelectField` for admins only). The secret is shown **once**, in the reveal panel the
+  create action returns it to — never stored or re-fetchable. `lib/api-keys.ts` is the seam.
+- `/developers` — the public API guide (auth, scopes, limits, IP allowlist, writing data,
+  errors), every number read from the `@repo/api` constants (`API_KEY_LIMITS`, …). Links to
+  Swagger UI at `/v1/docs`, which the **API** serves — so it is a plain `<a>`, not a `Link`.
+  In the sitemap and the footer ("API"); `/v1/` itself is robots-disallowed.
 - `/admin` — moderation queue (ADMIN only). `/admin/login` signs in via
   `app/api/admin/login` which stores the JWT in an httpOnly `capbase_token` cookie.
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
@@ -253,13 +264,14 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   admin-shaped. Never link to `/admin` from the public site. **Both queues are
   paged and no admin read may load a whole status**: APPROVED is every ingested row (~255k), and
   loading it ran the API out of heap. Submissions page by cursor (`before` ← `nextCursor`,
-  `SUBMISSION_PAGE_SIZE`; eight tables merged on `(createdAt desc, type, id desc)`, so an
+  `SUBMISSION_PAGE_SIZE`; nine tables merged on `(createdAt desc, type, id desc)`, so an
   offset would load every row above it from each), merges by page number (`MERGE_PAGE_SIZE`,
   windowed across signals in `MERGE_SIGNALS` order). Every admin page is Tailwind +
   `components/ui` inside `PageContainer` (so it shares the header's left edge), with filter pills
   from `app/admin/FilterLink.tsx`. Copy **`merges/page.tsx`** (header, `FilterLink` pills,
   `Card` rows, one `<form action={fn.bind(null, …)}>` per button) for any new admin page. The
-  queue renders each submission as an **open** `Card` (every field visible, no expand), ending
+  queue renders each submission as an **open** `Card` (every field visible, no expand; an
+  `investorProposal` shows the same field diff as a company proposal and links the firm), ending
   in one form whose Approve/Reject buttons pick the action via `formAction`. The reason is sent
   only on reject. The web layer does no
   per-action auth; the API's `@Roles('ADMIN')` on `AdminController` is the gate.
@@ -273,7 +285,7 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 - `/verify-email?token=` — spends a verification link on a **button press, never on load**
   (mail scanners open every link and would burn the token). Signed-in, unverified, non-admin
   users see `components/VerifyEmailBanner.tsx` (with a "Resend link" button) on `/profile`,
-  `/profile/settings`, `/contribute` and `/companies/[slug]/contribute`. Robots-disallowed,
+  `/profile/settings`, `/profile/api-keys`, `/contribute` and `/companies/[slug]/contribute`. Robots-disallowed,
   `noindex`, `no-referrer`.
 - `/report/[type]/[slug]` — the public report form for a company/investor/person profile
   (linked from each profile's footer). Anonymous even when signed in: `lib/reports.ts` sends
@@ -314,7 +326,9 @@ Run the web app with `yarn dev` (it serves on port 3001). It expects the API at
 
 ## Backend (apps/api)
 
-NestJS 11 REST API on port 3000. Auth = JWT + roles (USER/ADMIN), bcrypt. Every
+NestJS 11 REST API on port 3000. Auth = JWT + roles (USER/CONTRIBUTOR/ADMIN), bcrypt; plus
+personal API keys for the public `/v1` surface (below). `CONTRIBUTOR` is granted by an admin
+only; it moderates nothing, it may mint contributor keys and is always unlocked. Every
 crowdsourced row carries `moderationStatus` (PENDING/APPROVED/REJECTED); public reads
 return only APPROVED, `/admin/*` (RBAC) lists pending and flips status. Services map
 Prisma rows → shared `@repo/api` types (`src/companies/company.mapper.ts`). DTOs use
@@ -383,7 +397,7 @@ identity: `JwtStrategy` re-reads the user, so role, ban and `tokenVersion` come 
 every profile for `CONTRIBUTION_WINDOW_DAYS` (30) — both constants in `@repo/api`
 `domain/contributions.ts`, which the web copy reads too. The rule lives in **one** place,
 `UsersService.accessFor(viewer?)` → `ViewerAccess { unlocked, unlockedUntil }`: anonymous is
-locked, an ADMIN is unlocked with no query, everyone else is unlocked while their latest
+locked, an ADMIN or CONTRIBUTOR is unlocked with no query, everyone else is unlocked while their latest
 APPROVED row (any reviewable type, proposals included) is inside the window. `unlockedUntil`
 is still reported after it lapses so the UI can say when. Every read that needs it calls
 `accessFor` — `getCompanyDetail`, `GET /auth/me/contributions`, `GET /companies/featured` —
@@ -435,6 +449,48 @@ should count passes `forwardedForHeaders()` itself, like `app/api/companies/sear
 Client components import the 429 text from `lib/rate-limit.ts`, never from `lib/api.ts`,
 which is server-only.
 
+**Public API (`/v1`, `src/v1/`).** `V1Module`'s three controllers (read, write, admin) are the
+API's **entire** public surface — nginx forwards `/v1/` and nothing else. They call the
+website's own services and DTOs, so validation, `attested`, attribution, citations and
+visibility are identical. Auth is a **personal API key** only (`Authorization: Bearer cbk_…`;
+`ApiKeyGuard`, via `@ApiKeyAuth()`/`@AdminKey()`): a JWT is refused on `/v1` and a key
+everywhere else. `ApiKeysService` (`src/api-keys/`) mints `cbk_<8 base62>_<43 base64url>`,
+stores only the sha256 (`ApiKey.hash`; `prefix` is the lookup handle) and on every request
+checks: unrevoked, owner unbanned, owner's **current** role still permits the key's scope
+(`scopesForRole` in `@repo/api` — the scope is a ceiling), owner verified (admins exempt,
+`EMAIL_UNVERIFIED`), and the request IP inside the key's `allowedCidrs` (Node `BlockList`,
+IPv4-mapped addresses normalised). 401 for a dead key, 403 for scope/IP/unverified. A key
+**is** its owner: `RequestUser` gains `apiKey { id, scope, prefix }`, so every service call,
+the pending cap and revisions work unchanged. Writes use `@KeyContribution()` (the
+`PendingCapGuard`, at `MAX_PENDING_API_SUBMISSIONS` 500 for key traffic) — no Turnstile.
+Contributor-key writes land PENDING; **admin-key writes are published** by `V1WriteService.publish`
+calling `AdminService.moderate(…, 'APPROVED')` right after the create — two steps, not one
+transaction: if the approval fails the row stays PENDING (500 naming its id). Admin keys also get
+`GET /v1/submissions` + `POST /v1/submissions/:type/:id/approve|reject`; no deletes, merges, bans,
+roles or suppression over `/v1`. `GET /v1/companies?domain=` is an exact host match
+(`normalizeDomain` in `@repo/api`; contributed domains are stored normalised; indexed) for
+de-duplication. Keys are managed with JWT routes `GET|POST /auth/me/api-keys`, `DELETE
+/auth/me/api-keys/:id` (`MAX_ACTIVE_API_KEYS` 5); `AdminUsersService.update` revokes keys in the
+role/ban transaction (`revokeForRole`). The throttler keys a key on `key:<id>` (never
+admin-exempt, never skipped as an internal read) and `V1ReadThrottle`/`V1WriteThrottle` size it
+by scope from `API_KEY_LIMITS`; the guard and throttler share one key lookup per request.
+**OpenAPI**: `setupApiDocs` (`src/v1/docs.ts`, called in `main.ts`) serves Swagger UI at
+`/v1/docs` and the document at `/v1/openapi.json`, public, `include: [V1Module]` only. Bodies and
+query params come from the DTO classes through the `@nestjs/swagger` CLI plugin (`nest-cli.json`;
+`test/swagger-plugin.js` does the same for e2e) — so `apps/api` pins the **same TypeScript as the
+hoisted root** (the plugin loads the root copy; two versions crash the transformer). Responses are
+described per route with `@ApiOperation`/`@ApiOkResponse`. Guide for callers: `/developers`.
+
+**Investor-firm edits** (`investorProposal`, a ninth reviewable type, `/v1` only — no web form):
+`InvestorChangeProposal` holds an `InvestorEditFields` diff (`INVESTOR_EDIT_FIELDS` whitelist;
+ADV facts are ingest-owned). `InvestorsService.proposeChange` drops unchanged keys (400 if
+nothing is left, 404 for a hidden/merged firm). Approval (`applyInvestorProposal`) updates the
+firm and stores the replaced values in `previous` inside the transaction — **no Revision and no
+Citation** (a firm has no company timeline, and there is no firm-level citable type), so
+`CitableType`/`RevisableType` exclude it. Every table enumeration (queue, counts, pending cap,
+`listContributions`, ban sweep, digest) includes it; its emails link `/investors/<slug>` and a
+rejection points at `/developers`. An ADV/Wikidata re-ingest may re-set an edited field.
+
 Errors go to self-hosted GlitchTip via `@sentry/nestjs` (`src/instrument.ts`, imported
 first in `main.ts`; `SentryGlobalFilter` reports 5xx, never 4xx). No-op without `SENTRY_DSN`.
 The same pattern is in `apps/jobs` and, as `@sentry/nextjs` in `instrumentation.ts` plus a
@@ -449,6 +505,10 @@ Single source of truth for the schema. Holds `prisma/schema.prisma`, `prisma/mig
 in `prisma.config.ts` (reads `DATABASE_URL`), not the schema. Money is `BigInt`. Contributable
 Company/FundingRound rows — and the ingest-only `Fund` — also have
 `externalSource`/`externalId` (`@@unique`) for idempotent ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
+
+`ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,
+`allowedCidrs`, `lastUsedAt` debounced to once a minute, `revokedAt`); `InvestorChangeProposal`
+holds investor-firm edits (see Backend). `Company.domain` is indexed for `?domain=`.
 
 `User.emailVerifiedAt` (plus `EmailVerificationToken`) gates contributions. The
 `email_verification` migration backfilled every pre-existing user as verified
@@ -475,7 +535,7 @@ because Postgres treats NULLs as distinct, which would defeat the
 change log, anchored to a company so one timeline covers the company row and every child.
 
 `CitableType` is a **superset** of the reviewable types, not an alias for them: it is
-`Exclude<ReviewableType, 'proposal'> | 'fund'`. Funds are citable without being reviewable —
+`Exclude<ReviewableType, 'proposal' | 'investorProposal'> | 'fund'`. Funds are citable without being reviewable —
 they are ingest-only, so widening it gives them citations without dragging them into
 `countsByType` or `moderate()`. `RevisableType` (`apps/api/src/provenance/revision.util.ts`)
 stays narrow.
@@ -799,8 +859,11 @@ name parsed from the User-Agent (one bucket per crawler across all its IPs; sear
 exempt) — a per-IP limit never caught GPTBot, which spread its load over 54 addresses and
 starved the API's DB pool into 504s. Server actions are POSTs to the page URL,
 so any new form under `location /` is covered by `writes` with no nginx change. The API is
-never public (web → api is container-to-container); its throttler is the per-user backstop
-(see Backend). **Cloudflare-ready**: `conf.d/cloudflare-realip.conf` (generated by
+public **only under `/v1/`** (`location ^~ /v1/` → `api:3000`, its own per-IP `apikeys` zone
+10 r/s + 40 burst — never `crawlers`, which would put every `curl`/`python-requests` caller in
+one bucket — and `X-Forwarded-For` **overwritten** with `$remote_addr`, since the API keys rate
+limits and IP allowlists on it); every other API route stays container-to-container. Its
+throttler is the per-user / per-key backstop (see Backend). **Cloudflare-ready**: `conf.d/cloudflare-realip.conf` (generated by
 `make nginx-cloudflare-ips`) takes `$remote_addr` from `CF-Connecting-IP`, but only for a
 peer inside a Cloudflare range. Otherwise every visitor behind one edge would share a
 rate-limit bucket. It is inert while the record isn't proxied. Key targets:

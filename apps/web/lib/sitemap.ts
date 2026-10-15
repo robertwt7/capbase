@@ -34,6 +34,7 @@ const STATIC_PATHS = [
   '/about',
   '/faq',
   '/data',
+  '/developers',
   '/alternatives/crunchbase',
   '/alternatives/pitchbook',
   '/terms',

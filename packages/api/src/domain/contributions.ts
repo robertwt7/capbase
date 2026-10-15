@@ -61,6 +61,9 @@ export interface MyContribution {
   label: string;
   companySlug: string | null;
   companyName: string | null;
+  /** The firm an investor edit targets; null for every other type. */
+  investorSlug: string | null;
+  investorName: string | null;
   moderationStatus: ReviewStatus;
   createdAt: string;
 }

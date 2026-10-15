@@ -1,10 +1,18 @@
-import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
+  normalizeDomain,
   type Citation,
   type CountryFacet,
   type EntityIdentifierRef,
   type InvestorDetailResponse,
+  type InvestorEditFields,
   type InvestorListQuery,
   type InvestorSlugEntry,
   type InvestorSummary,
@@ -23,7 +31,12 @@ import {
 } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
-import { toInvestorSummary, type InvestorWithHoldings } from './investor.mapper';
+import { CreateInvestorProposalDto } from './dto/create-investor-proposal.dto';
+import {
+  toInvestorEditFields,
+  toInvestorSummary,
+  type InvestorWithHoldings,
+} from './investor.mapper';
 
 /** How many portfolio companies to include in each investor's preview sample. */
 const PORTFOLIO_SAMPLE = 6;
@@ -128,6 +141,41 @@ export class InvestorsService {
     ]);
 
     return { items: rows.map((r) => toInvestorSummary(r as InvestorWithHoldings)), total, page, pageSize };
+  }
+
+  /**
+   * Store a field-level edit to a public firm (PENDING). Keys equal to the firm's current values
+   * are dropped; an empty diff is a 400. A hidden or merged-away firm is a 404 — an edit must
+   * target the row the public sees (follow the 301 on the read for a merged slug).
+   */
+  async proposeChange(slug: string, dto: CreateInvestorProposalDto, userId: string) {
+    const firm = await this.prisma.investor.findFirst({ where: { slug, ...PUBLIC_INVESTOR } });
+    if (!firm) throw new NotFoundException(`Investor "${slug}" not found`);
+    const current = toInvestorEditFields(firm);
+
+    const cleaned: InvestorEditFields = {};
+    for (const key of Object.keys(dto.changes) as (keyof InvestorEditFields)[]) {
+      let value = dto.changes[key];
+      if (value === undefined) continue;
+      if (key === 'domain' && typeof value === 'string') value = normalizeDomain(value) || null;
+      if (value === current[key]) continue;
+      (cleaned as Record<string, unknown>)[key] = value;
+    }
+    if (Object.keys(cleaned).length === 0) {
+      throw new BadRequestException('No changes proposed');
+    }
+
+    const created = await this.prisma.investorChangeProposal.create({
+      data: {
+        investorId: firm.id,
+        changes: cleaned as Prisma.InputJsonValue,
+        note: dto.note ?? null,
+        sourceUrl: dto.sourceUrl ?? null,
+        moderationStatus: 'PENDING',
+        submittedById: userId,
+      },
+    });
+    return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
   /** Full profile: the whole approved portfolio, not a sample, plus the largest

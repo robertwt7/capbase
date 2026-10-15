@@ -17,6 +17,7 @@ const MODELS = [
   'exitEvent',
   'diversitySignal',
   'changeProposal',
+  'investorChangeProposal',
 ] as const;
 type Model = (typeof MODELS)[number];
 type Pending = Partial<Record<Model, { count: number; oldest?: Date }>>;

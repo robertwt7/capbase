@@ -276,3 +276,19 @@ export interface Company {
    *  repeating the host as an "identifier" is noise. */
   identifiers?: EntityIdentifierRef[];
 }
+
+/**
+ * A company domain as it is stored and matched: the bare host, lower-cased, with any scheme,
+ * `www.`, port, path, query or trailing dot removed. `https://www.Example.com/about` →
+ * `example.com`. Returns '' when nothing host-like is left.
+ */
+export function normalizeDomain(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/:\d+$/, '')
+    .replace(/^www\./, '')
+    .replace(/\.$/, '');
+}

@@ -12,15 +12,12 @@ import {
 import {
   IDENTIFIABLE_TYPES,
   MERGE_STATUSES,
-  REVIEWABLE_TYPES,
   type IdentifiableType,
   type MergeQueueResponse,
   type AdminUser,
   type MergeStatus,
   type Paginated,
   type PendingSubmissionsResponse,
-  type ReviewableType,
-  type ReviewStatus,
 } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
@@ -33,9 +30,8 @@ import { ListUsersDto, UpdateUserDto } from './dto/admin-users.dto';
 import { ManualMergeCandidateDto, MergeDecisionDto } from './dto/merge.dto';
 import { ModerationDecisionDto } from './dto/moderation-decision.dto';
 import { MergeService } from './merge/merge.service';
+import { parseReviewableType, parseReviewStatus } from './submission-params';
 import { AdminUsersService } from './users/admin-users.service';
-
-const REVIEW_STATUSES: ReviewStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN')
@@ -54,14 +50,7 @@ export class AdminController {
     @Query('type') type?: string,
     @Query('before') before?: string,
   ): Promise<PendingSubmissionsResponse> {
-    const resolved = (status ?? 'PENDING') as ReviewStatus;
-    if (!REVIEW_STATUSES.includes(resolved)) {
-      throw new BadRequestException(`Invalid status "${status}"`);
-    }
-    if (type !== undefined && !REVIEWABLE_TYPES.includes(type as ReviewableType)) {
-      throw new BadRequestException(`Invalid type "${type}"`);
-    }
-    return this.admin.listSubmissions(resolved, type as ReviewableType | undefined, before);
+    return this.admin.listSubmissions(parseReviewStatus(status), parseReviewableType(type), before);
   }
 
   /** The nav badge's count, without rendering a page of the queue. */
@@ -77,12 +66,11 @@ export class AdminController {
     @Body() dto: ModerationDecisionDto,
     @CurrentUser() user: RequestUser,
   ) {
-    if (!REVIEWABLE_TYPES.includes(type as ReviewableType)) {
-      throw new BadRequestException(`Invalid submission type "${type}"`);
-    }
+    const resolved = parseReviewableType(type);
+    if (!resolved) throw new BadRequestException('Missing submission type');
     // The acting admin is recorded on every revision this decision writes; the
     // note only travels in the contributor's rejection email.
-    return this.admin.moderate(type as ReviewableType, id, dto.status, user.id, dto.note);
+    return this.admin.moderate(resolved, id, dto.status, user.id, dto.note);
   }
 
   // --- Merge queue ---------------------------------------------------------

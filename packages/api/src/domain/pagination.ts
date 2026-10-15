@@ -35,6 +35,9 @@ export interface CompanyListQuery {
   pageSize?: number;
   /** Comma-separated slug list — fetches exactly those companies (compare page). */
   slugs?: string;
+  /** Exact match on the normalised host (`normalizeDomain`). Public API only: callers check
+   *  for an existing company before creating one. */
+  domain?: string;
 }
 
 export type InvestorSort = 'portfolio' | 'name';
