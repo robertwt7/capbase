@@ -347,6 +347,9 @@ deploy-all: check-env ## [1 VPS] Build, back up, then start EVERYTHING incl. Pos
 	$(RELEASE) $(COMPOSE_ALL) build
 	@scripts/predeploy-backup.sh
 	$(RELEASE) $(COMPOSE_ALL) up -d
+# nginx resolves `web`/`api` once at startup and isn't recreated here; the new
+# containers may get different IPs, so reload it or it proxies to a stale one (502).
+	$(COMPOSE_ALL) exec nginx nginx -s reload
 	@scripts/release-images.sh promote $(GIT_SHA)
 
 .PHONY: deploy-rollback
@@ -356,6 +359,7 @@ deploy-rollback: ## [VPS] Re-run api/web/jobs on an earlier release's images, no
 	@echo "⚠️  Code rolls back; the database does NOT. If the newer release migrated the"
 	@echo "   schema, restore its capbase-predeploy-* backup too (infra/README.md → Rollback)."
 	IMAGE_TAG=$(SHA) GIT_SHA=$(SHA) $(COMPOSE_STACK) up -d --no-build api web jobs
+	$(COMPOSE_STACK) exec nginx nginx -s reload
 	@scripts/release-images.sh promote $(SHA)
 
 .PHONY: deploy-releases
