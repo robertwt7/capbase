@@ -15,7 +15,7 @@ export async function generateMetadata({
   return {
     title: 'Investor Directory — VCs, Angels & Funds',
     description:
-      'Venture firms, growth funds, and angels with their portfolio companies and sectors — free, crowdsourced investor data.',
+      'Venture firms, growth funds, angels and limited partners with their portfolios, funds and commitments — free, open investor data.',
     ...canonical(directoryCanonical('/investors', await searchParams)),
   };
 }

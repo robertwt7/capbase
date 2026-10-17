@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   ...canonical('/privacy'),
 };
 
-const LAST_UPDATED = '3 October 2026';
+const LAST_UPDATED = '17 October 2026';
 
 export default function PrivacyPage() {
   return (
@@ -47,6 +47,13 @@ export default function PrivacyPage() {
         <li>
           <strong>Server logs</strong> — IP address, user agent, and request metadata, kept for
           security and debugging.
+        </li>
+        <li>
+          <strong>Professional contact details from partners</strong> — for people who work
+          at investment firms (fund managers and institutional investors), a work email address,
+          phone number and LinkedIn profile, provided by partners. We store these and{' '}
+          <strong>never publish them</strong>: they appear on no page, in no search result and in
+          no API response.
         </li>
         <li>
           <strong>Analytics data</strong> — aggregate usage statistics via Google Analytics (see
@@ -113,10 +120,12 @@ export default function PrivacyPage() {
       <p>
         Capbase profiles describe companies and people in their public, professional capacity —
         founders, executives, investors — using public sources such as regulatory filings and
-        Wikidata. If a profile describes you and you want it corrected or removed, use the
-        &ldquo;Report an issue&rdquo; link on that profile (no account needed) or email{' '}
+        Wikidata, data provided by partners, and community contributions. If a profile describes
+        you and you want it corrected or removed, use the &ldquo;Report an issue&rdquo; link on that
+        profile (no account needed) or email{' '}
         <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>, and we will review the request. A
-        removed person profile is hidden from the Service. See our{' '}
+        removed person profile is hidden from the Service, and any contact details we stored for
+        that person (section 2) are deleted. See our{' '}
         <Link href="/takedown">takedown &amp; removal policy</Link> for what we remove and how
         quickly.
       </p>

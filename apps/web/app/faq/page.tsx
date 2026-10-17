@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 const FAQS: { q: string; a: string; link?: { href: string; label: string } }[] = [
   {
     q: 'What is Capbase?',
-    a: 'Capbase is a free, open-source database of private companies: funding rounds, investors, people, acquisitions, and exits. It is a crowdsourced alternative to closed deal databases like Crunchbase and PitchBook, built on public sources and community contributions.',
+    a: 'Capbase is a free, open-source database of private companies: funding rounds, investors, people, acquisitions, and exits. It is an open alternative to closed deal databases like Crunchbase and PitchBook, combining public records, data provided by partners, and moderated community contributions.',
   },
   {
     q: 'Is Capbase really free?',
@@ -31,12 +31,12 @@ const FAQS: { q: string; a: string; link?: { href: string; label: string } }[] =
   },
   {
     q: 'Where does the data come from?',
-    a: 'Three places: automated ingestion of public US government records (SEC EDGAR Form D, Form C, Form S-1 and Form ADV filings, and SBIR.gov research awards), enrichment from Wikidata for notable companies, and community contributions. Every crowdsourced submission is reviewed by a moderator before it appears, and every published fact links to its source.',
+    a: 'Three places: public records (SEC EDGAR Form D, Form C, Form S-1 and Form ADV filings, SBIR.gov and Innovate UK research awards, Companies House, and Wikidata for notable companies), data provided by partners (companies, deals, funds and the investors behind them), and community contributions. Every crowdsourced submission is reviewed by a moderator before it appears. Every public-record fact links to its source document; partner data carries no source marker.',
     link: { href: '/data', label: 'Every source and its terms' },
   },
   {
     q: 'How accurate is the data?',
-    a: 'Filed data reflects what companies disclosed to the SEC; Wikidata and community data are moderated but can lag or contain errors. Nothing on Capbase is financial, investment, or legal advice. If you spot an error, propose a change on the company page or email support@capbase.fyi.',
+    a: 'Filed data reflects what companies disclosed to the SEC; partner, Wikidata and community data can lag or contain errors. Nothing on Capbase is financial, investment, or legal advice. If you spot an error, propose a change on the company page or email support@capbase.fyi.',
   },
   {
     q: 'How can I contribute or fix data?',
@@ -48,11 +48,11 @@ const FAQS: { q: string; a: string; link?: { href: string; label: string } }[] =
   },
   {
     q: "How do I correct or remove my company's information?",
-    a: 'Email support@capbase.fyi, ideally from a company address, and we will review corrections or removal requests. Profiles describe companies and public figures using public sources; we take accuracy requests seriously.',
+    a: 'Email support@capbase.fyi, ideally from a company address, and we will review corrections or removal requests. Profiles describe companies and public figures using public records, data provided by partners and community contributions; we take accuracy requests seriously.',
   },
   {
     q: 'Can I use Capbase data in my own project?',
-    a: 'Yes, for non-commercial use. The Capbase database is licensed under Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0): credit "Capbase (capbase.fyi)", link to the licence, and say if you changed anything. Facts taken directly from SEC filings and SBIR.gov are public domain, and Wikidata is CC0, so those are yours to use from the original source. For commercial use of the database, email support@capbase.fyi. The code is open source under the AGPL-3.0. Please do not scrape at abusive rates.',
+    a: 'Yes, for non-commercial use. The Capbase database is licensed under Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0): credit "Capbase (capbase.fyi)", link to the licence, and say if you changed anything. Facts taken directly from SEC filings and SBIR.gov are public domain, and Wikidata is CC0, so those are yours to use from the original source. Data provided by partners is excluded: it is not covered by the licence and may not be reused from Capbase. For commercial use of the database, email support@capbase.fyi. The code is open source under the AGPL-3.0. Please do not scrape at abusive rates.',
     link: { href: '/data', label: 'Data licence and how to cite' },
   },
   {

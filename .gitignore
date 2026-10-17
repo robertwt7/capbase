@@ -73,6 +73,10 @@ infra/backup/rclone.conf
 
 # Local database dumps (make db-dump)
 backups/
+# Licensed bulk data (partner stage files, raw archives): never committed.
+*.dump
+*.tar
+partner-stage-*.sql*
 infra/.release
 
 # Rendered email previews (make mail-preview)

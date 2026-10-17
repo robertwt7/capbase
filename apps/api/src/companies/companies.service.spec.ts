@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { NotFoundException } from '@nestjs/common';
+import { SITEMAP_PAGE_SIZE } from '@repo/api';
 
 import { CompaniesService } from './companies.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -230,6 +231,8 @@ describe('CompaniesService.listSlugs (sitemap feed)', () => {
       where: { moderationStatus: 'APPROVED', mergedIntoId: null },
       select: { slug: true, updatedAt: true },
       orderBy: { slug: 'asc' },
+      skip: 0,
+      take: SITEMAP_PAGE_SIZE,
     });
     expect(entries).toEqual([
       { slug: 'helia', updatedAt: '2026-07-01T10:30:00.000Z' },
@@ -383,7 +386,18 @@ describe('CompaniesService.getCompanyHistory', () => {
 
     const { items } = await service.getCompanyHistory('helia');
 
-    expect(items[0]!.actorName).toBe('WIKIDATA');
+    expect(items[0]!.actorName).toBe('Wikidata');
+  });
+
+  it('labels partner data generically, and never leaks an unknown tag', async () => {
+    const { service } = makeService([
+      revision({ actor: 'INGEST', actorSource: 'PARTNER', actorUser: null }),
+      revision({ id: 'rev-x', actor: 'INGEST', actorSource: 'SOME_INTERNAL_TAG', actorUser: null }),
+    ]);
+
+    const { items } = await service.getCompanyHistory('helia');
+
+    expect(items.map((i) => i.actorName)).toEqual(['partner', 'automated']);
   });
 
   it('never exposes a contributor email', async () => {

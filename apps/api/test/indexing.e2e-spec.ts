@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import request from 'supertest';
+import { SITEMAP_PAGE_SIZE, type SitemapCount } from '@repo/api';
 
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
@@ -12,6 +13,10 @@ import { PrismaService } from './../src/prisma/prisma.service';
 // so this checks, per fixture, that the two agree with each other and with the
 // rule. Requires Postgres running (docker compose up); seeds and removes its
 // own rows.
+/** The sitemap reads walk every indexable row; on a full dataset (half a million people
+ *  after a partner snapshot) one takes seconds, and these tests make several. */
+const SITEMAP_TIMEOUT_MS = 60_000;
+
 describe('Indexing gate (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
@@ -25,6 +30,7 @@ describe('Indexing gate (e2e)', () => {
   /** slug → expected `indexable`. Suppressed/merged people are absent from both reads. */
   const people: Record<string, boolean> = {};
   const investors: Record<string, boolean> = {};
+  const funds: Record<string, boolean> = {};
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -165,20 +171,57 @@ describe('Indexing gate (e2e)', () => {
     investors[s('hidden-holding')] = false;
 
     investors[s('officer-firm')] = true;
+
+    // ── Funds and limited partners ────────────────────────────────────────
+    const fund = async (name: string, data: Record<string, unknown> = {}) =>
+      (
+        await prisma.fund.create({
+          data: { slug: s(name), name: `E2E ${name} ${stamp}`, managerId: fundsOnly, moderationStatus: 'APPROVED', ...data },
+          select: { id: true },
+        })
+      ).id;
+    await fund('bare-fund', { grossAssetsUsd: 101n });
+    funds[s('bare-fund')] = false;
+    await fund('sized-fund', { closedUsd: 250_000_000n });
+    funds[s('sized-fund')] = true;
+    await fund('fee-fund', { managementFeePct: 2 });
+    funds[s('fee-fund')] = true;
+    const committed = await fund('committed-fund');
+    funds[s('committed-fund')] = true;
+
+    // An LP whose only public fact is a commitment is worth indexing.
+    const lpOnly = await investor('lp-only');
+    await prisma.fundCommitment.create({
+      data: { fundId: committed, investorId: lpOnly, moderationStatus: 'APPROVED' },
+    });
+    investors[s('lp-only')] = true;
   });
 
   afterAll(async () => {
     await prisma.entityIdentifier.deleteMany({ where: { entityType: 'person', entityId: { in: personIds } } });
     await prisma.personRole.deleteMany({ where: { personId: { in: personIds } } });
     await prisma.person.deleteMany({ where: { id: { in: personIds } } });
+    await prisma.fund.deleteMany({ where: { managerId: { in: investorIds } } });
     await prisma.investor.deleteMany({ where: { id: { in: investorIds } } });
     await prisma.company.deleteMany({ where: { id: { in: companyIds } } });
     await app.close();
   });
 
+  /** Every page of a family's sitemap feed, with no slug on two pages. (Not
+   *  "the pages add up to `/count`": suites run in parallel and others create
+   *  and delete firms between the two reads.) */
   const slugSet = async (path: string) => {
-    const res = await request(app.getHttpServer()).get(path).expect(200);
-    return new Set((res.body as { slug: string }[]).map((r) => r.slug));
+    const { body: total } = await request(app.getHttpServer()).get(`${path}/count`).expect(200);
+    const slugs = new Set<string>();
+    let listed = 0;
+    for (let page = 0; page * SITEMAP_PAGE_SIZE < (total as SitemapCount).count; page++) {
+      const res = await request(app.getHttpServer()).get(`${path}?page=${page}`).expect(200);
+      const rows = res.body as { slug: string }[];
+      listed += rows.length;
+      rows.forEach((r) => slugs.add(r.slug));
+    }
+    expect(slugs.size).toBe(listed);
+    return slugs;
   };
 
   it('people: the sitemap lists exactly the profiles that are indexable', async () => {
@@ -191,7 +234,7 @@ describe('Indexing gate (e2e)', () => {
     // Neither suppressed nor merged people are listed, however many roles they hold.
     expect(sitemap.has(s('suppressed'))).toBe(false);
     expect(sitemap.has(s('merged'))).toBe(false);
-  });
+  }, SITEMAP_TIMEOUT_MS);
 
   it('investors: the sitemap lists exactly the profiles that are indexable', async () => {
     const sitemap = await slugSet('/investors/sitemap');
@@ -200,5 +243,14 @@ describe('Indexing gate (e2e)', () => {
       expect({ slug, indexable: res.body.indexable }).toEqual({ slug, indexable: expected });
       expect({ slug, inSitemap: sitemap.has(slug) }).toEqual({ slug, inSitemap: expected });
     }
-  });
+  }, SITEMAP_TIMEOUT_MS);
+
+  it('funds: the sitemap lists exactly the fund pages that are indexable', async () => {
+    const sitemap = await slugSet('/funds/sitemap');
+    for (const [slug, expected] of Object.entries(funds)) {
+      const res = await request(app.getHttpServer()).get(`/funds/${slug}`).expect(200);
+      expect({ slug, indexable: res.body.indexable }).toEqual({ slug, indexable: expected });
+      expect({ slug, inSitemap: sitemap.has(slug) }).toEqual({ slug, inSitemap: expected });
+    }
+  }, SITEMAP_TIMEOUT_MS);
 });

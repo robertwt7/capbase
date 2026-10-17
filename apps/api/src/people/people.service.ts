@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import {
   DEFAULT_PAGE_SIZE,
   PERSON_INDEX_MIN_ROLES,
+  SITEMAP_PAGE_SIZE,
   type Citation,
   type EntityIdentifierRef,
   type Paginated,
@@ -10,7 +11,7 @@ import {
   type PersonSlugEntry,
   type PersonSummary,
 } from '@repo/api';
-import type { Prisma } from '@repo/db';
+import { Prisma } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_MERGE_HOPS, PUBLIC_PERSON, PUBLIC_ROLES } from '../prisma/public-filters';
@@ -25,6 +26,35 @@ const ROLE_INCLUDE = {
   company: { select: { slug: true, name: true, domain: true } },
   investor: { select: { slug: true, name: true } },
 };
+
+/**
+ * The person-profile indexing rule (`PERSON_INDEX_MIN_ROLES` roles on live
+ * organisations, or a Wikidata QID) as a SQL predicate over `"Person" p` — the
+ * sitemap's page and count share it. Raw because Prisma can't filter on a
+ * relation count.
+ */
+const INDEXABLE_PERSON_SQL = Prisma.sql`
+  p."moderationStatus" = 'APPROVED'
+  AND p."mergedIntoId" IS NULL
+  AND p."suppressedAt" IS NULL
+  AND (
+    (SELECT count(*)
+       FROM "PersonRole" r
+       LEFT JOIN "Company" c ON c.id = r."companyId"
+      WHERE r."personId" = p.id
+        AND r."moderationStatus" = 'APPROVED'
+        AND (r."companyId" IS NULL
+             OR (c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL))
+    ) >= ${PERSON_INDEX_MIN_ROLES}
+    OR EXISTS (
+      SELECT 1
+        FROM "EntityIdentifier" e
+       WHERE e."entityType" = 'person'
+         AND e."entityId" = p.id
+         AND e.scheme = 'WIKIDATA'
+    )
+  )
+`;
 
 @Injectable()
 export class PeopleService {
@@ -250,33 +280,23 @@ export class PeopleService {
    * PUBLIC_ROLES — keep all three in step. `findOne` computes `indexable` with
    * the same rule.
    */
-  async listSlugs(): Promise<PersonSlugEntry[]> {
+  /** One `SITEMAP_PAGE_SIZE` page of the indexable people, by slug. */
+  async listSlugs(page = 0): Promise<PersonSlugEntry[]> {
     const rows = await this.prisma.$queryRaw<{ slug: string; updatedAt: Date }[]>`
       SELECT p.slug, p."updatedAt"
         FROM "Person" p
-       WHERE p."moderationStatus" = 'APPROVED'
-         AND p."mergedIntoId" IS NULL
-         AND p."suppressedAt" IS NULL
-         AND (
-           (SELECT count(*)
-              FROM "PersonRole" r
-              LEFT JOIN "Company" c ON c.id = r."companyId"
-             WHERE r."personId" = p.id
-               AND r."moderationStatus" = 'APPROVED'
-               AND (r."companyId" IS NULL
-                    OR (c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL))
-           ) >= ${PERSON_INDEX_MIN_ROLES}
-           OR EXISTS (
-             SELECT 1
-               FROM "EntityIdentifier" e
-              WHERE e."entityType" = 'person'
-                AND e."entityId" = p.id
-                AND e.scheme = 'WIKIDATA'
-           )
-         )
-       ORDER BY p."updatedAt" DESC
+       WHERE ${INDEXABLE_PERSON_SQL}
+       ORDER BY p.slug
+       LIMIT ${SITEMAP_PAGE_SIZE} OFFSET ${page * SITEMAP_PAGE_SIZE}
     `;
     return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
+  }
+
+  async countSlugs(): Promise<number> {
+    const [row] = await this.prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT count(*) AS count FROM "Person" p WHERE ${INDEXABLE_PERSON_SQL}
+    `;
+    return Number(row?.count ?? 0);
   }
 
   /**
@@ -287,13 +307,21 @@ export class PeopleService {
    * ingest auto-APPROVES every row it touches and would flip a rejected person
    * straight back on the next cron run. The ingest match index reads this
    * column and refuses to match or recreate a suppressed human.
+   *
+   * Suppressing also DELETES the person's private contact details
+   * (PersonContact), in the same transaction: a removal request covers what we
+   * store, not only what we show. Lifting a suppression does not bring them
+   * back; only a later re-ingest could.
    */
   async setSuppressed(id: string, suppressed: boolean): Promise<{ id: string; suppressedAt: string | null }> {
-    const row = await this.prisma.person.update({
+    const update = this.prisma.person.update({
       where: { id },
       data: { suppressedAt: suppressed ? new Date() : null },
       select: { id: true, suppressedAt: true },
     });
+    const row = suppressed
+      ? (await this.prisma.$transaction([update, this.prisma.personContact.deleteMany({ where: { personId: id } })]))[0]
+      : await update;
     return { id: row.id, suppressedAt: row.suppressedAt?.toISOString() ?? null };
   }
 }

@@ -165,13 +165,15 @@ const PROFILES = {
   company: { logo: true, actions: 3, facts: 8, stats: 4, sections: 3 },
   investor: { logo: true, actions: 0, facts: 4, stats: 3, sections: 3 },
   person: { logo: false, actions: 0, facts: 0, stats: 3, sections: 1 },
+  fund: { logo: false, actions: 0, facts: 6, stats: 4, sections: 3 },
 } as const;
 
 /**
  * A loading profile page, mirroring the real ones' geometry: the back link
  * (and the company's action pills), the header — logo, name, one-liner, badges
  * and fact grid — the stat strip, then a few sections of panel rows. A person
- * has no logo or fact grid; their metrics sit inside the header.
+ * has no logo or fact grid; their metrics sit inside the header. A fund has a
+ * fact grid but no logo.
  */
 export function ProfileSkeleton({
   variant,
@@ -228,6 +230,30 @@ export function ProfileSkeleton({
             ))}
           </div>
         </header>
+      ) : p.facts > 0 ? (
+        <header
+          aria-hidden="true"
+          className="grid grid-cols-[1fr_auto] items-start gap-7 border-b border-ink pt-7 pb-9 max-[860px]:grid-cols-1"
+        >
+          <div className="min-w-0">
+            {title}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Skeleton className="h-6 w-28" />
+              <Skeleton className="h-6 w-20" />
+            </div>
+            <span className="mt-4 flex h-5 items-center">
+              <Skeleton className="h-3.5 w-56 max-w-full" />
+            </span>
+          </div>
+          <div className="grid grid-cols-[repeat(3,auto)] gap-x-8 gap-y-4 max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
+            {Array.from({ length: p.facts }, (_, i) => (
+              <span key={i} className="flex flex-col gap-2 py-0.5">
+                <Skeleton className="h-2.5 w-14" />
+                <Skeleton className="h-3.5 w-20" />
+              </span>
+            ))}
+          </div>
+        </header>
       ) : (
         <header aria-hidden="true" className="border-b border-ink pt-7 pb-9">
           {title}
@@ -237,7 +263,7 @@ export function ProfileSkeleton({
         </header>
       )}
 
-      {p.logo ? (
+      {p.logo || p.facts > 0 ? (
         <div aria-hidden="true" className="flex flex-wrap gap-x-16 gap-y-3.5 border-b border-line py-8">
           <StatsSkeleton count={p.stats} size="md" />
         </div>
@@ -249,7 +275,7 @@ export function ProfileSkeleton({
           aria-hidden="true"
           // The first section under a stat strip has no rule of its own (the
           // strip's border-b is it); a person's sits straight under the header.
-          className={cn('py-8', (s > 0 || !p.logo) && 'border-t border-line')}
+          className={cn('py-8', (s > 0 || (!p.logo && p.facts === 0)) && 'border-t border-line')}
         >
           <span className="flex h-7 items-center">
             <Skeleton className="h-5 w-40" />

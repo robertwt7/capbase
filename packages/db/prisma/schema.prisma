@@ -424,6 +424,8 @@ model Investor {
   funds          Fund[]
   people         PersonRole[]
   proposals      InvestorChangeProposal[]
+  /// Commitments this firm made to funds as a limited partner.
+  commitments    FundCommitment[]
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
@@ -461,10 +463,36 @@ model Fund {
   /// Gross asset value as last reported on Form ADV Schedule D 7.B.(1). NAV at
   /// filing time, NOT capital raised — the two are different facts.
   grossAssetsUsd BigInt?
+  /// The directory's size sort key: grossAssetsUsd when Form ADV reports it,
+  /// else closedUsd — exactly the figure the directory row shows. A column
+  /// rather than an expression because Prisma can neither order by COALESCE nor
+  /// declare an expression index. Ingest refreshes it on every fund write.
+  sizeUsd BigInt?
   /// ISO 4217. Both sources report USD only; the column exists so a non-US
   /// source later cannot silently be read as dollars.
   currency String  @default("USD")
   hq       String?
+
+  /// The fund page's address. Nullable only until `backfill-fund-slugs` has
+  /// run everywhere; every write path mints one on create.
+  slug String? @unique
+  /// One of FUND_STATUSES. Only a data partner reports it; SEC funds stay null.
+  status String?
+  /// Lifecycle dates and terms, as a data partner publishes them. No public
+  /// filing reports any of these, so SEC-only funds leave them null.
+  launchDate         DateTime?
+  latestCloseDate    DateTime?
+  finalCloseDate     DateTime?
+  hardCapUsd         BigInt?
+  /// Percentages as published: 2.0 means 2%.
+  managementFeePct     Float?
+  carriedInterestPct   Float?
+  hurdleRatePct        Float?
+  targetIrrNetMinPct   Float?
+  targetIrrNetMaxPct   Float?
+  targetIrrGrossMinPct Float?
+  targetIrrGrossMaxPct Float?
+  regionFocus          String?
 
   /// SEC private fund identification number (805-XXXXXXXXXX), from Schedule D.
   secFundId String?
@@ -492,9 +520,63 @@ model Fund {
   /// declare null ordering (it ignores it when diffing, so there is no drift).
   @@index([moderationStatus, vintageYear(sort: Desc), name])
   @@index([moderationStatus, grossAssetsUsd(sort: Desc), name])
+  @@index([moderationStatus, sizeUsd(sort: Desc), name])
+  @@index([moderationStatus, status])
   @@index([moderationStatus, name])
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Fund_name_trgm_idx")
+
+  commitments FundCommitment[]
+  metrics     FundMetric[]
+}
+
+/// A limited partner's commitment to a fund. Ingest-only and auto-APPROVED, like
+/// Fund; writes no revisions (there is no company to anchor them to).
+///
+/// No unique on (fundId, investorId): an investor merge can make two rows share
+/// that pair, and — exactly as with InvestorHolding — leaving both keeps the
+/// merge reversible. (externalSource, externalId) is the idempotency key.
+model FundCommitment {
+  id         String   @id @default(cuid())
+  fundId     String
+  fund       Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  /// The LP.
+  investorId String
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  /// FX-converted comparable figure; null when the amount is undisclosed or no
+  /// rate exists for the currency.
+  amountUsd   BigInt?
+  /// As published, in `currency`. Null for a USD commitment.
+  amountLocal BigInt?
+  currency    String   @default("USD")
+
+  externalSource String?
+  externalId     String?
+
+  moderationStatus ReviewStatus @default(PENDING)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([externalSource, externalId])
+  @@index([fundId])
+  @@index([investorId])
+}
+
+/// A point-in-time figure for a fund: one row per fund per as-at date.
+model FundMetric {
+  id            String   @id @default(cuid())
+  fundId        String
+  fund          Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  asAt          DateTime
+  dryPowderUsd  BigInt?
+  aumUsd        BigInt?
+  unrealizedUsd BigInt?
+
+  externalSource String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([fundId, asAt])
 }
 
 model InvestorHolding {
@@ -568,6 +650,10 @@ model PersonRole {
   linkedinUrl String?
   title       String?
 
+  /// Private contact details for this role, when a partner supplied
+  /// them. Never read by any public path — see PersonContact.
+  contact PersonContact?
+
   // Provenance for ingested rows (e.g. SEC_EDGAR, WIKIDATA). Null for human contributions.
   externalSource String?
   externalId     String?
@@ -596,6 +682,8 @@ model Person {
   normalizedName String
 
   roles PersonRole[]
+  /// PRIVATE. See PersonContact.
+  contacts PersonContact[]
 
   /// Merge tombstone, identical in purpose to Company/Investor: the row is KEPT
   /// so its slug redirects and its identifiers stay claimed.
@@ -609,6 +697,13 @@ model Person {
   /// ingest match index reads and honours, the same way it honours mergedIntoId.
   suppressedAt DateTime?
 
+  /// Created by a source that resolves people by its own record id ONLY (a
+  /// partner's contact id). Such a person is never matched by name —
+  /// not by that source, and not by any later one — so the ingest index leaves
+  /// them out of its name map. A column rather than a lookup of their
+  /// identifiers, so the index need not hold half a million ids to know it.
+  identifierOnly Boolean @default(false)
+
   moderationStatus ReviewStatus @default(PENDING)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
@@ -619,6 +714,40 @@ model Person {
   @@index([moderationStatus, name])
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Person_name_trgm_idx")
+}
+
+/// Professional contact details for a person at one organisation, licensed
+/// from a data partner.
+///
+/// PRIVATE: no API mapper, /v1 route, search, sitemap, export or admin view
+/// selects this table, and nothing here is ever written to Revision. The only
+/// API code that touches it is the suppression delete (PeopleService) and the
+/// merge remap (MergeService); `contact-privacy.e2e-spec.ts` guards that no
+/// public response carries a value. Suppressing the person (Privacy §6)
+/// deletes these rows.
+///
+/// One row per role, not per person: contact details are firm-specific — the
+/// same human at two firms has two work emails.
+model PersonContact {
+  id       String      @id @default(cuid())
+  personId String
+  person   Person      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  roleId   String?     @unique
+  role     PersonRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  email       String?
+  phone       String?
+  linkedinUrl String?
+
+  externalSource String
+  /// The role's provenance key, e.g. `${contactId}:${firmId}`.
+  externalId     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([externalSource, externalId])
+  @@index([personId])
 }
 
 model AcquisitionDeal {

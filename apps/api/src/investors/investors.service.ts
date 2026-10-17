@@ -7,10 +7,16 @@ import {
 } from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
+  INVESTOR_COMMITMENT_PREVIEW,
+  INVESTOR_PEOPLE_PREVIEW,
+  INVESTOR_PORTFOLIO_PREVIEW,
+  SITEMAP_PAGE_SIZE,
   normalizeDomain,
   type Citation,
   type CountryFacet,
   type EntityIdentifierRef,
+  type FundStrategy,
+  type InvestorCommitmentRow,
   type InvestorDetailResponse,
   type InvestorEditFields,
   type InvestorListQuery,
@@ -58,6 +64,12 @@ const PUBLIC_HOLDINGS = {
 /** The firm's own officers (Wikidata P112/P169) that the profile lists. */
 const PUBLIC_OFFICERS = { moderationStatus: 'APPROVED' } satisfies Prisma.PersonRoleWhereInput;
 
+/** An LP's commitments that the profile lists: approved, to a published fund. */
+const PUBLIC_LP_COMMITMENTS = {
+  moderationStatus: 'APPROVED',
+  fund: PUBLIC_FUNDS,
+} satisfies Prisma.FundCommitmentWhereInput;
+
 /**
  * Worth a search engine's time: the profile shows at least one portfolio
  * company, named fund or officer. Built from the SAME filters the detail read
@@ -71,6 +83,7 @@ const INDEXABLE_INVESTOR = {
     { holdings: { some: PUBLIC_HOLDINGS } },
     { funds: { some: PUBLIC_FUNDS } },
     { people: { some: PUBLIC_OFFICERS } },
+    { commitments: { some: PUBLIC_LP_COMMITMENTS } },
   ],
 } satisfies Prisma.InvestorWhereInput;
 
@@ -178,14 +191,17 @@ export class InvestorsService {
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
-  /** Full profile: the whole approved portfolio, not a sample, plus the largest
-   *  funds we can name and the citations attesting them. */
+  /** Full profile: the largest slice of the approved portfolio (with the full
+   *  count and every sector), the largest funds we can name and the citations
+   *  attesting them. */
   async findOne(slug: string): Promise<InvestorDetailResponse> {
-    const row = await this.prisma.investor.findFirst({
+    const found = await this.prisma.investor.findFirst({
       where: { slug, ...PUBLIC_INVESTOR },
       include: {
         holdings: {
           where: PUBLIC_HOLDINGS,
+          orderBy: [{ company: { totalRaisedUsd: 'desc' } }, { id: 'asc' }],
+          take: INVESTOR_PORTFOLIO_PREVIEW,
           include: { company: COMPANY_SELECT },
         },
         funds: {
@@ -193,33 +209,102 @@ export class InvestorsService {
           orderBy: [{ grossAssetsUsd: { sort: 'desc', nulls: 'last' } }, { name: 'asc' }],
           take: FUND_PREVIEW,
         },
+        // Capped: a large firm lists thousands of staff. `peopleCount` says how
+        // many the page is not showing.
         people: {
           where: PUBLIC_OFFICERS,
-          orderBy: { since: 'desc' },
+          orderBy: [{ since: 'desc' }, { id: 'asc' }],
+          take: INVESTOR_PEOPLE_PREVIEW,
           include: { person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } } },
         },
-        _count: {
-          select: { holdings: { where: PUBLIC_HOLDINGS }, funds: { where: PUBLIC_FUNDS } },
+        commitments: {
+          where: PUBLIC_LP_COMMITMENTS,
+          orderBy: [{ amountUsd: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+          take: INVESTOR_COMMITMENT_PREVIEW,
+          include: {
+            fund: {
+              select: {
+                slug: true,
+                name: true,
+                vintageYear: true,
+                strategy: true,
+                manager: { select: { slug: true, name: true } },
+              },
+            },
+          },
         },
       },
     });
     // Returns `never` — either a 301 to the survivor, or a 404.
-    if (!row) return this.redirectOrNotFound(slug);
+    if (!found) return this.redirectOrNotFound(slug);
+
+    // Four targeted counts, each served by an index on the firm's id. Not
+    // Prisma's `_count`: that aggregates the WHOLE child table with GROUP BY
+    // before joining, which on half a million holdings and roles cost ~500 ms
+    // per profile even for a firm with none.
+    const [holdingCount, fundCount, peopleCount, commitmentCount] = await Promise.all([
+      this.prisma.investorHolding.count({ where: { investorId: found.id, ...PUBLIC_HOLDINGS } }),
+      this.prisma.fund.count({ where: { managerId: found.id, ...PUBLIC_FUNDS } }),
+      this.prisma.personRole.count({ where: { investorId: found.id, ...PUBLIC_OFFICERS } }),
+      this.prisma.fundCommitment.count({ where: { investorId: found.id, ...PUBLIC_LP_COMMITMENTS } }),
+    ]);
+    const row = {
+      ...found,
+      _count: { holdings: holdingCount, funds: fundCount, people: peopleCount, commitments: commitmentCount },
+    };
 
     const funds = row.funds.map(toFund);
     const summary = toInvestorSummary(row as unknown as InvestorWithHoldings);
+    // The holdings above are a capped slice, so the sector list is read across
+    // the whole portfolio rather than off the sample.
+    if (summary.portfolioCount > row.holdings.length) {
+      summary.sectors = (
+        await this.prisma.company.findMany({
+          where: {
+            ...PUBLIC_COMPANY_RELATION,
+            primarySector: { not: null },
+            investors: { some: { investorId: row.id, moderationStatus: 'APPROVED' } },
+          },
+          distinct: ['primarySector'],
+          select: { primarySector: true },
+        })
+      )
+        .map((c) => c.primarySector!)
+        .sort((a, b) => a.localeCompare(b));
+    }
     return {
       ...summary,
       identifiers: await this.loadIdentifiers(row.id),
       // Officers Wikidata names on the firm itself. Same role rows as a
       // company's people, carrying investorId instead of companyId.
       people: row.people.map(toPerson),
+      peopleCount: row._count.people,
+      commitments: row.commitments.map(
+        (c): InvestorCommitmentRow => ({
+          id: c.id,
+          fund: {
+            slug: c.fund.slug,
+            name: c.fund.name,
+            vintageYear: c.fund.vintageYear,
+            strategy: c.fund.strategy as FundStrategy | null,
+          },
+          manager: { slug: c.fund.manager.slug, name: c.fund.manager.name },
+          amountUsd: c.amountUsd === null ? null : Number(c.amountUsd),
+          amountLocal: c.amountLocal === null ? null : Number(c.amountLocal),
+          currency: c.currency,
+        }),
+      ),
+      commitmentCount: row._count.commitments,
       funds,
       // What we can name, as against `fundCount` — what the firm told the SEC.
       namedFundCount: row._count.funds,
       citations: await this.loadFundCitations(funds.map((f) => f.id)),
       // INDEXABLE_INVESTOR, read off the counts this response already carries.
-      indexable: summary.portfolioCount > 0 || row._count.funds > 0 || row.people.length > 0,
+      indexable:
+        summary.portfolioCount > 0 ||
+        row._count.funds > 0 ||
+        row._count.people > 0 ||
+        row._count.commitments > 0,
     };
   }
 
@@ -294,12 +379,20 @@ export class InvestorsService {
    * `noindex`, and join the sitemap on their own once a holding, fund or
    * officer arrives.
    */
-  async listSlugs(): Promise<InvestorSlugEntry[]> {
+  /** One `SITEMAP_PAGE_SIZE` page, by slug: a unique, stable order, so a row
+   *  updated between two page reads can neither repeat nor go missing. */
+  async listSlugs(page = 0): Promise<InvestorSlugEntry[]> {
     const rows = await this.prisma.investor.findMany({
       where: INDEXABLE_INVESTOR,
       select: { slug: true, updatedAt: true },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { slug: 'asc' },
+      skip: page * SITEMAP_PAGE_SIZE,
+      take: SITEMAP_PAGE_SIZE,
     });
     return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
+  }
+
+  countSlugs(): Promise<number> {
+    return this.prisma.investor.count({ where: INDEXABLE_INVESTOR });
   }
 }

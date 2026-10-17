@@ -13,7 +13,8 @@ import { IngestService } from './ingest/ingest.service';
 // ingest pass and exits. Handy for first-load / manual backfills without
 // waiting for the cron. `source` is `all` (default) or a source name
 // (SEC_EDGAR | WIKIDATA | SEC_ADV | SEC_ADV_FUNDS | SEC_FORM_C | SBIR |
-// INNOVATE_UK | COMPANIES_HOUSE | SEC_S1).
+// INNOVATE_UK | COMPANIES_HOUSE | PARTNER | SEC_S1). PARTNER reads the
+// `partner_stage` schema and honours PARTNER_STAGES (see partner.source.ts).
 async function main() {
   const logger = new Logger('Backfill');
   const days = Number(process.argv[2] ?? process.env.INGEST_DAYS ?? '90');

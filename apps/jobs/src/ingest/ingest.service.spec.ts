@@ -8,6 +8,7 @@ import type {
   NormalizedFund,
   NormalizedInvestorFirm,
   NormalizedRecord,
+  SourceBatch,
 } from '../sources/ingestion-source';
 
 /** A full company row as the enrich path reads it back. */
@@ -127,6 +128,7 @@ function mockPrisma(
   existingFunds: ReturnType<typeof fundRow>[] = [],
   seedIdentifiers: IdentifierRow[] = [],
   existingPeople: ReturnType<typeof personRow>[] = [],
+  existingRounds: Record<string, unknown>[] = [],
 ) {
   let created = 0;
   let fundsCreated = 0;
@@ -173,11 +175,34 @@ function mockPrisma(
       ),
     },
     fundingRound: {
-      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async (args) => ({
+        id: `r-${(args as { where: { externalSource_externalId: { externalId: string } } }).where.externalSource_externalId.externalId}`,
+      })),
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingRounds),
+      update: jest.fn<(args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>>(
+        async (args) => ({ id: args.where.id }),
+      ),
+      aggregate: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({ _sum: { amountUsd: null } })),
+    },
+    roundInvestor: {
+      deleteMany: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({ count: 0 })),
+      createMany: jest.fn<(args: { data: Record<string, unknown>[] }) => Promise<unknown>>(async () => ({})),
+    },
+    fundCommitment: {
+      upsert: jest.fn<(args: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
+    },
+    fundMetric: {
+      upsert: jest.fn<(args: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
     },
     personRole: {
-      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+      upsert: jest.fn<(args: unknown) => Promise<unknown>>(async (args) => ({
+        id: `role-${(args as { where: { externalSource_externalId: { externalId: string } } }).where.externalSource_externalId.externalId}`,
+      })),
     },
+    personContact: {
+      upsert: jest.fn<(args: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
+    },
+    $executeRaw: jest.fn<(...args: unknown[]) => Promise<number>>(async () => 0),
     person: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingPeople),
       create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<{ id: string }>>(
@@ -1908,5 +1933,491 @@ describe('IngestService tombstones', () => {
 
     expect(prisma.investor.create).not.toHaveBeenCalled();
     expect(prisma.investor.update.mock.calls[0]![0].where).toEqual({ id: 'i-keep' });
+  });
+});
+
+describe('IngestService streaming sources (Phase 2 seams)', () => {
+  function streamSource(batches: SourceBatch[]): IngestionSource {
+    return {
+      name: 'PARTNER',
+      fetch: async () => {
+        throw new Error('a streaming source is never fetched');
+      },
+      stream: async function* () {
+        for (const b of batches) yield b;
+      },
+    };
+  }
+
+  const serviceFor = (prisma: ReturnType<typeof mockPrisma>, batches: SourceBatch[]) =>
+    new IngestService(prisma as unknown as PrismaService, [streamSource(batches)], config());
+
+  const pid = (value: string) => ({ scheme: 'PARTNER' as const, value });
+
+  const partnerFirm = (over: Partial<NormalizedInvestorFirm> = {}): NormalizedInvestorFirm => ({
+    externalId: '501',
+    name: 'Granite Peak Partners',
+    type: 'Private equity',
+    identifiers: [pid('501')],
+    ...over,
+  });
+
+  const fundRef = { externalId: 'F1', name: 'Granite Peak Fund II', manager: { externalId: '501', identifier: pid('501') } };
+
+  const partnerFund = (over: Partial<NormalizedFund> = {}): NormalizedFund => ({
+    externalId: 'F1',
+    name: 'Granite Peak Fund II',
+    manager: { externalId: '501', identifier: pid('501') },
+    status: 'Closed',
+    closedUsd: 400_000_000,
+    finalCloseDate: '2019-06-30',
+    managementFeePct: 2,
+    carriedInterestPct: 20,
+    ...over,
+  });
+
+  it('applies a batch in dependency order and never calls fetch', async () => {
+    const prisma = mockPrisma();
+    const order: string[] = [];
+    prisma.investor.create.mockImplementation(async () => {
+      order.push('investor');
+      return { id: 'i-new-1' };
+    });
+    prisma.fund.create.mockImplementation(async () => {
+      order.push('fund');
+      return { id: 'f-new-1' };
+    });
+    prisma.company.create.mockImplementation(async () => {
+      order.push('company');
+      return { id: 'c-new' };
+    });
+    prisma.fundCommitment.upsert.mockImplementation(async () => {
+      order.push('commitment');
+      return {};
+    });
+    prisma.fundMetric.upsert.mockImplementation(async () => {
+      order.push('metric');
+      return {};
+    });
+
+    const result = await serviceFor(prisma, [
+      {
+        // Deliberately listed out of order: the service, not the object, fixes it.
+        metrics: [{ fund: fundRef, asAt: '2024-06-30', aumUsd: 1 }],
+        commitments: [
+          { externalId: 'F1:777', fund: fundRef, investor: { externalId: '777', identifier: pid('777') }, amountUsd: 5 },
+        ],
+        records: [record({ source: 'PARTNER' })],
+        funds: [partnerFund()],
+        investors: [partnerFirm(), partnerFirm({ externalId: '777', name: 'State Pension Plan', type: 'Pension fund', identifiers: [pid('777')] })],
+      },
+    ]).run(RUN);
+
+    expect(order).toEqual(['investor', 'investor', 'fund', 'company', 'commitment', 'metric']);
+    expect(result).toMatchObject({ investors: 2, funds: 1, upserted: 1 });
+  });
+
+  it('resolves a fund manager by the source id, mints a slug and records the terms', async () => {
+    const prisma = mockPrisma();
+    await serviceFor(prisma, [{ investors: [partnerFirm()], funds: [partnerFund()] }]).run(RUN);
+
+    expect(prisma.fund.create.mock.calls[0]![0].data).toMatchObject({
+      managerId: 'i-new-1',
+      slug: 'granite-peak-fund-ii',
+      status: 'Closed',
+      closedUsd: 400_000_000n,
+      sizeUsd: 400_000_000n,
+      finalCloseDate: new Date('2019-06-30'),
+      managementFeePct: 2,
+      carriedInterestPct: 20,
+      externalSource: 'PARTNER',
+      externalId: 'F1',
+    });
+  });
+
+  it('resolves a manager the source MATCHED earlier through its identifier', async () => {
+    // A prior run matched partner firm 501 to an existing ADV row, so the row
+    // keeps its own provenance and only the identifier records the link.
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-adv', externalSource: 'SEC_ADV', externalId: '999' })],
+      [],
+      [{ scheme: 'PARTNER', value: '501', entityType: 'investor', entityId: 'i-adv', source: 'PARTNER' }],
+    );
+    await serviceFor(prisma, [{ funds: [partnerFund()] }]).run(RUN);
+    expect(prisma.fund.create.mock.calls[0]![0].data).toMatchObject({ managerId: 'i-adv' });
+  });
+
+  it('skips a fund whose manager is not held, and never by name', async () => {
+    const prisma = mockPrisma([], [investorRow({ id: 'i-namesake', name: 'Granite Peak Partners' })]);
+    const result = await serviceFor(prisma, [{ funds: [partnerFund()] }]).run(RUN);
+    expect(result.funds).toBe(0);
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+  });
+
+  it('enriches a same-manager fund by name, and edges still find it on a later run', async () => {
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-adv', externalSource: 'SEC_ADV', externalId: '999' })],
+      [fundRow({ id: 'f-adv', name: 'Granite Peak Fund II, L.P.', managerId: 'i-adv' })],
+      [{ scheme: 'PARTNER', value: '501', entityType: 'investor', entityId: 'i-adv', source: 'PARTNER' }],
+    );
+    await serviceFor(prisma, [
+      {
+        funds: [partnerFund()],
+        metrics: [{ fund: fundRef, asAt: '2024-06-30', aumUsd: 9 }],
+      },
+    ]).run(RUN);
+
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+    expect(prisma.fund.update.mock.calls[0]![0]).toMatchObject({ where: { id: 'f-adv' } });
+    expect(prisma.fundMetric.upsert.mock.calls[0]![0]).toMatchObject({
+      where: { fundId_asAt: { fundId: 'f-adv', asAt: new Date('2024-06-30') } },
+    });
+  });
+
+  it('matches a same-manager fund even when another manager holds a namesake (stable re-runs)', async () => {
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-adv', externalSource: 'SEC_ADV', externalId: '999' }), investorRow({ id: 'i-other' })],
+      [
+        fundRow({ id: 'f-adv', name: 'Granite Peak Fund II, L.P.', managerId: 'i-adv' }),
+        // Another firm's fund with the same normalized name: the global index
+        // drops the name, but the manager-scoped one must still resolve.
+        fundRow({ id: 'f-namesake', name: 'Granite Peak Fund II', managerId: 'i-other' }),
+      ],
+      [{ scheme: 'PARTNER', value: '501', entityType: 'investor', entityId: 'i-adv', source: 'PARTNER' }],
+    );
+    await serviceFor(prisma, [{ funds: [partnerFund()] }]).run(RUN);
+    expect(prisma.fund.create).not.toHaveBeenCalled();
+    expect(prisma.fund.update.mock.calls[0]![0]).toMatchObject({ where: { id: 'f-adv' } });
+  });
+
+  it('upserts a commitment on its provenance key, and skips one with a missing end', async () => {
+    const prisma = mockPrisma(
+      [],
+      [
+        investorRow({ id: 'i-lp', externalSource: 'PARTNER', externalId: '777' }),
+        investorRow({ id: 'i-gp', externalSource: 'PARTNER', externalId: '501' }),
+      ],
+      [fundRow({ id: 'f-p', managerId: 'i-gp', externalSource: 'PARTNER', externalId: 'F1' })],
+    );
+    await serviceFor(prisma, [
+      {
+        commitments: [
+          {
+            externalId: 'F1:777',
+            fund: fundRef,
+            investor: { externalId: '777' },
+            currency: 'EUR',
+            amountLocal: 20_000_000,
+            amountUsd: 22_000_000,
+          },
+          { externalId: 'F1:888', fund: fundRef, investor: { externalId: '888' } },
+          { externalId: 'F9:777', fund: { ...fundRef, externalId: 'F9', name: 'Unknown' }, investor: { externalId: '777' } },
+        ],
+      },
+    ]).run(RUN);
+
+    expect(prisma.fundCommitment.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.fundCommitment.upsert.mock.calls[0]![0]).toMatchObject({
+      where: { externalSource_externalId: { externalSource: 'PARTNER', externalId: 'F1:777' } },
+      create: {
+        fundId: 'f-p',
+        investorId: 'i-lp',
+        currency: 'EUR',
+        amountLocal: 20_000_000n,
+        amountUsd: 22_000_000n,
+        moderationStatus: 'APPROVED',
+      },
+    });
+  });
+
+  it('replaces only this source’s firms on a round, by firm id, idempotently', async () => {
+    const prisma = mockPrisma([], [
+      investorRow({ id: 'i-gp', name: 'Granite Peak Partners', externalSource: 'PARTNER', externalId: '501' }),
+    ]);
+    const r = record({
+      source: 'PARTNER',
+      rounds: [
+        {
+          externalId: 'D1',
+          name: 'Series A',
+          date: '2022-01-10',
+          amountUsd: 5_000_000,
+          investors: [{ externalId: '501', lead: true }, { externalId: 'gone' }],
+        },
+      ],
+    });
+    await serviceFor(prisma, [{ records: [r] }]).run(RUN);
+    await serviceFor(prisma, [{ records: [r] }]).run(RUN);
+
+    expect(prisma.roundInvestor.deleteMany.mock.calls[0]![0]).toEqual({
+      where: { roundId: 'r-D1', investorId: { in: ['i-gp'] } },
+    });
+    expect(prisma.roundInvestor.createMany.mock.calls[0]![0]).toEqual({
+      data: [{ roundId: 'r-D1', investorId: 'i-gp', name: 'Granite Peak Partners', lead: true }],
+    });
+    // The re-run issues the same delete-then-create, so nothing accumulates.
+    expect(prisma.roundInvestor.createMany.mock.calls[1]![0]).toEqual(
+      prisma.roundInvestor.createMany.mock.calls[0]![0],
+    );
+  });
+
+  describe('identifier-only people and private contacts', () => {
+    const contactPerson = (over: Record<string, unknown> = {}) => ({
+      externalId: 'C1:501',
+      name: 'Jane Founder',
+      role: 'Partner',
+      title: 'Partner',
+      since: 2026,
+      identifiers: [pid('C1')],
+      identifierOnly: true,
+      contact: { email: 'jane@example.test', phone: '+1 555 0100', linkedinUrl: 'https://www.linkedin.com/in/jane' },
+      ...over,
+    });
+
+    it('marks the people it creates as identifier-only', async () => {
+      const prisma = mockPrisma();
+      await serviceFor(prisma, [{ investors: [partnerFirm({ people: [contactPerson()] })] }]).run(RUN);
+      expect(prisma.person.create.mock.calls[0]![0].data).toMatchObject({ identifierOnly: true });
+    });
+
+    it('never name-merges an identifier-only person', async () => {
+      const prisma = mockPrisma([], [], [], [], [personRow({ id: 'p-formd' })]);
+      await serviceFor(prisma, [{ investors: [partnerFirm({ people: [contactPerson()] })] }]).run(RUN);
+
+      expect(prisma.person.create).toHaveBeenCalledTimes(1);
+      const role = prisma.personRole.upsert.mock.calls[0]![0] as unknown as { create: Record<string, unknown> };
+      expect(role.create.personId).toBe('p-new-1');
+    });
+
+    it('does not let a later name-keyed person attach to an identifier-only one', async () => {
+      const prisma = mockPrisma();
+      const svc = new IngestService(
+        prisma as unknown as PrismaService,
+        [
+          streamSource([{ investors: [partnerFirm({ people: [contactPerson()] })] }]),
+          stubSource([record({ people: [{ externalId: 'x:jane', name: 'Jane Founder', role: 'CEO', since: 2020 }] })]),
+        ],
+        config(),
+      );
+      await svc.run(RUN);
+      expect(prisma.person.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps a partner person out of name matching on a LATER run too', async () => {
+      // A previous partner run created p-partner and gave them a PARTNER id.
+      const prisma = mockPrisma(
+        [],
+        [],
+        [],
+        [{ scheme: 'PARTNER', value: 'C1', entityType: 'person', entityId: 'p-partner', source: 'PARTNER' }],
+        [personRow({ id: 'p-partner', identifierOnly: true })],
+      );
+      // Now a name-keyed source (Form D) names a "Jane Founder".
+      await serviceWith(prisma, [record({ people: [{ externalId: 'x:jane', name: 'Jane Founder', role: 'CEO', since: 2020 }] })]).run(RUN);
+      expect(prisma.person.create).toHaveBeenCalledTimes(1);
+      const role = prisma.personRole.upsert.mock.calls[0]![0] as unknown as { create: Record<string, unknown> };
+      expect(role.create.personId).toBe('p-new-1');
+    });
+
+    it('matches the same contact at a second firm through the identifier', async () => {
+      const prisma = mockPrisma();
+      await serviceFor(prisma, [
+        {
+          investors: [
+            partnerFirm({ people: [contactPerson()] }),
+            partnerFirm({ externalId: '502', name: 'Other Firm', identifiers: [pid('502')], people: [contactPerson({ externalId: 'C1:502' })] }),
+          ],
+        },
+      ]).run(RUN);
+      expect(prisma.person.create).toHaveBeenCalledTimes(1);
+      expect(prisma.personRole.upsert).toHaveBeenCalledTimes(2);
+    });
+
+    it('stores contact details privately, keyed on the role, never on a public column', async () => {
+      const prisma = mockPrisma();
+      await serviceFor(prisma, [{ investors: [partnerFirm({ people: [contactPerson()] })] }]).run(RUN);
+
+      const role = prisma.personRole.upsert.mock.calls[0]![0] as unknown as { create: Record<string, unknown> };
+      expect(role.create.linkedinUrl).toBeNull();
+      expect(JSON.stringify(role)).not.toContain('jane@example.test');
+      expect(prisma.personContact.upsert.mock.calls[0]![0]).toEqual({
+        where: { externalSource_externalId: { externalSource: 'PARTNER', externalId: 'C1:501' } },
+        create: {
+          personId: 'p-new-1',
+          roleId: 'role-C1:501',
+          email: 'jane@example.test',
+          phone: '+1 555 0100',
+          linkedinUrl: 'https://www.linkedin.com/in/jane',
+          externalSource: 'PARTNER',
+          externalId: 'C1:501',
+        },
+        update: {
+          personId: 'p-new-1',
+          roleId: 'role-C1:501',
+          email: 'jane@example.test',
+          phone: '+1 555 0100',
+          linkedinUrl: 'https://www.linkedin.com/in/jane',
+        },
+      });
+    });
+
+    it('writes no contact for a suppressed person', async () => {
+      const prisma = mockPrisma([], [], [], [], [personRow({ id: 'p-gone', suppressedAt: new Date() })]);
+      await serviceFor(prisma, [{ investors: [partnerFirm({ people: [contactPerson()] })] }]).run(RUN);
+      expect(prisma.person.create).not.toHaveBeenCalled();
+      expect(prisma.personContact.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cross-source round dedup', () => {
+    const formD = (over: Record<string, unknown> = {}) => ({
+      id: 'r-formd',
+      name: 'Private placement (Form D)',
+      date: new Date('2022-02-01T00:00:00Z'),
+      amountUsd: 0n,
+      kind: 'Equity',
+      currency: 'USD',
+      amountLocal: null,
+      externalSource: 'SEC_EDGAR',
+      externalId: '0001-22-000001',
+      ...over,
+    });
+    const partnerRecord = (over: Partial<NormalizedRecord> = {}) =>
+      record({
+        source: 'PARTNER',
+        companyExternalId: 'PC1',
+        roundDedup: 'enrich',
+        company: { ...record().company, name: 'Acme Robotics, Inc.', domain: 'acme.example' },
+        rounds: [
+          {
+            externalId: 'D1',
+            name: 'Series A',
+            date: '2022-01-10',
+            amountUsd: 8_000_000,
+            investors: [{ externalId: '501' }],
+          },
+        ],
+        ...over,
+      });
+
+    it('folds a near-duplicate into the existing ingested round and corrects it', async () => {
+      const prisma = mockPrisma(
+        [companyRow({ domain: 'acme.example' })],
+        [investorRow({ id: 'i-gp', externalSource: 'PARTNER', externalId: '501' })],
+        [],
+        [],
+        [],
+        [formD()],
+      );
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+
+      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.fundingRound.update.mock.calls[0]![0]).toEqual({
+        where: { id: 'r-formd' },
+        data: {
+          name: 'Series A',
+          date: new Date('2022-01-10'),
+          amountUsd: 8_000_000n,
+          currency: 'USD',
+          amountLocal: null,
+        },
+      });
+      const revs = revisionsFrom(prisma).filter((r) => r.entityType === 'round');
+      expect(revs.map((r) => r.field).sort()).toEqual(['amountUsd', 'date', 'name']);
+      expect(revs.every((r) => r.actorSource === 'PARTNER' && r.entityId === 'r-formd')).toBe(true);
+      // The partner's investors land on the rung that exists.
+      expect(prisma.roundInvestor.createMany.mock.calls[0]![0]).toMatchObject({
+        data: [{ roundId: 'r-formd', investorId: 'i-gp' }],
+      });
+    });
+
+    it('does not treat its own record id as strong evidence on a re-run', async () => {
+      // A first run matched this Form D company by NAME and attached the
+      // partner's record id to it; the re-run hits that id.
+      const prisma = mockPrisma(
+        [companyRow()],
+        [],
+        [],
+        [{ scheme: 'PARTNER', value: 'PC1', entityType: 'company', entityId: 'c-sec', source: 'PARTNER' }],
+        [],
+        [formD()],
+      );
+      const r = partnerRecord();
+      r.company = { ...r.company, domain: undefined, identifiers: [{ scheme: 'PARTNER', value: 'PC1' }] };
+      await serviceFor(prisma, [{ records: [r] }]).run(RUN);
+      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.fundingRound.update).not.toHaveBeenCalled();
+    });
+
+    it('never lowers its own company total on a re-run', async () => {
+      // An own-key row whose total another partner record raised earlier.
+      const prisma = mockPrisma(
+        [companyRow({ id: 'c-own', externalSource: 'PARTNER', externalId: 'PC1', totalRaisedUsd: 90_000_000n })],
+      );
+      prisma.fundingRound.aggregate.mockResolvedValue({ _sum: { amountUsd: 8_000_000n } });
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      const updates = prisma.company.update.mock.calls.map((c) => c[0] as unknown as { data: Record<string, unknown> });
+      expect(updates.some((u) => 'totalRaisedUsd' in u.data)).toBe(false);
+    });
+
+    it('never rewrites a round on a company matched by name alone — it only skips the duplicate', async () => {
+      const prisma = mockPrisma([companyRow()], [], [], [], [], [formD()]);
+      // companyRow has no domain and no identifier: this record matches by name.
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.fundingRound.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps a known amount on the existing round', async () => {
+      const prisma = mockPrisma([companyRow({ domain: 'acme.example' })], [], [], [], [], [formD({ amountUsd: 7_000_000n })]);
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      const data = prisma.fundingRound.update.mock.calls[0]![0].data;
+      expect(data).not.toHaveProperty('amountUsd');
+    });
+
+    it('never modifies a human contribution, but still does not duplicate it', async () => {
+      const prisma = mockPrisma([companyRow()], [], [], [], [], [formD({ externalSource: null, externalId: null })]);
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.fundingRound.update).not.toHaveBeenCalled();
+    });
+
+    it('updates its own round in place on a re-run instead of re-pairing it', async () => {
+      const prisma = mockPrisma(
+        [companyRow()],
+        [],
+        [],
+        [],
+        [],
+        [formD(), formD({ id: 'r-own', name: 'Seed', externalSource: 'PARTNER', externalId: 'D1' })],
+      );
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      expect(prisma.fundingRound.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.fundingRound.update).not.toHaveBeenCalled();
+    });
+
+    it('does nothing of the sort without roundDedup — every round is written', async () => {
+      const prisma = mockPrisma([companyRow()], [], [], [], [], [formD()]);
+      await serviceFor(prisma, [{ records: [partnerRecord({ roundDedup: undefined })] }]).run(RUN);
+      expect(prisma.fundingRound.findMany).not.toHaveBeenCalled();
+      expect(prisma.fundingRound.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('raises a stale company total to the sum of its rounds, never lowers it', async () => {
+      const prisma = mockPrisma([companyRow({ domain: 'acme.example', totalRaisedUsd: 1_000_000n })], [], [], [], [], [formD()]);
+      prisma.fundingRound.aggregate.mockResolvedValue({ _sum: { amountUsd: 8_000_000n } });
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      const updates = prisma.company.update.mock.calls.map((c) => c[0] as unknown as { data: Record<string, unknown> });
+      expect(updates.some((u) => u.data.totalRaisedUsd === 8_000_000n)).toBe(true);
+
+      const lower = mockPrisma([companyRow({ domain: 'acme.example', totalRaisedUsd: 90_000_000n })], [], [], [], [], [formD()]);
+      lower.fundingRound.aggregate.mockResolvedValue({ _sum: { amountUsd: 8_000_000n } });
+      await serviceFor(lower, [{ records: [partnerRecord()] }]).run(RUN);
+      const lowered = lower.company.update.mock.calls.map((c) => c[0] as unknown as { data: Record<string, unknown> });
+      expect(lowered.some((u) => 'totalRaisedUsd' in u.data)).toBe(false);
+    });
   });
 });

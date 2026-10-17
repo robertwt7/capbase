@@ -7,11 +7,11 @@ import { DATA_LICENSE_URL, SOURCE_URL, SUPPORT_EMAIL } from '@/lib/site';
 export const metadata: Metadata = {
   title: 'Terms of Service',
   description:
-    'The terms that govern your use of Capbase, the free, crowdsourced company and funding database.',
+    'The terms that govern your use of Capbase, the free company and funding database built from public records, partner data and community contributions.',
   ...canonical('/terms'),
 };
 
-const LAST_UPDATED = '3 October 2026';
+const LAST_UPDATED = '17 October 2026';
 
 export default function TermsPage() {
   return (
@@ -31,9 +31,9 @@ export default function TermsPage() {
 
       <h2>2. The service</h2>
       <p>
-        Capbase is an open, crowdsourced database of company and funding information — funding
-        rounds, investors, people, acquisitions, and exits — aggregated from public sources and
-        community contributions. The Service is free to browse.
+        Capbase is an open database of company and funding information — funding rounds,
+        investors, funds, people, acquisitions, and exits — aggregated from public sources, data
+        provided by partners, and community contributions. The Service is free to browse.
       </p>
 
       <h2>3. Accounts</h2>
@@ -91,6 +91,11 @@ export default function TermsPage() {
         indicate if you made changes. Where practical, link to the page you took the data from.
       </p>
       <p>
+        Data provided by partners is not covered by this licence and may not be
+        reused from Capbase. You may read it on the Service; you may not copy, export, scrape or
+        redistribute it.
+      </p>
+      <p>
         Many individual facts on Capbase come from public-domain government records (SEC EDGAR,
         SBIR.gov) or from Wikidata, which is dedicated to the public domain under CC0. Our licence
         does not restrict your use of those facts taken from their original source. For commercial
@@ -114,7 +119,7 @@ export default function TermsPage() {
       <h2>7. Data disclaimer</h2>
       <p>
         Information on Capbase is aggregated from public sources (including SEC EDGAR filings and
-        Wikidata) and community submissions, and is provided &ldquo;as is&rdquo; for general
+        Wikidata), data provided by partners, and community submissions, and is provided &ldquo;as is&rdquo; for general
         information only. It is <strong>not</strong> financial, investment, or legal advice, and we
         make no warranty that it is accurate, complete, or current. Verify anything important
         against primary sources before relying on it. Corrections are welcome at{' '}

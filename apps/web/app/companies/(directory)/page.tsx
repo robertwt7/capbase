@@ -15,7 +15,7 @@ export async function generateMetadata({
   return {
     title: 'Company Directory — Free Startup Funding Data',
     description:
-      'Browse private companies with funding rounds, investors, and valuations — free, crowdsourced startup data with no account required.',
+      'Browse private companies with funding rounds, investors, and valuations — free, open startup data with no account required.',
     ...canonical(directoryCanonical('/companies', await searchParams)),
   };
 }

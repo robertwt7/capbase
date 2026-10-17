@@ -16,6 +16,16 @@ import { kebab } from '../util/slug';
 const WIKIDATA = 'WIKIDATA';
 
 /**
+ * Sources whose people are resolved by identifier ONLY (a partner's
+ * contact id; see NormalizedPerson.identifierOnly). Their roles always carry a
+ * person from ingest, and their people must never meet anyone by name: the
+ * partner already says which contacts are distinct, and two of its contacts
+ * sharing a name at one firm are two people. So the backfill's name pass and
+ * both variant sweeps leave these roles — and these people — alone.
+ */
+export const IDENTIFIER_ONLY_SOURCES = ['PARTNER'];
+
+/**
  * Personal name suffixes, dropped before taking a "last name".
  *
  * Without this, "Adam Larson Jr" keys on `adam jr` and never meets

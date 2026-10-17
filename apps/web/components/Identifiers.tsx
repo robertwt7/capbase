@@ -26,6 +26,8 @@ const SCHEME_LABELS: Record<IdentifierScheme, string> = {
   DUNS: 'DUNS',
   COMPANIES_HOUSE: 'Companies House',
   DOMAIN: 'Domain',
+  // Never rendered: the API drops the scheme from every response.
+  PARTNER: 'Partner',
 };
 
 /** Where the value points, for a screen reader and a hover. */
@@ -40,6 +42,7 @@ const SCHEME_TITLES: Record<IdentifierScheme, string> = {
   DUNS: 'Dun & Bradstreet number',
   COMPANIES_HOUSE: 'UK Companies House company number — the company on the UK register',
   DOMAIN: 'Primary web domain',
+  PARTNER: 'Partner record',
 };
 
 export function Identifiers({

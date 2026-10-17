@@ -3,10 +3,12 @@ import type {
   Paginated,
   PersonDetailResponse,
   PersonSlugEntry,
+  SitemapCount,
   PersonSummary,
 } from '@repo/api';
 
 import { PeopleService } from './people.service';
+import { SitemapPageDto } from '../prisma/sitemap-page.dto';
 import { ListPeopleDto } from './dto/list-people.dto';
 import { SearchThrottle } from '../throttle/throttle';
 
@@ -23,8 +25,14 @@ export class PeopleController {
 
   // Declared before @Get(':slug') so the literal path wins over the param route.
   @Get('sitemap')
-  sitemap(): Promise<PersonSlugEntry[]> {
-    return this.people.listSlugs();
+  sitemap(@Query() query: SitemapPageDto): Promise<PersonSlugEntry[]> {
+    return this.people.listSlugs(query.page ?? 0);
+  }
+
+  /** Sizes the sitemap index: how many `SITEMAP_PAGE_SIZE` pages to list. */
+  @Get('sitemap/count')
+  async sitemapCount(): Promise<SitemapCount> {
+    return { count: await this.people.countSlugs() };
   }
 
   @Get(':slug')

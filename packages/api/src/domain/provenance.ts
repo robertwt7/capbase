@@ -88,3 +88,25 @@ export interface CompanyHistoryResponse {
   pageSize: number;
   items: Revision[];
 }
+
+/**
+ * Internal ingest tag → what the public timeline may say. An explicit table on
+ * purpose: a new internal tag (a partner, a test source) can never
+ * leak by default — anything unlisted reads `automated`.
+ */
+const PUBLIC_INGEST_LABELS: Record<string, string> = {
+  SEC_EDGAR: 'SEC Form D',
+  SEC_ADV: 'SEC Form ADV',
+  SEC_ADV_FUNDS: 'SEC Form ADV',
+  SEC_FORM_C: 'SEC Form C',
+  SEC_S1: 'SEC Form S-1',
+  WIKIDATA: 'Wikidata',
+  SBIR: 'SBIR.gov',
+  INNOVATE_UK: 'Innovate UK',
+  COMPANIES_HOUSE: 'Companies House',
+  PARTNER: 'partner',
+};
+
+export function publicIngestLabel(source: string | null | undefined): string {
+  return (source && PUBLIC_INGEST_LABELS[source]) || 'automated';
+}

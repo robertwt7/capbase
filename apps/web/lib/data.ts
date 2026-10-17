@@ -21,18 +21,17 @@ import {
   type CompanyDetailResponse,
   type CompanyHistoryResponse,
   type CompanyListQuery,
-  type CompanySlugEntry,
   type CountryFacet,
   type DiversitySignal,
   type ExitEvent,
   type FeaturedCompaniesResponse,
+  type FundDetailResponse,
   type FundListQuery,
   type FundSummary,
   type FundingRound,
   type InvestorDetailResponse,
   type InvestorHolding,
   type InvestorListQuery,
-  type InvestorSlugEntry,
   type InvestorSummary,
   type MarketStat,
   type MarketTotals,
@@ -40,8 +39,8 @@ import {
   type Person,
   type PersonDetailResponse,
   type PersonListQuery,
-  type PersonSlugEntry,
   type PersonSummary,
+  type SitemapCount,
 } from '@repo/api';
 
 import { ApiError, apiFetch } from './api';
@@ -436,6 +435,7 @@ const fallbackInvestors: InvestorSummary[] = [
 const fallbackFunds: FundSummary[] = [
   {
     id: 'fund-sequoia-growth-iii',
+    slug: null,
     name: 'Sequoia Growth Fund III, L.P.',
     strategy: 'Venture capital',
     vintageYear: 2022,
@@ -448,6 +448,7 @@ const fallbackFunds: FundSummary[] = [
   },
   {
     id: 'fund-founders-fund-viii',
+    slug: null,
     name: 'Founders Fund VIII, L.P.',
     strategy: 'Venture capital',
     vintageYear: 2023,
@@ -460,6 +461,7 @@ const fallbackFunds: FundSummary[] = [
   },
   {
     id: 'fund-tiger-private-xv',
+    slug: null,
     name: 'Tiger Global Private Investment Partners XV, L.P.',
     strategy: 'Private equity',
     vintageYear: 2021,
@@ -670,20 +672,6 @@ export async function getInvestorCountries(): Promise<CountryFacet[]> {
   }
 }
 
-/** Every approved company's slug + last update, for the sitemap. */
-export async function getCompanySlugs(): Promise<CompanySlugEntry[]> {
-  try {
-    // `no-store`: this payload is far past Next's 2MB fetch-cache limit, and
-    // over it the cache does not merely skip — it hands back a TRUNCATED list
-    // (35,943 companies came back as 11,058). The sitemap routes set their own
-    // `s-maxage`, so nothing is lost by going to the API each time.
-    return await apiFetch<CompanySlugEntry[]>('/companies/sitemap', { cache: 'no-store' });
-  } catch (err) {
-    // Never emit mock slugs into a production sitemap — an empty list is safer.
-    console.warn('[data] getCompanySlugs failed; sitemap gets no company URLs:', err);
-    return [];
-  }
-}
 
 /** Offline fallback: apply the list query to the mock array client-side. */
 function paginateFallbackInvestors(query: InvestorListQuery): Paginated<InvestorSummary> {
@@ -770,9 +758,34 @@ export const getInvestor = cache(async function getInvestor(
     if (!match) return null;
     const funds = fallbackFunds.filter((f) => f.manager.slug === slug);
     // Mock data is illustrative, never something to put in a search index.
-    return { ...match, people: [], funds, namedFundCount: funds.length, citations: [], indexable: false };
+    return {
+      ...match,
+      people: [],
+      peopleCount: 0,
+      commitments: [],
+      commitmentCount: 0,
+      funds,
+      namedFundCount: funds.length,
+      citations: [],
+      indexable: false,
+    };
   }
 });
+
+/** One fund page, or null when the slug is unknown (renders notFound). No
+ *  offline fallback: the mock funds carry no terms or commitments, and a fund
+ *  page of invented figures is worse than a 404. Wrapped in React cache() so
+ *  generateMetadata and the page share one fetch per request. */
+export const getFund = cache(async function getFund(slug: string): Promise<FundDetailResponse | null> {
+  try {
+    return await apiFetch<FundDetailResponse>(`/funds/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    console.warn(`[data] getFund(${slug}) failed:`, err);
+    return null;
+  }
+});
+
 
 // --- People ----------------------------------------------------------------
 //
@@ -805,32 +818,7 @@ export const getPerson = cache(async function getPerson(
   }
 });
 
-export async function getPersonSlugs(): Promise<PersonSlugEntry[]> {
-  try {
-    // `no-store`: this payload is far past Next's 2MB fetch-cache limit, and
-    // over it the cache does not merely skip — it hands back a TRUNCATED list
-    // (35,943 companies came back as 11,058). The sitemap routes set their own
-    // `s-maxage`, so nothing is lost by going to the API each time.
-    return await apiFetch<PersonSlugEntry[]>('/people/sitemap', { cache: 'no-store' });
-  } catch (err) {
-    console.warn('[data] getPersonSlugs failed; sitemap gets no person URLs:', err);
-    return [];
-  }
-}
 
-export async function getInvestorSlugs(): Promise<InvestorSlugEntry[]> {
-  try {
-    // `no-store`: this payload is far past Next's 2MB fetch-cache limit, and
-    // over it the cache does not merely skip — it hands back a TRUNCATED list
-    // (35,943 companies came back as 11,058). The sitemap routes set their own
-    // `s-maxage`, so nothing is lost by going to the API each time.
-    return await apiFetch<InvestorSlugEntry[]>('/investors/sitemap', { cache: 'no-store' });
-  } catch (err) {
-    // Never emit mock slugs into a production sitemap — an empty list is safer.
-    console.warn('[data] getInvestorSlugs failed; sitemap gets no investor URLs:', err);
-    return [];
-  }
-}
 
 export async function getMarketStats(): Promise<MarketStat[]> {
   try {
@@ -847,5 +835,42 @@ export async function getMarketTotals(): Promise<MarketTotals> {
   } catch (err) {
     allowMockFallback('getMarketTotals', err);
     return fallbackMarketTotals;
+  }
+}
+
+// --- Sitemap ---------------------------------------------------------------
+
+/** The four entity families the sitemap pages over. */
+export type SitemapFamily = 'companies' | 'investors' | 'people' | 'funds';
+
+/** One `SITEMAP_PAGE_SIZE` page of a family's indexable slugs (0-based).
+ *  `no-store`: a page is still past Next's 2MB fetch-cache limit, and over it
+ *  the cache does not merely skip — it hands back a TRUNCATED list (35,943
+ *  companies once came back as 11,058). The sitemap routes set their own
+ *  `s-maxage`. */
+export async function getSitemapSlugs(
+  family: SitemapFamily,
+  page: number,
+): Promise<{ slug: string; updatedAt: string }[]> {
+  try {
+    return await apiFetch<{ slug: string; updatedAt: string }[]>(`/${family}/sitemap?page=${page}`, {
+      cache: 'no-store',
+    });
+  } catch (err) {
+    // Never emit mock slugs into a production sitemap — an empty list is safer.
+    console.warn(`[data] getSitemapSlugs(${family}, ${page}) failed; that file gets no URLs:`, err);
+    return [];
+  }
+}
+
+/** How many indexable rows a family has — sizes the sitemap index. 0 on
+ *  failure, so the index lists no file rather than an empty one. */
+export async function getSitemapCount(family: SitemapFamily): Promise<number> {
+  try {
+    const { count } = await apiFetch<SitemapCount>(`/${family}/sitemap/count`, { cache: 'no-store' });
+    return count;
+  } catch (err) {
+    console.warn(`[data] getSitemapCount(${family}) failed; the index lists no ${family} files:`, err);
+    return 0;
   }
 }

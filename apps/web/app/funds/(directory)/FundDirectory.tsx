@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { FUND_STRATEGIES, type FundSummary, type Paginated } from '@repo/api';
+import { FUND_STATUSES, FUND_STRATEGIES, type FundSummary, type Paginated } from '@repo/api';
 
 import {
   Badge,
@@ -52,6 +52,7 @@ export function FundDirectory({
 
   const [q, setQ] = useState(initial.q ?? '');
   const [strategy, setStrategy] = useState(initial.strategy ?? ALL);
+  const [status, setStatus] = useState(initial.status ?? ALL);
   const [sort, setSort] = useState<Sort>(isSort(initial.sort) ? initial.sort : 'size');
   // Set by the investor profile's "all N funds" link. Not a control on this
   // page — it is cleared with the rest of the filters.
@@ -61,6 +62,7 @@ export function FundDirectory({
     const params = new URLSearchParams();
     if (q.trim()) params.set('q', q.trim());
     if (strategy !== ALL) params.set('strategy', strategy);
+    if (status !== ALL) params.set('status', status);
     if (manager) params.set('manager', manager);
     if (sort !== 'size') params.set('sort', sort);
     if (page && page > 1) params.set('page', String(page));
@@ -85,12 +87,14 @@ export function FundDirectory({
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, strategy, manager, sort, pathname, router]);
+  }, [q, strategy, status, manager, sort, pathname, router]);
 
-  const active = q.trim() !== '' || strategy !== ALL || manager !== '' || sort !== 'size';
+  const active =
+    q.trim() !== '' || strategy !== ALL || status !== ALL || manager !== '' || sort !== 'size';
   const clear = () => {
     setQ('');
     setStrategy(ALL);
+    setStatus(ALL);
     setManager('');
     setSort('size');
   };
@@ -118,6 +122,19 @@ export function FundDirectory({
           <SelectContent>
             <SelectItem value={ALL}>All strategies</SelectItem>
             {FUND_STRATEGIES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="w-[160px]" aria-label="Any status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Any status</SelectItem>
+            {FUND_STATUSES.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
               </SelectItem>
@@ -184,8 +201,27 @@ export function FundDirectory({
                 className={`grid ${FUND_COLUMNS} items-center border-t border-line px-[22px] py-4 max-[820px]:gap-y-2`}
                 role="row"
               >
-                <span className="min-w-0 font-display text-[15px] font-semibold tracking-tight text-ink" role="cell">
-                  {fund.name}
+                <span className="flex min-w-0 flex-col gap-0.5" role="cell">
+                  {/* prefetch={false}: a profile prefetch renders its uncached
+                      detail read, one API call per row in the viewport. */}
+                  {fund.slug ? (
+                    <Link
+                      href={`/funds/${fund.slug}`}
+                      prefetch={false}
+                      className="font-display text-[15px] font-semibold tracking-tight text-ink underline-offset-[3px] transition-colors hover:text-graphite-700 hover:underline"
+                    >
+                      {fund.name}
+                    </Link>
+                  ) : (
+                    <span className="font-display text-[15px] font-semibold tracking-tight text-ink">
+                      {fund.name}
+                    </span>
+                  )}
+                  {fund.status && (
+                    <span className="font-mono text-[11px] tracking-[0.05em] text-graphite-500 uppercase">
+                      {fund.status}
+                    </span>
+                  )}
                 </span>
                 <Link
                   href={`/investors/${fund.manager.slug}`}
@@ -232,7 +268,7 @@ export function FundDirectory({
         </div>
       ) : (
         <EmptyState className="mt-4">
-          No funds match these filters. Try clearing the search or the strategy filter.
+          No funds match these filters. Try clearing the search, strategy or status filter.
         </EmptyState>
       )}
     </div>

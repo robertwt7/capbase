@@ -9,6 +9,7 @@ import {
 } from './ingest/identifier.writer';
 import { GROUP_LIMIT } from './ingest/merge-detector';
 import {
+  IDENTIFIER_ONLY_SOURCES,
   assignPeople,
   variantPairs,
   type AssignedRole,
@@ -51,6 +52,9 @@ async function main() {
     const client = prisma as unknown as IdentifierWriterClient;
 
     const existing = await loadExisting(prisma, logger);
+    // Identifier-only roles (the partner's) are resolved at ingest and are
+    // never name-matched or swept for variants — and skipping them keeps the
+    // in-memory role list to the public sources' size.
     const roles = await loadRoles(prisma, logger);
 
     const plan = assignPeople(roles, existing);
@@ -162,6 +166,7 @@ async function loadExisting(prisma: PrismaService, logger: Logger): Promise<Exis
       normalizedName: true,
       mergedIntoId: true,
       suppressedAt: true,
+      identifierOnly: true,
     },
   });
 
@@ -182,6 +187,8 @@ async function loadExisting(prisma: PrismaService, logger: Logger): Promise<Exis
     }
     if (p.mergedIntoId) continue;
     live.add(p.id);
+    // People an identifier-only source created are never matched by name.
+    if (p.identifierOnly) continue;
     if (p.normalizedName && !existing.byName.has(p.normalizedName)) {
       existing.byName.set(p.normalizedName, p.id);
     }
@@ -211,6 +218,9 @@ async function loadRoles(prisma: PrismaService, logger: Logger): Promise<Backfil
 
   for (;;) {
     const rows = await prisma.personRole.findMany({
+      where: {
+        OR: [{ externalSource: null }, { externalSource: { notIn: IDENTIFIER_ONLY_SOURCES } }],
+      },
       select: {
         id: true,
         name: true,

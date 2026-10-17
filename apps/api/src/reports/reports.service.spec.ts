@@ -43,6 +43,12 @@ function table(rows: Row[] = []) {
       Object.assign(r, data);
       return { ...r };
     },
+    deleteMany: async ({ where }: { where?: Record<string, unknown> } = {}) => {
+      const keep = rows.filter((r) => !match(r, where));
+      const count = rows.length - keep.length;
+      rows.splice(0, Infinity, ...keep);
+      return { count };
+    },
   };
 }
 
@@ -85,6 +91,10 @@ function fixture() {
       },
     ]),
     report: table([]),
+    personContact: table([
+      { id: 'pc-1', personId: 'p-1', email: 'jane@example.test' },
+      { id: 'pc-2', personId: 'p-other', email: 'other@example.test' },
+    ]),
   };
   // Failure inside the transaction must leave every table as it was, so the
   // stand-in snapshots and restores — the atomicity the service relies on.
@@ -180,6 +190,9 @@ describe('ReportsService', () => {
       expect(
         db.person.rows.find((p) => p.id === 'p-1')!.suppressedAt,
       ).toBeInstanceOf(Date);
+      // The stored private contact details go with the suppression; nobody
+      // else's do.
+      expect(db.personContact.rows.map((r) => r.id)).toEqual(['pc-2']);
       expect(db.report.rows[0]).toMatchObject({
         status: 'RESOLVED',
         resolutionNote: 'Removal request',

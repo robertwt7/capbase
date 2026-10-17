@@ -5,7 +5,7 @@ import type { IdentifiableType, MergeSignal } from '@repo/api';
 import { AppModule } from './app.module';
 import { recordCandidate, type IdentifierWriterClient } from './ingest/identifier.writer';
 import { GROUP_LIMIT, detectorNameKey, sweep, type DetectRow } from './ingest/merge-detector';
-import { variantPairs, type AssignedRole } from './ingest/person-matcher';
+import { IDENTIFIER_ONLY_SOURCES, variantPairs, type AssignedRole } from './ingest/person-matcher';
 import { PrismaService } from './prisma/prisma.service';
 
 /**
@@ -86,7 +86,13 @@ async function runPeople(
   const roles = await prisma.personRole.findMany({
     // A role whose person was merged away is already decided; proposing it
     // again would undo the decision.
-    where: { personId: { not: null }, person: { mergedIntoId: null, suppressedAt: null } },
+    // Identifier-only roles (a partner's contacts) are left out: the partner's
+    // own ids already say which of its same-named contacts are distinct.
+    where: {
+      personId: { not: null },
+      person: { mergedIntoId: null, suppressedAt: null },
+      OR: [{ externalSource: null }, { externalSource: { notIn: IDENTIFIER_ONLY_SOURCES } }],
+    },
     select: { personId: true, companyId: true, investorId: true, name: true },
   });
 

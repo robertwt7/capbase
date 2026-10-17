@@ -127,7 +127,7 @@ db-tunnel: ## [laptop] SSH-tunnel the VPS Postgres to localhost (VPS=user@host [
 # ---------------------------------------------------------------------------
 
 .PHONY: ingest
-ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|INNOVATE_UK|COMPANIES_HOUSE|SEC_S1)
+ingest: ## Run a local backfill (DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|INNOVATE_UK|COMPANIES_HOUSE|SEC_S1|PARTNER)
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill.js $(DAYS) $(LIMIT) $(SOURCE)
 
@@ -248,6 +248,32 @@ backfill-people: ## Collapse PersonRole rows into one Person per human (no netwo
 backfill-people-prod: ## [VPS] Collapse role rows into people inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-people.js
 
+# Licensed partner snapshot (manual, never on a cron, never in SOURCE=all).
+# Load the stage file into the `partner_stage` schema, run the stages in order
+# (firms → funds → companies → commitments → metrics; STAGE= one or a comma
+# list, empty = all), then drop the schema. See docs/DATA_REBUILD.md.
+.PHONY: partner-stage-load
+partner-stage-load: ## Load the partner stage file into schema partner_stage (FILE=partner-stage-….sql[.zst|.gz])
+	@scripts/partner-stage.sh load "$(FILE)"
+
+.PHONY: partner-stage-drop
+partner-stage-drop: ## Drop schema partner_stage once the partner import is done
+	@scripts/partner-stage.sh drop
+
+.PHONY: partner-stage-status
+partner-stage-status: ## Row counts of the loaded partner_stage schema (or "not loaded")
+	@scripts/partner-stage.sh status
+
+.PHONY: ingest-partner
+ingest-partner: ## Import the licensed partner snapshot (STAGE=firms|funds|companies|commitments|metrics, empty = all)
+	yarn workspace jobs build
+	cd apps/jobs && PARTNER_STAGES=$(STAGE) node dist/backfill.js 1 10000000 PARTNER
+
+.PHONY: backfill-fund-slugs
+backfill-fund-slugs: ## Give every fund without one a /funds/<slug> page address (no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-fund-slugs.js
+
 .PHONY: purge-sbir-people
 purge-sbir-people: ## One-shot: delete SBIR person rows read from 'Contact Name' (federal program officers)
 	yarn workspace jobs build
@@ -261,6 +287,24 @@ purge-sbir-people-prod: ## [VPS] Delete the SBIR agency-contact person rows insi
 merge-candidates: ## Propose duplicate pairs from shared domain / normalized name (re-runnable)
 	yarn workspace jobs build
 	cd apps/jobs && node dist/detect-merges.js
+
+# The stage targets run psql inside the capbase-postgres container, so on a
+# split topology run them on the DB box.
+.PHONY: partner-stage-load-prod
+partner-stage-load-prod: ## [VPS] Load the partner stage file into schema partner_stage (FILE=/path/outside/repo/…)
+	@scripts/partner-stage.sh load "$(FILE)"
+
+.PHONY: partner-stage-drop-prod
+partner-stage-drop-prod: ## [VPS] Drop schema partner_stage after the partner import
+	@scripts/partner-stage.sh drop
+
+.PHONY: ingest-partner-prod
+ingest-partner-prod: ## [VPS] Import the partner snapshot inside the deployed jobs container (STAGE=…)
+	$(COMPOSE_STACK) run --rm -e PARTNER_STAGES=$(STAGE) jobs node apps/jobs/dist/backfill.js 1 10000000 PARTNER
+
+.PHONY: backfill-fund-slugs-prod
+backfill-fund-slugs-prod: ## [VPS] Give every fund a page slug inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-fund-slugs.js
 
 .PHONY: merge-candidates-prod
 merge-candidates-prod: ## [VPS] Propose duplicate pairs inside the deployed jobs container

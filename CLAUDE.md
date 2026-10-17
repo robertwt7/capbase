@@ -224,12 +224,21 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle).
 - `/funds` — fund directory (URL-driven filters, same pattern as companies): search,
-  strategy filter, sort by size/vintage/name, `?manager=<slug>` scoping. **Sorted by
-  size by default** — AngelList-style SPV platforms report tens of thousands of
-  near-empty funds and would otherwise own every page. No per-fund page.
+  strategy and status filters, sort by size/vintage/name, `?manager=<slug>` scoping. **Sorted
+  by size by default** (`Fund.sizeUsd` = gross assets, else capital closed — the figure the
+  row shows) — AngelList-style SPV platforms report tens of thousands of near-empty funds and
+  would otherwise own every page. `/funds/[slug]` — fund page (leaf segment, own
+  `loading.tsx`): manager, strategy/status, vintage, size/target/hard cap, launch and close
+  dates, terms (fee, carry, hurdle, target IRR; `formatPct`), a metrics table and the largest
+  LP commitments. `noindex` unless `fundIndexable` (`@repo/api` `indexing.ts`): a commitment,
+  a size, a target, a final close or a fee.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies);
-  `/investors/[slug]` — investor profile: facts, fund assets, portfolio grid, the firm's
-  own officers, or an empty state inviting a contribution.
+  `/investors/[slug]` — investor profile: facts, fund assets, funds (linked to their pages),
+  **fund commitments** for a limited partner, portfolio grid (the `INVESTOR_PORTFOLIO_PREVIEW`
+  largest by capital raised; count and sectors cover the whole portfolio), the firm's people
+  (capped at `INVESTOR_PEOPLE_PREVIEW`, "N of M named"), or an empty state inviting a
+  contribution. The detail read counts each relation with its own indexed `count()` — never
+  Prisma's `_count`, which GROUP BYs the whole child table (~500 ms per profile at this size).
 - `/people` — people directory (URL-driven filters, same pattern as companies): search,
   an "at several companies" toggle, sort by roles held or name. **No role filter** —
   3,744 distinct free-text role strings is not a vocabulary. `/people/[slug]` — person
@@ -295,7 +304,9 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   plain semantic HTML plus `metadata` and a `LAST_UPDATED` line. Site-wide constants
   (`SUPPORT_EMAIL`, `SOURCE_URL`, `DATA_LICENSE_URL`) are **hardcoded** in `lib/site.ts`,
   not env. A new indexable static page must be added to `STATIC_PATHS` in `lib/sitemap.ts`
-  (the sitemap is route-handler based; there is no `app/sitemap.ts`); a new form route must be
+  (the sitemap is route-handler based; there is no `app/sitemap.ts`; each child file fetches
+  only its own page, `GET /<family>/sitemap?page=N` in `SITEMAP_PAGE_SIZE` rows, and the index only
+  `GET /<family>/sitemap/count` — never a whole family: a 24 MB read ran the 512 MB API out of heap); a new form route must be
   added to `disallow` in `app/robots.ts`. Footer links live in `COLUMNS` in
   `components/SiteFooter.tsx`.
 
@@ -606,6 +617,22 @@ now admits `'person'` so the whole merge queue works unchanged. A person merge w
 column of its own, not `moderationStatus: 'REJECTED'`, because ingest auto-APPROVES and would
 undo a rejection on the next cron run; a suppressed person 404s rather than 301s.
 
+**`PersonContact` is PRIVATE.** A partner supplies a work email, phone and LinkedIn URL
+for people at investment firms; they are stored one row per role (`roleId`, firm-specific) and
+**never published** — no API mapper, `/v1` route, search, sitemap, export, admin view or Revision
+reads them, and the partner's LinkedIn never goes into the public `PersonRole.linkedinUrl`. The
+only API code that touches the table is the suppression delete (`PeopleService.setSuppressed`
+and the report "Suppress & resolve", both in the same transaction as the suppression) and the
+person-merge remap (`MergeService`, ids only in `moved`). `test/contact-privacy.e2e-spec.ts`
+seeds sentinel values and asserts no public response, site or `/v1`, carries one; keep it
+passing, and keep `grep -rn personContact apps/api/src apps/web` to those three files.
+
+**e2e cleanup rule:** never `deleteMany({ where: { id: maybeUndefined } })` — Prisma reads an
+`undefined` filter value as NO filter, so a `beforeAll` that failed before assigning the id
+deletes every row in the table (it emptied the local `User` table once). Guard with `if (id)`,
+delete by the ids you created, and avoid `/auth` calls in new suites (throttled at 20/min
+across the whole parallel run; create users with Prisma and mint keys via `ApiKeysService`).
+
 **Funds are a first-class entity too, and ingest-only.** `Fund` is one row per private fund
 with a **required** `managerId` FK to `Investor` — a fund whose manager cannot be resolved
 structurally is dropped, never written against a guess (measured: name-prefix guessing added
@@ -619,14 +646,24 @@ managers matches **neither** — 191 of 94,399 ADV fund names collide and they a
 "Indefinite" offering; `0` would be a claim the filing never made. `Fund` keeps a
 `moderationStatus` column so its read path matches its siblings, but nothing ever leaves it
 `PENDING`, it never enters the admin queue, and it writes **no revisions** (`Revision.companyId`
-is required and a fund has no company). There is **no per-fund page and no `slug`** — `/funds` is
-a directory, and minting ~95k slugs buys no reader anything.
+is required and a fund has no company). Every fund has a page at `/funds/<slug>`: ingest mints
+the slug on create (`ingest/fund-slug.ts`, shared with `make backfill-fund-slugs`, which gave
+the pre-existing funds theirs; `Fund.slug` stays nullable until that has run everywhere). A
+data partner adds what no filing reports: `status` (`FundStatus`), launch/latest/final close
+dates, hard cap, management fee, carry, hurdle and target IRRs (percentages as published, null
+when absent — never 0). `FundCommitment` (an LP `Investor` → `Fund`, money in the fund's
+currency plus an ECB-converted `amountUsd`) and `FundMetric` (one per fund per as-at date) are
+ingest-only and write no revisions; `FundCommitment` has **no** `(fundId, investorId)` unique,
+so an investor merge keeps both rows (the `InvestorHolding` rule) and stays reversible.
 
 Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
 (`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
 — not Prisma enums. `InvestorType` covers `Venture`/`Growth`/`Angel`/`Corporate`/`Private equity`/
 `Accelerator`/`Hedge fund`/`Sovereign wealth` — the last three are derived from source *structure*
-(Wikidata P31 class, ADV fund-type columns), never guessed from the firm's name.
+(Wikidata P31 class, ADV fund-type columns), never guessed from the firm's name — plus the
+limited-partner types `Pension fund`/`Endowment`/`Foundation`/`Family office`/`Insurance`/`Bank`/
+`Wealth manager`/`Asset manager`/`Fund of funds`/`Government`, read from a data partner's closed
+firm-type field (`sources/partner/partner.parser.ts` `firmType`).
 `FundStrategy`/`FUND_STRATEGIES` (`Venture capital`/`Private equity`/`Hedge fund`/`Real estate`/
 `Securitized asset`/`Liquidity`/`Other`) is read the same way — both SEC sources publish a fund
 type as a *structured field*, so the two publisher vocabularies are renamed into one canonical
@@ -681,7 +718,7 @@ The column is ingest-only: it defaults to `Equity` and no contribution form sets
 
 ## Jobs (apps/jobs)
 
-NestJS worker (port 3002, health endpoint) with nine pluggable `IngestionSource`s
+NestJS worker (port 3002, health endpoint) with ten pluggable `IngestionSource`s
 (`src/sources/`, add OpenCorporates etc. later). A source contributes a
 `NormalizedRecord` whose `rounds[]` is **plural** — a Reg CF issuer runs several offerings and an
 SBIR grantee wins many awards, and one record per round would re-run the company upsert and let the
@@ -766,6 +803,43 @@ last one clobber `totalRaisedUsd`:
   `SICCode.SicText_1` via `companies-house/sic-sector.ts` (deterministic; holding
   companies and fund vehicles stay null). `stage` is `Public` for a PLC, `Late stage` for
   the size slice, `Seed` for a known small company. No rounds, no people.
+- **PARTNER** — a bulk snapshot from a partner (firms — managers and LPs — with
+  their people, funds with terms, portfolio companies with deals, LP commitments, fund
+  metrics). **The partner is never named** anywhere in code, docs or public copy: the tag,
+  identifier scheme (`PARTNER`, in `HIDDEN_SCHEMES`), env, Make targets and public label all
+  say "partner". The snapshot is loaded into the capbase DB as its own `partner_stage` schema
+  (`make partner-stage-load FILE=…`, dropped after with `make partner-stage-drop`; Prisma
+  manages `public` only) and read by `PartnerClient` over the same `DATABASE_URL`. It
+  **streams** (`IngestionSource.stream` → `SourceBatch`es applied firms → funds → records →
+  commitments → metrics) because it is far larger than the heap, and runs **one stage at a
+  time** (`make ingest-partner STAGE=firms|funds|companies|commitments|metrics`, env
+  `PARTNER_STAGES`); a stage run before its prerequisite skips and counts the edges it cannot
+  resolve. `explicitOnly`: never part of `SOURCE=all`, never on a cron. Edges are id-keyed
+  (`SourceFirmRef`/`SourceFundRef`): resolved by provenance key, then by the `PARTNER`
+  identifier (a matched firm keeps its own key), never by name. Partner people are
+  `identifierOnly` (resolved by contact id only — 20k names collide across firms — and never
+  registered for name matching). Partner records set `roundDedup: 'enrich'`: a deal that is a
+  near-duplicate (`ingest/round-dedup.ts`: ±120 days, ±25% amount, grant only with grant) of
+  another source's round on a matched company is not written; its investors attach to the
+  existing rung, and an **ingested** round (never a human one) is corrected — stage name over
+  a placeholder, the partner's date, a missing amount — with a Revision each; a matched
+  company's total is raised, never lowered. Partner facts carry **no citation** (the em
+  dash), and `publicIngestLabel` (`@repo/api` `provenance.ts`) maps every internal
+  `actorSource` to a public label (`PARTNER` → `partner`, unknown → `automated`), so the
+  history page never shows a raw tag. Round correction needs a **strong** company match — an
+  identifier in someone else's scheme, or a domain; a hit on the partner's own record id
+  (`SOURCE_RECORD_SCHEMES`, which ingest attaches to whatever it matched, possibly by name)
+  only repeats an earlier decision and never rewrites. Partner people carry
+  `Person.identifierOnly` and are left out of every name map (ingest's `byName`,
+  `backfill-people`'s name pass, both person variant sweeps — `IDENTIFIER_ONLY_SOURCES` in
+  `person-matcher.ts`), so a later Form D "John Smith" never attaches to one.
+  **Index memory** (the 1 GB jobs container, ~549 MB heap): `IngestService` loads its four
+  match indexes **lazily** (a stream batch loads only what it writes against), **paged**
+  (`eachPage`, 20k rows; tombstones resolve from the merged rows alone), and leaves a record
+  source's own ids and provenance keys (`SOURCE_RECORD_SCHEMES`/`wantKey` — ~770k identifiers,
+  ~360k keys) out of every run that does not include that source. Measured on the full local
+  dataset: ~450 MB of indexes for a public-source run, the daily Form D run peaking at ~700 MB
+  RSS; before these changes it OOM'd. Re-measure before adding another bulk source.
 
 The `@nestjs/schedule` cron (`CRON_SCHEDULE`) runs `INGEST_SOURCES` (default
 SEC Form D only). A second, **monthly** job (`MONTHLY_CRON_SCHEDULE`, default `0 3 10 * *`)
@@ -782,7 +856,7 @@ advisory locks are per-session): a cron tick skips while a backfill runs, and a 
 exits 75 while the cron runs. Failed ingests are reported to GlitchTip; a cron run that
 **succeeds** POSTs `INGEST_HEARTBEAT_URL` (a dead man's switch, no-op if unset), so a cron
 that never fires alerts too. Failed and skipped runs send no ping. Backfills:
-`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|INNOVATE_UK|COMPANIES_HOUSE|SEC_S1`
+`make ingest DAYS=N LIMIT=N SOURCE=all|SEC_EDGAR|WIKIDATA|SEC_ADV|SEC_ADV_FUNDS|SEC_FORM_C|SBIR|INNOVATE_UK|COMPANIES_HOUSE|SEC_S1|PARTNER`
 (→ `node dist/backfill [days] [limit] [source]`), plus `make ingest-investors`
 (ADV + Wikidata firms), `make ingest-funds` (ADV Schedule D), `make ingest-uk` (Innovate UK →
 Companies House) and `make ingest-all`

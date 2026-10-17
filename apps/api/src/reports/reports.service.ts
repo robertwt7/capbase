@@ -143,6 +143,9 @@ export class ReportsService {
           where: { id: report.entityId },
           data: { suppressedAt: new Date() },
         });
+        // A removal request covers the private contact details we store, not
+        // only the profile we show — the same rule as PeopleService.setSuppressed.
+        await tx.personContact.deleteMany({ where: { personId: report.entityId } });
       }
 
       await tx.report.update({

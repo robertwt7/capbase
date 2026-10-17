@@ -1,5 +1,5 @@
 import type { InvestorType, Person } from './company';
-import type { Fund } from './fund';
+import type { Fund, InvestorCommitmentRow } from './fund';
 import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
 
@@ -38,11 +38,20 @@ export interface InvestorSummary extends Investor {
   companies: { slug: string; name: string; domain: string }[];
 }
 
-/** Full investor profile: every approved portfolio company, not a sample. */
+/** Full investor profile. `companies` is the largest `INVESTOR_PORTFOLIO_PREVIEW`
+ *  of the portfolio (by capital raised); `portfolioCount` and `sectors` cover all of it. */
 export interface InvestorDetailResponse extends InvestorSummary {
   /** Officers of the firm itself (Wikidata P112/P169). The same role rows a
    *  company profile calls `people`. */
   people: Person[];
+  /** How many officers/staff the firm has on record — `people` is capped at
+   *  `INVESTOR_PEOPLE_PREVIEW`, and a large firm lists thousands. */
+  peopleCount: number;
+  /** The firm's commitments to funds, as a limited partner — largest first,
+   *  capped (`commitmentCount` is the total). Empty for a firm that is not an
+   *  LP, which is most of them. */
+  commitments: InvestorCommitmentRow[];
+  commitmentCount: number;
   /** The largest funds we can name, by gross assets. */
   funds: Fund[];
   /** How many we can name — distinct from `fundCount`, which is what the firm
@@ -55,6 +64,19 @@ export interface InvestorDetailResponse extends InvestorSummary {
    *  sitemap lists exactly the investors for whom this is true. */
   indexable: boolean;
 }
+
+/** How many portfolio companies the profile lists — a large venture firm holds
+ *  thousands, and a page of thousands of logo tiles is megabytes of HTML. */
+export const INVESTOR_PORTFOLIO_PREVIEW = 200;
+
+/** How many of a firm's people the profile lists before saying "N of M". */
+export const INVESTOR_PEOPLE_PREVIEW = 60;
+
+/** How many of an LP's commitments the profile lists. */
+export const INVESTOR_COMMITMENT_PREVIEW = 24;
+
+/** How many of a fund's commitments the fund page lists. */
+export const FUND_COMMITMENT_PREVIEW = 50;
 
 /** Lightweight listing entry for the web sitemap: every indexable investor. */
 export interface InvestorSlugEntry {

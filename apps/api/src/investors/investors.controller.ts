@@ -3,11 +3,13 @@ import type {
   CountryFacet,
   InvestorDetailResponse,
   InvestorSlugEntry,
+  SitemapCount,
   InvestorSummary,
   Paginated,
 } from '@repo/api';
 
 import { InvestorsService } from './investors.service';
+import { SitemapPageDto } from '../prisma/sitemap-page.dto';
 import { ListInvestorsDto } from './dto/list-investors.dto';
 import { SearchThrottle } from '../throttle/throttle';
 
@@ -30,8 +32,14 @@ export class InvestorsController {
 
   // Declared before @Get(':slug') so the literal path wins over the param route.
   @Get('sitemap')
-  sitemap(): Promise<InvestorSlugEntry[]> {
-    return this.investors.listSlugs();
+  sitemap(@Query() query: SitemapPageDto): Promise<InvestorSlugEntry[]> {
+    return this.investors.listSlugs(query.page ?? 0);
+  }
+
+  /** Sizes the sitemap index: how many `SITEMAP_PAGE_SIZE` pages to list. */
+  @Get('sitemap/count')
+  async sitemapCount(): Promise<SitemapCount> {
+    return { count: await this.investors.countSlugs() };
   }
 
   @Get(':slug')

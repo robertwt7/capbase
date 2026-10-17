@@ -75,9 +75,11 @@ export type CompanyType = 'For profit' | 'Non-profit';
 
 export const COMPANY_TYPES: readonly CompanyType[] = ['For profit', 'Non-profit'];
 
-/** Controlled investor vocabulary. The last three are derivable from source
- *  structure — Wikidata P31 classes and the Form ADV fund-type columns — rather
- *  than guessed from the firm's name. */
+/** Controlled investor vocabulary. Every value is read from a publisher's
+ *  structured field, never guessed from the firm's name: `Hedge fund`,
+ *  `Sovereign wealth` and `Private equity` come from Wikidata P31 classes and the
+ *  Form ADV fund-type columns; the limited-partner types (`Pension fund` through
+ *  `Government`) come from a data partner's closed firm-type field. */
 export type InvestorType =
   | 'Venture'
   | 'Growth'
@@ -86,7 +88,17 @@ export type InvestorType =
   | 'Private equity'
   | 'Accelerator'
   | 'Hedge fund'
-  | 'Sovereign wealth';
+  | 'Sovereign wealth'
+  | 'Pension fund'
+  | 'Endowment'
+  | 'Foundation'
+  | 'Family office'
+  | 'Insurance'
+  | 'Bank'
+  | 'Wealth manager'
+  | 'Asset manager'
+  | 'Fund of funds'
+  | 'Government';
 
 export const INVESTOR_TYPES: readonly InvestorType[] = [
   'Venture',
@@ -97,6 +109,16 @@ export const INVESTOR_TYPES: readonly InvestorType[] = [
   'Accelerator',
   'Hedge fund',
   'Sovereign wealth',
+  'Pension fund',
+  'Endowment',
+  'Foundation',
+  'Family office',
+  'Insurance',
+  'Bank',
+  'Wealth manager',
+  'Asset manager',
+  'Fund of funds',
+  'Government',
 ];
 
 /** What kind of capital a fund deploys. Both SEC sources publish a fund type as
@@ -124,6 +146,29 @@ export const FUND_STRATEGIES: readonly FundStrategy[] = [
   'Securitized asset',
   'Liquidity',
   'Other',
+];
+
+/** Where a fund is in its life. Read from a data partner's closed fund-status
+ *  field; the SEC sources publish none, so their funds leave it null. */
+export type FundStatus =
+  | 'Announced'
+  | 'Raising'
+  | 'First close'
+  | 'Second close'
+  | 'Later close'
+  | 'Closed'
+  | 'Evergreen'
+  | 'Liquidated';
+
+export const FUND_STATUSES: readonly FundStatus[] = [
+  'Announced',
+  'Raising',
+  'First close',
+  'Second close',
+  'Later close',
+  'Closed',
+  'Evergreen',
+  'Liquidated',
 ];
 
 /** Capital type of a funding round. Grants are non-dilutive government awards

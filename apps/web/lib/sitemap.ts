@@ -12,16 +12,21 @@
 //     people alone are past that. `generateSitemaps()` would handle the split
 //     but needs the chunk count at BUILD time, which is the same unavailable
 //     fetch — so the index is computed here, per request, from real counts.
+//
+// Each child file asks the API for exactly its own page
+// (`GET /<family>/sitemap?page=N`) and the index asks only for counts — a
+// whole-family read (24 MB for ~340k companies, refetched by every file) ran
+// the 512 MB API container out of heap.
 
-import { SECTORS } from '@repo/api';
+import { SECTORS, SITEMAP_PAGE_SIZE } from '@repo/api';
 
-import { getCompanySlugs, getInvestorSlugs, getPersonSlugs } from './data';
+import { getSitemapCount, getSitemapSlugs, type SitemapFamily } from './data';
 import { sectorSlug } from './markets';
 import { SITE_URL } from './site';
 
-/** The sitemap protocol's hard cap. Also keeps each file far under the 50MB
- *  uncompressed limit, which we would never approach at this URL length. */
-export const URLS_PER_SITEMAP = 45_000;
+/** Under the protocol's 50,000 cap, and far under its 50MB uncompressed limit.
+ *  The API pages by the same constant, so one file is one API page. */
+export const URLS_PER_SITEMAP = SITEMAP_PAGE_SIZE;
 
 /** Pages that exist regardless of the data. */
 const STATIC_PATHS = [
@@ -48,19 +53,16 @@ export interface SitemapEntry {
 }
 
 /** The entity families that need paging. `static` is a single file. */
-export type SitemapKind = 'static' | 'companies' | 'investors' | 'people';
+export type SitemapKind = 'static' | 'companies' | 'investors' | 'people' | 'funds';
 
-const LOADERS: Record<Exclude<SitemapKind, 'static'>, () => Promise<{ slug: string; updatedAt: string }[]>> = {
-  companies: getCompanySlugs,
-  investors: getInvestorSlugs,
-  people: getPersonSlugs,
-};
+const FAMILIES: readonly SitemapFamily[] = ['companies', 'investors', 'people', 'funds'];
 
 /** `/companies/acme` etc. — the path prefix each family's slugs hang off. */
-const PREFIX: Record<Exclude<SitemapKind, 'static'>, string> = {
+const PREFIX: Record<SitemapFamily, string> = {
   companies: '/companies',
   investors: '/investors',
   people: '/people',
+  funds: '/funds',
 };
 
 /** Escape the five XML metacharacters. Slugs are kebab-case today, so this is
@@ -106,8 +108,8 @@ export function staticEntries(): SitemapEntry[] {
 export async function entriesFor(kind: SitemapKind, page: number): Promise<SitemapEntry[]> {
   if (kind === 'static') return page === 0 ? staticEntries() : [];
 
-  const rows = await LOADERS[kind]();
-  return rows.slice(page * URLS_PER_SITEMAP, (page + 1) * URLS_PER_SITEMAP).map((r) => ({
+  const rows = await getSitemapSlugs(kind, page);
+  return rows.map((r) => ({
     url: `${SITE_URL}${PREFIX[kind]}/${r.slug}`,
     lastModified: r.updatedAt,
   }));
@@ -121,28 +123,20 @@ export async function entriesFor(kind: SitemapKind, page: number): Promise<Sitem
  * build-time failure hid — 26 URLs looked like a valid sitemap.
  */
 export async function indexFiles(): Promise<string[]> {
-  const [companies, investors, people] = await Promise.all([
-    getCompanySlugs(),
-    getInvestorSlugs(),
-    getPersonSlugs(),
-  ]);
+  const counts = await Promise.all(FAMILIES.map(getSitemapCount));
 
   const files = ['static.xml'];
-  for (const [kind, rows] of [
-    ['companies', companies],
-    ['investors', investors],
-    ['people', people],
-  ] as const) {
-    const pages = Math.ceil(rows.length / URLS_PER_SITEMAP);
+  FAMILIES.forEach((kind, k) => {
+    const pages = Math.ceil((counts[k] ?? 0) / URLS_PER_SITEMAP);
     for (let i = 0; i < pages; i++) files.push(`${kind}-${i}.xml`);
-  }
+  });
   return files;
 }
 
 /** `people-1.xml` → { kind: 'people', page: 1 }; null when it names nothing. */
 export function parseSitemapFile(file: string): { kind: SitemapKind; page: number } | null {
   if (file === 'static.xml') return { kind: 'static', page: 0 };
-  const match = /^(companies|investors|people)-(\d+)\.xml$/.exec(file);
+  const match = /^(companies|investors|people|funds)-(\d+)\.xml$/.exec(file);
   if (!match) return null;
   return { kind: match[1] as SitemapKind, page: Number(match[2]) };
 }

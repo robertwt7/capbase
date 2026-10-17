@@ -2,6 +2,7 @@ import type {
   CompanyStatus,
   CompanyType,
   ExitType,
+  FundStatus,
   FundStrategy,
   IdentifierScheme,
   InvestorType,
@@ -23,6 +24,21 @@ export interface SourceIdentifier {
   value: string;
 }
 
+/**
+ * A reference to an investor firm by the source's own id — how a source that
+ * publishes id-keyed edges (fund → manager, deal → investor, LP → fund) points
+ * at a firm it contributed earlier, possibly in an earlier run.
+ *
+ * Resolved by provenance key (`${source}:${externalId}`) first, then by
+ * `identifier`: a firm the source MATCHED to an existing row rather than
+ * creating has no provenance key of its own, but it does carry the source's
+ * identifier, written when it matched. Never by name.
+ */
+export interface SourceFirmRef {
+  externalId: string;
+  identifier?: SourceIdentifier;
+}
+
 /** One capital event contributed by a source. */
 export interface NormalizedRound {
   /** Stable id of this round within the source (Form D accession, Reg CF file
@@ -40,6 +56,12 @@ export interface NormalizedRound {
   currency?: string;
   /** The amount as published, in `currency`. */
   amountLocal?: number;
+  /** The name is a placeholder ("Undisclosed round"), so it must never
+   *  replace a name another source recorded. */
+  genericName?: boolean;
+  /** Firms that took part, by the source's own firm id. Written as
+   *  RoundInvestor rows; a firm that does not resolve is skipped and counted. */
+  investors?: (SourceFirmRef & { lead?: boolean })[];
 }
 
 /** An executive/director/founder attached to a company or an investor firm. */
@@ -62,9 +84,24 @@ export interface NormalizedPerson {
   endYear?: number | null;
   title?: string | null;
   linkedinUrl?: string | null;
-  /** Identifiers for the PERSON, not for the role. Only WIKIDATA today — it is
-   *  the one scheme any source publishes for a human. */
+  /** Identifiers for the PERSON, not for the role: WIKIDATA, or a licensed
+   *  partner's contact id. */
   identifiers?: SourceIdentifier[];
+  /**
+   * Resolve this human by identifier ONLY — never by an exactly-equal name, and
+   * never register the name for later name matches. For a source that publishes
+   * a stable per-person id across a corpus where names collide constantly (two
+   * different "John Smith"s at two firms): a name merge there would be wrong far
+   * more often than right, and would pull a Form D "John Smith" into it too.
+   */
+  identifierOnly?: boolean;
+  /**
+   * PRIVATE professional contact details for this role. Stored in the
+   * PersonContact table, which no public path reads; never written to a public
+   * column (`linkedinUrl` above is the PUBLIC one), never logged, never put in
+   * a Revision.
+   */
+  contact?: { email?: string | null; phone?: string | null; linkedinUrl?: string | null };
 }
 
 /** An investor holding a position in the company (not tied to a round). */
@@ -75,6 +112,9 @@ export interface NormalizedInvestor {
    *  Distinct from `externalId` above, which identifies the holding. Used to
    *  resolve the holding to a first-class Investor row. */
   investorExternalId?: string;
+  /** The firm's identifier as this source wrote it (see SourceFirmRef). When
+   *  set, the holding resolves by key or identifier only — never by name. */
+  investorIdentifier?: SourceIdentifier;
   name: string;
   type: InvestorType;
   /** 'Undisclosed' when unknown. */
@@ -160,6 +200,18 @@ export interface NormalizedRecord {
    *  round would re-run the company upsert per round and let the last one
    *  overwrite totalRaisedUsd. */
   rounds?: NormalizedRound[];
+  /**
+   * How to treat a round that looks like one another source already recorded
+   * for a company this record MATCHED (see `round-dedup.ts`). Absent: no check,
+   * every round is written (the historical behaviour of every public source).
+   *  - `skip`: do not write the near-duplicate; attach its investors to the
+   *    existing round instead.
+   *  - `enrich`: as `skip`, and also correct the existing INGESTED round with
+   *    this source's facts — its stage name, its date, an amount it lacked —
+   *    recording each change in the timeline. A human contribution is never
+   *    modified.
+   */
+  roundDedup?: 'skip' | 'enrich';
 
   people?: NormalizedPerson[];
   investors?: NormalizedInvestor[];
@@ -229,6 +281,74 @@ export interface NormalizedFund {
   hq?: string | null;
   secFundId?: string | null;
   cikNumber?: string | null;
+  /** The manager by the source's own firm id, for a source that publishes its
+   *  managers itself (resolved like SourceFirmRef). Either this or
+   *  `managerCrd` must resolve, or the fund is dropped. */
+  manager?: SourceFirmRef;
+  status?: FundStatus | null;
+  /** ISO dates. */
+  launchDate?: string | null;
+  latestCloseDate?: string | null;
+  finalCloseDate?: string | null;
+  hardCapUsd?: number | null;
+  /** Percentages as published (2.0 = 2%). Null when absent or unparseable —
+   *  never 0 for "unknown". */
+  managementFeePct?: number | null;
+  carriedInterestPct?: number | null;
+  hurdleRatePct?: number | null;
+  targetIrrNetMinPct?: number | null;
+  targetIrrNetMaxPct?: number | null;
+  targetIrrGrossMinPct?: number | null;
+  targetIrrGrossMaxPct?: number | null;
+  regionFocus?: string | null;
+}
+
+/**
+ * A fund as an edge endpoint: the source's own id, plus its name and manager
+ * so a fund that MATCHED an existing row (and so has no provenance key of its
+ * own) resolves exactly the way `upsertFund` matched it — same manager, same
+ * normalized name.
+ */
+export interface SourceFundRef {
+  externalId: string;
+  name: string;
+  manager: SourceFirmRef;
+}
+
+/** One limited partner's commitment to a fund. */
+export interface NormalizedFundCommitment {
+  /** Stable within the source, e.g. `${fundId}:${firmId}`. */
+  externalId: string;
+  fund: SourceFundRef;
+  investor: SourceFirmRef;
+  /** ISO 4217 of `amountLocal`; defaults to USD. */
+  currency?: string;
+  amountLocal?: number | null;
+  /** FX-converted comparable figure; null when undisclosed or unconvertible. */
+  amountUsd?: number | null;
+}
+
+/** A point-in-time figure for a fund. */
+export interface NormalizedFundMetric {
+  fund: SourceFundRef;
+  /** ISO date. */
+  asAt: string;
+  dryPowderUsd?: number | null;
+  aumUsd?: number | null;
+  unrealizedUsd?: number | null;
+}
+
+/**
+ * One bounded batch from a streaming source. A source yields its dependencies
+ * first (firms before the funds they manage, funds before their commitments),
+ * and IngestService applies each batch in that field order too.
+ */
+export interface SourceBatch {
+  investors?: NormalizedInvestorFirm[];
+  funds?: NormalizedFund[];
+  records?: NormalizedRecord[];
+  commitments?: NormalizedFundCommitment[];
+  metrics?: NormalizedFundMetric[];
 }
 
 export const INGESTION_SOURCES = Symbol('INGESTION_SOURCES');
@@ -251,6 +371,10 @@ export interface FetchOptions {
 /** Contract every ingestion source implements. */
 export interface IngestionSource {
   readonly name: string;
+  /** Run only when named explicitly (`SOURCE=PARTNER`), never as part of an
+   *  "all sources" run — for a licensed snapshot that must be loaded on
+   *  purpose. */
+  readonly explicitOnly?: boolean;
   fetch(opts: FetchOptions): Promise<NormalizedRecord[]>;
   /** Sources that publish an investor universe implement this too. Keeping it on
    *  the same interface means one DI token and one INGEST_SOURCES env var. */
@@ -266,4 +390,11 @@ export interface IngestionSource {
    * why a second call returns nothing.
    */
   fetchFunds?(opts: FetchOptions): Promise<NormalizedFund[]>;
+  /**
+   * For a source too large to materialise (the ~550 MB jobs heap cannot hold a
+   * few hundred thousand companies with their rounds): bounded batches, applied
+   * and released one at a time. When present, `run()` uses this exclusively and
+   * never calls fetch/fetchInvestors/fetchFunds.
+   */
+  stream?(opts: FetchOptions): AsyncIterable<SourceBatch>;
 }

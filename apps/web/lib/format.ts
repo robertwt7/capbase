@@ -90,3 +90,16 @@ export function signedPct(value: number): string {
 export function foundedYear(year: number): string | null {
   return year > 0 ? String(year) : null;
 }
+
+/** A percentage as published (2 → "2%", 1.75 → "1.75%"), or an em dash when
+ *  the source states none. Never "0%" for unknown. */
+export function formatPct(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return `${Number(value.toFixed(2))}%`;
+}
+
+/** A target range ("15–20%"), one bound ("15%"), or an em dash. */
+export function formatPctRange(min: number | null | undefined, max: number | null | undefined): string {
+  if (min != null && max != null && min !== max) return `${Number(min.toFixed(2))}–${formatPct(max)}`;
+  return formatPct(min ?? max);
+}

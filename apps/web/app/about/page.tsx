@@ -6,9 +6,9 @@ import { canonical } from '@/lib/metadata';
 import { SUPPORT_EMAIL } from '@/lib/site';
 
 export const metadata: Metadata = {
-  title: 'About — Open, Crowdsourced Company Data',
+  title: 'About — Open Company Data',
   description:
-    'Capbase is an open company database: free startup funding data aggregated from SEC EDGAR filings, Wikidata, and moderated community contributions.',
+    'Capbase is an open company database: free startup funding data combining public records (SEC EDGAR filings, Wikidata), data provided by partners, and moderated community contributions.',
   ...canonical('/about'),
 };
 
@@ -23,11 +23,11 @@ export default function AboutPage() {
             An open alternative to closed deal databases
           </h2>
           <p className="mt-3 text-base leading-[1.65] text-graphite-900">
-            Who funds the private economy shouldn&apos;t be a trade secret. Capbase is a free,
-            crowdsourced company database — funding rounds, investors, people, acquisitions, and
-            exits for the companies shaping each sector. The incumbents lock this information
-            behind subscriptions and seat licences; Capbase publishes it in the open, free to
-            read and free to build on.
+            Who funds the private economy shouldn&apos;t be a trade secret. Capbase is a free
+            company database — funding rounds, investors, funds, people, acquisitions, and exits
+            for the companies shaping each sector. The incumbents lock this information behind
+            subscriptions and seat licences; Capbase publishes it in the open, free to read, with
+            its public-record and community data free to build on.
           </p>
         </section>
 
@@ -36,14 +36,21 @@ export default function AboutPage() {
             Where the data comes from
           </h2>
           <p className="mt-3 text-base leading-[1.65] text-graphite-900">
-            Three streams feed the database. First, automated ingestion of{' '}
-            <span className="font-medium text-ink">SEC EDGAR Form D filings</span> — the official
-            disclosure US companies file when they raise a private placement — which gives every
-            round a verifiable, on-the-record source. Second,{' '}
-            <span className="font-medium text-ink">Wikidata enrichment</span> for notable
-            companies: websites, headquarters, sectors, investors, founders, and exits. Third,{' '}
+            Capbase combines public records, data provided by partners, and moderated community
+            contributions. First,{' '}
+            <span className="font-medium text-ink">public records</span>: automated ingestion of
+            SEC EDGAR filings — the official disclosures US companies file when they raise a
+            private placement — and government award data, which give those rounds a verifiable,
+            on-the-record source, plus Wikidata for notable companies&apos; websites, sectors,
+            founders and exits. Second,{' '}
+            <span className="font-medium text-ink">data provided by partners</span> — companies,
+            deals, funds and the investors behind them, beyond what any filing discloses. Third,{' '}
             <span className="font-medium text-ink">community contributions</span> — the
-            crowdsourced layer that fills in what filings never capture.
+            crowdsourced layer that fills in what neither captures. See{' '}
+            <Link href="/data" className="text-ink underline underline-offset-[3px]">
+              Data &amp; sources
+            </Link>{' '}
+            for each source and its terms.
           </p>
         </section>
 
@@ -54,8 +61,8 @@ export default function AboutPage() {
           <p className="mt-3 text-base leading-[1.65] text-graphite-900">
             Crowdsourced doesn&apos;t mean unchecked. Every community submission — a new company, a
             funding round, a correction — enters a moderation queue and is reviewed before it
-            appears publicly. Automated ingestion from official sources is keyed to the original
-            filings, so re-runs update records instead of duplicating them. Spotted something
+            appears publicly. Automated ingestion is keyed to each source&apos;s own records, so
+            re-runs update records instead of duplicating them. Spotted something
             wrong anyway? Every profile has a propose-change flow, and{' '}
             <a
               href={`mailto:${SUPPORT_EMAIL}`}

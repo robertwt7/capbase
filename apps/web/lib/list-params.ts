@@ -7,6 +7,7 @@ import {
   COMPANY_STATUSES,
   COUNTRY_CODES,
   FUND_SORTS,
+  FUND_STATUSES,
   FUND_STRATEGIES,
   INVESTOR_SORTS,
   INVESTOR_TYPES,
@@ -69,6 +70,7 @@ export function fundListQuery(sp: SearchParams): FundListQuery {
   return {
     q: sp.q?.trim() || undefined,
     strategy: pick(sp.strategy, FUND_STRATEGIES),
+    status: pick(sp.status, FUND_STATUSES),
     // A manager slug is free text, so it is passed through unvalidated — an
     // unknown slug simply matches nothing rather than 400ing.
     manager: sp.manager?.trim() || undefined,

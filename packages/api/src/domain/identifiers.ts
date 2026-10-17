@@ -24,7 +24,10 @@ export type IdentifierScheme =
   /** UK Companies House company number (CRN), e.g. 05002194 or SC123456. */
   | 'COMPANIES_HOUSE'
   /** Identifying web host (see apps/jobs/src/util/domain.ts for what counts). */
-  | 'DOMAIN';
+  | 'DOMAIN'
+  /** A licensed data partner's own record id. Internal only: never rendered,
+   *  never linked (the API's HIDDEN_SCHEMES drops it from every response). */
+  | 'PARTNER';
 
 export const IDENTIFIER_SCHEMES: readonly IdentifierScheme[] = [
   'LEI',
@@ -37,6 +40,7 @@ export const IDENTIFIER_SCHEMES: readonly IdentifierScheme[] = [
   'DUNS',
   'COMPANIES_HOUSE',
   'DOMAIN',
+  'PARTNER',
 ];
 
 /**
@@ -163,6 +167,9 @@ export function normalizeIdentifier(scheme: IdentifierScheme, raw: string): stri
         ? lower
         : null;
     }
+    case 'PARTNER':
+      // Opaque, but bounded: some ids carry a prefix (`fm-overdrive-12`).
+      return /^[A-Za-z0-9-]{1,64}$/.test(trimmed) ? trimmed : null;
     default:
       // Unreachable for a well-typed caller, but `scheme` is a plain String
       // column: a row written by an older or buggier writer must normalize to
@@ -171,10 +178,11 @@ export function normalizeIdentifier(scheme: IdentifierScheme, raw: string): stri
   }
 }
 
-/** The schemes whose issuer publishes a public page for every value. The two
- *  that don't: DUNS sits behind D&B's paywall, and a ticker has no neutral
- *  canonical page (an exchange's own listing page is not one). */
-export type LinkedScheme = Exclude<IdentifierScheme, 'TICKER' | 'DUNS'>;
+/** The schemes whose issuer publishes a public page for every value. The ones
+ *  that don't: DUNS sits behind D&B's paywall, a ticker has no neutral
+ *  canonical page (an exchange's own listing page is not one), and a partner id
+ *  is never shown at all. */
+export type LinkedScheme = Exclude<IdentifierScheme, 'TICKER' | 'DUNS' | 'PARTNER'>;
 
 const LINKED_URLS: Record<LinkedScheme, (value: string) => string> = {
   LEI: (v) => `https://search.gleif.org/#/record/${v}`,

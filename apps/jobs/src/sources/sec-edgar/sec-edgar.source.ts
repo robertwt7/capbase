@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Stage } from '@repo/api';
 
 import type {
   FetchOptions,
@@ -9,6 +8,7 @@ import type {
   NormalizedRecord,
 } from '../ingestion-source';
 import { kebab } from '../../util/slug';
+import { stageFromAmount } from '../../util/stage';
 import { EdgarClient, type FormDRef } from './edgar.client';
 import { countryFromEdgarCode, countryFromEdgarDescription } from './edgar-locations';
 import { parseFormD, roleKind } from './form-d.parser';
@@ -186,13 +186,6 @@ export function safeIsoDate(...candidates: (string | null | undefined)[]): strin
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Rough stage inference from offering size — Form D doesn't disclose round
- *  series, so we band by amount to keep a valid Stage value. */
-export function stageFromAmount(amountUsd: number): Stage {
-  if (amountUsd < 5_000_000) return 'Seed';
-  if (amountUsd < 20_000_000) return 'Series A';
-  if (amountUsd < 60_000_000) return 'Series B';
-  if (amountUsd < 150_000_000) return 'Series C';
-  if (amountUsd < 400_000_000) return 'Series D';
-  return 'Late stage';
-}
+/** Re-exported: the banding now lives in util/stage.ts, shared with the
+ *  partner source. */
+export { stageFromAmount };

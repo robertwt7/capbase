@@ -36,8 +36,8 @@ export async function generateMetadata({
   const stats = await getMarketStats();
   const stat = stats.find((s) => s.sector === sector);
   const description = stat
-    ? `${sector} startups on Capbase: ${formatCount(stat.companyCount)} companies, ${formatCount(stat.dealCount)} disclosed deals, ${formatUsd(stat.totalRaisedUsd)} raised. Free, crowdsourced funding data.`
-    : `Funding rounds, investors, and market data for ${sector} startups — free and crowdsourced on Capbase.`;
+    ? `${sector} startups on Capbase: ${formatCount(stat.companyCount)} companies, ${formatCount(stat.dealCount)} disclosed deals, ${formatUsd(stat.totalRaisedUsd)} raised. Free, open funding data.`
+    : `Funding rounds, investors, and market data for ${sector} startups — free and open on Capbase.`;
 
   return {
     title: `${sector} Startups — Funding & Market Data`,

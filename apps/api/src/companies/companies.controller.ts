@@ -4,6 +4,7 @@ import type {
   CompanyDetailResponse,
   CompanyHistoryResponse,
   CompanySlugEntry,
+  SitemapCount,
   CountryFacet,
   FeaturedCompaniesResponse,
   Paginated,
@@ -13,6 +14,7 @@ import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.d
 import { Contribution } from '../auth/decorators/contribution.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { CompaniesService } from './companies.service';
+import { SitemapPageDto } from '../prisma/sitemap-page.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
   CreateAcquisitionDto,
@@ -59,8 +61,14 @@ export class CompaniesController {
 
   // Declared before @Get(':slug') so the literal path wins over the param route.
   @Get('sitemap')
-  sitemap(): Promise<CompanySlugEntry[]> {
-    return this.companies.listSlugs();
+  sitemap(@Query() query: SitemapPageDto): Promise<CompanySlugEntry[]> {
+    return this.companies.listSlugs(query.page ?? 0);
+  }
+
+  /** Sizes the sitemap index: how many `SITEMAP_PAGE_SIZE` pages to list. */
+  @Get('sitemap/count')
+  async sitemapCount(): Promise<SitemapCount> {
+    return { count: await this.companies.countSlugs() };
   }
 
   // Declared before @Get(':slug') so the more specific path wins over the param

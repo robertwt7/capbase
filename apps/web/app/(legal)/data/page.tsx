@@ -8,11 +8,11 @@ import { DATA_LICENSE_URL, SOURCE_URL, SUPPORT_EMAIL } from '@/lib/site';
 export const metadata: Metadata = {
   title: 'Data & Sources',
   description:
-    'Where Capbase data comes from — SEC EDGAR, SBIR.gov, Wikidata and community contributions — the terms each source carries, the CC BY-NC 4.0 data licence, and how to cite Capbase.',
+    'Where Capbase data comes from — public records (SEC EDGAR, SBIR.gov, Wikidata), data provided by partners, and community contributions — the terms each source carries, the CC BY-NC 4.0 data licence, and how to cite Capbase.',
   ...canonical('/data'),
 };
 
-const LAST_UPDATED = '3 October 2026';
+const LAST_UPDATED = '17 October 2026';
 
 // One entry per ingested source. Keep in step with apps/jobs/src/sources/ —
 // a new source is not live until it is listed here with its terms.
@@ -88,11 +88,11 @@ export default function DataPage() {
       <div className="mt-2 font-mono text-xs text-graphite-500">Last updated: {LAST_UPDATED}</div>
 
       <p>
-        Capbase combines public filings, open datasets and moderated community contributions. Every
-        published fact carries a bracketed marker naming its source — <code>[SEC]</code>,{' '}
-        <code>[GOV]</code>, <code>[WD]</code> and so on — that links to the primary document. A
-        fact with no source shows a muted em dash instead, so a filing and an unsourced
-        contribution never look alike.
+        Capbase combines public records, data provided by partners, and moderated community
+        contributions. Every public-record fact carries a bracketed marker naming its source —{' '}
+        <code>[SEC]</code>, <code>[GOV]</code>, <code>[WD]</code> and so on — that links to the
+        primary document. A fact with no public source — partner data, or an unsourced
+        contribution — shows a muted em dash instead, so it never looks like a filing.
       </p>
 
       <h2>Ingested sources</h2>
@@ -118,6 +118,21 @@ export default function DataPage() {
         </section>
       ))}
 
+      <h2>Partner data</h2>
+      <p>
+        Some company, deal, fund, fund-term, limited-partner and investor-firm data is provided by
+        partners. It is published without a source marker (the muted em
+        dash) and is not reviewed by a moderator.
+      </p>
+      <p>
+        Partner data is <strong>not</strong> covered by the CC BY-NC licence below. You may
+        read it on Capbase, but you may not copy, export or reuse it from Capbase.
+      </p>
+      <p>
+        For people at investment firms, partners also provide professional contact details. We
+        store them and never publish them; see the <Link href="/privacy">Privacy Policy</Link>.
+      </p>
+
       <h2>Community contributions</h2>
       <p>
         Companies, funding rounds, people, investors, acquisitions, exits and corrections submitted
@@ -135,7 +150,8 @@ export default function DataPage() {
           Creative Commons Attribution-NonCommercial 4.0
         </a>{' '}
         (CC BY-NC 4.0). You may copy, share and adapt it for non-commercial purposes with
-        attribution.
+        attribution. Data provided by partners is excluded: it is not covered by this licence and
+        may not be reused from Capbase.
       </p>
       <p>
         That licence cannot take away rights you already have. Facts from SEC filings and SBIR.gov

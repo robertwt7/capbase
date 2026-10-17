@@ -1,7 +1,7 @@
 // Shared pagination contract for list endpoints. Directory reads are paginated
 // server-side; clients pass query params and receive one page plus the total.
 
-import type { CompanyStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
+import type { CompanyStatus, FundStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
 import type { CountryCode } from './geography';
 
 export interface Paginated<T> {
@@ -13,6 +13,20 @@ export interface Paginated<T> {
 
 export const DEFAULT_PAGE_SIZE = 25;
 export const MAX_PAGE_SIZE = 100;
+
+/**
+ * URLs per child sitemap (the protocol caps one file at 50,000). Each
+ * `GET /<family>/sitemap?page=N` (0-based) returns exactly one such page, and
+ * `GET /<family>/sitemap/count` sizes the index — so no request ever holds a
+ * whole family. Whole-family reads (24 MB of JSON for ~340k companies) ran a
+ * 512 MB API container out of heap under a crawler's parallel fetches.
+ */
+export const SITEMAP_PAGE_SIZE = 45_000;
+
+/** `GET /<family>/sitemap/count`. */
+export interface SitemapCount {
+  count: number;
+}
 
 export type CompanySort = 'name' | 'raised' | 'valuation';
 
@@ -78,6 +92,7 @@ export const FUND_SORTS: readonly FundSort[] = ['size', 'vintage', 'name'];
 export interface FundListQuery {
   q?: string;
   strategy?: FundStrategy;
+  status?: FundStatus;
   /** Restrict to one manager (the investor profile's "see all funds" link). */
   manager?: string; // investor slug
   sort?: FundSort;

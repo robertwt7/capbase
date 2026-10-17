@@ -11,6 +11,7 @@ import {
   type ApiKeyWhoAmI,
   type Company,
   type CompanyDetailResponse,
+  type FundDetailResponse,
   type FundSummary,
   type InvestorDetailResponse,
   type InvestorSummary,
@@ -190,6 +191,18 @@ export class V1ReadController {
   @Get('funds')
   listFunds(@Query() query: ListFundsDto): Promise<Paginated<FundSummary>> {
     return this.funds.findAll(query);
+  }
+
+  @V1ReadThrottle()
+  @ApiOperation({ summary: 'Get a private fund' })
+  @ApiOkResponse({
+    description:
+      '`{ fund, commitments, commitmentCount, metrics, citations, indexable }` — the fund, its terms, its largest LP commitments and point-in-time metrics.',
+  })
+  @ApiNotFoundResponse({ description: 'No public fund has this slug.' })
+  @Get('funds/:slug')
+  fund(@Param('slug') slug: string): Promise<FundDetailResponse> {
+    return this.funds.findOne(slug);
   }
 
   @V1ReadThrottle()

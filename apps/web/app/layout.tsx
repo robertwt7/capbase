@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     template: `%s — ${SITE_NAME}`,
   },
   description:
-    'Funding rounds, investors, people, and market data for private companies — a free, crowdsourced, open-source alternative to Crunchbase and PitchBook.',
+    'Funding rounds, investors, people, and market data for private companies — a free, open-source alternative to Crunchbase and PitchBook.',
   // No `url` and no `alternates.canonical` here: every page would inherit them
   // and claim to be the homepage. Indexable pages set both via `canonical()`
   // (lib/metadata.ts); the rest emit neither.

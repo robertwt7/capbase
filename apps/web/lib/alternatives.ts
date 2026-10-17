@@ -18,7 +18,7 @@ export type Competitor = {
 const SHARED_ROWS: Array<{ label: string; capbase: string }> = [
   { label: 'Price', capbase: 'Free' },
   { label: 'Open source', capbase: 'Yes' },
-  { label: 'Data sources', capbase: 'SEC EDGAR + Wikidata + community' },
+  { label: 'Data sources', capbase: 'Public records + partner data + community' },
   { label: 'Community contributions', capbase: 'Yes, moderated' },
   { label: 'Funding rounds & investors', capbase: 'Yes' },
   { label: 'Account required to browse', capbase: 'No' },
@@ -35,11 +35,11 @@ export const COMPETITORS: Competitor[] = [
     name: 'Crunchbase',
     title: 'Free Crunchbase Alternative',
     description:
-      'Looking for a free Crunchbase alternative? Capbase has company funding rounds, investors, and startup data — open source, crowdsourced, and free to browse with no account.',
+      'Looking for a free Crunchbase alternative? Capbase has company funding rounds, investors, funds and startup data — open source, community-moderated, and free to browse with no account.',
     h1: 'The free, open Crunchbase alternative',
     intro: [
       'Capbase covers the ground most people open Crunchbase for — who raised, from whom, and when — without paywalls, seat licences, or an account wall. Funding rounds, investors, people, and market data for private companies, free to read.',
-      'Every row is traceable: automated ingestion of SEC EDGAR Form D filings supplies the official record, Wikidata enrichment fills in company facts, and moderated community contributions cover what filings never capture.',
+      'Capbase combines public records, data provided by partners, and moderated community contributions: SEC EDGAR filings supply the official record and public-record facts link to their source document, partner data adds companies, deals and funds no filing discloses, and the community covers the rest.',
     ],
     rows: rows([
       'Paid subscription',
@@ -59,11 +59,11 @@ export const COMPETITORS: Competitor[] = [
       },
       {
         q: 'Is Capbase really a Crunchbase alternative?',
-        a: 'For core company and funding research, yes: funding rounds, investors, people, acquisitions, and exits, sourced from SEC filings, Wikidata, and a moderated community. For sales prospecting or CRM workflows, Crunchbase remains the more complete paid product.',
+        a: 'For core company and funding research, yes: funding rounds, investors, people, acquisitions, and exits, sourced from public records such as SEC filings and Wikidata, data provided by partners, and a moderated community. For sales prospecting or CRM workflows, Crunchbase remains the more complete paid product.',
       },
       {
         q: 'Where does Capbase data come from?',
-        a: 'SEC EDGAR Form D filings (official US private-placement disclosures), Wikidata enrichment for notable companies, and community contributions reviewed by moderators before publishing.',
+        a: 'Public records — SEC EDGAR filings (official US private-placement disclosures), government award data and Wikidata for notable companies — plus data provided by partners, and community contributions reviewed by moderators before publishing.',
       },
       {
         q: 'Can I export data from Capbase?',
@@ -76,11 +76,11 @@ export const COMPETITORS: Competitor[] = [
     name: 'PitchBook',
     title: 'Free PitchBook Alternative',
     description:
-      'Need a free PitchBook alternative? Capbase offers startup funding rounds, investors, and market data — open source and crowdsourced, with no enterprise contract.',
+      'Need a free PitchBook alternative? Capbase offers startup funding rounds, investors, funds and market data — open source and community-moderated, with no enterprise contract.',
     h1: 'The free, open PitchBook alternative',
     intro: [
       'PitchBook is an institutional research platform priced for institutions. Capbase answers the everyday questions — which companies raised, who invested, how sectors are moving — in the open, free to read, with no enterprise contract or sales call.',
-      'The data is built from official SEC EDGAR Form D filings, Wikidata enrichment, and moderated community contributions, so what you see is traceable to a public source.',
+      'The data combines public records (SEC EDGAR filings, Wikidata), data provided by partners, and moderated community contributions; public-record facts link to their source document.',
     ],
     rows: rows([
       'Enterprise subscription',
@@ -92,7 +92,7 @@ export const COMPETITORS: Competitor[] = [
       'Paid tiers',
     ]),
     whenToUseThem:
-      'PitchBook is still the right tool for institutional-grade diligence: valuations analysis, comps, fund performance, LP data, Excel plugins, and analyst support. Capbase does not attempt any of that — it covers open funding data, for free.',
+      'PitchBook is still the right tool for institutional-grade diligence: valuations analysis, comps, fund performance analytics, Excel plugins, and analyst support. Capbase does not attempt that — it covers funding data, funds and their limited partners, for free.',
     faqs: [
       {
         q: 'How much does PitchBook cost?',
@@ -100,7 +100,7 @@ export const COMPETITORS: Competitor[] = [
       },
       {
         q: 'Does Capbase have valuations and fund data like PitchBook?',
-        a: 'No. Capbase records disclosed funding rounds, post-money valuations when public, investors, and people. PitchBook-style estimated valuations, comps, and fund performance analytics are out of scope.',
+        a: 'Partly. Capbase records funding rounds, post-money valuations when public, investors, people, and funds with their terms and limited-partner commitments where known. PitchBook-style estimated valuations, comps, and fund performance analytics are out of scope.',
       },
       {
         q: 'Who is Capbase for?',

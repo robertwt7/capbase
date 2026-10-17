@@ -15,7 +15,7 @@ export async function generateMetadata({
   return {
     title: 'Fund Directory — Vintages, Sizes & Managers',
     description:
-      'Private funds from SEC filings: manager, strategy, vintage year and size — free, open fund data.',
+      'Private funds from SEC filings and partners: manager, strategy, status, vintage year and size.',
     ...canonical(directoryCanonical('/funds', await searchParams)),
   };
 }

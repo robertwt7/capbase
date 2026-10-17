@@ -29,8 +29,16 @@ function investorRow(over: Record<string, unknown> = {}) {
     funds: [],
     // Officers Wikidata names on the firm itself; empty for most firms.
     people: [],
-    _count: { holdings: 0, funds: 0 },
+    commitments: [],
     ...over,
+    // Spread last so a test can override one count without restating the rest.
+    _count: {
+      holdings: 0,
+      funds: 0,
+      people: (over.people as unknown[] | undefined)?.length ?? 0,
+      commitments: 0,
+      ...(over._count as Record<string, number> | undefined),
+    },
   };
 }
 
@@ -57,6 +65,7 @@ describe('InvestorsService', () => {
   let transaction: jest.Mock;
   let citationFindMany: jest.Mock;
   let identifierFindMany: jest.Mock;
+  let relationCounts: Record<'holdings' | 'funds' | 'people' | 'commitments', jest.Mock>;
 
   beforeEach(() => {
     findMany = jest.fn();
@@ -66,9 +75,30 @@ describe('InvestorsService', () => {
     identifierFindMany = jest.fn(async () => []);
     // $transaction resolves the array of queries it is handed.
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    // The detail read counts each relation with its own query; these read the
+    // fixture's `_count` off the row findFirst last returned.
+    const countOf = (key: string) =>
+      jest.fn(async () => {
+        const row = (await findFirst.mock.results.at(-1)?.value) as
+          | { _count?: Record<string, number> }
+          | null
+          | undefined;
+        return row?._count?.[key] ?? 0;
+      });
+    relationCounts = {
+      holdings: countOf('holdings'),
+      funds: countOf('funds'),
+      people: countOf('people'),
+      commitments: countOf('commitments'),
+    };
     const prisma = {
       // findUnique backs the miss path: is this slug a tombstone, or nothing?
       investor: { findMany, count, findFirst, findUnique: jest.fn(async () => null) },
+      investorHolding: { count: relationCounts.holdings },
+      fund: { count: relationCounts.funds },
+      personRole: { count: relationCounts.people },
+      fundCommitment: { count: relationCounts.commitments },
+      company: { findMany: jest.fn(async () => []) },
       citation: { findMany: citationFindMany },
       entityIdentifier: { findMany: identifierFindMany },
       $transaction: transaction,
@@ -306,6 +336,54 @@ describe('InvestorsService', () => {
         );
         expect((await service.findOne('sequoia-capital')).indexable).toBe(true);
       });
+
+      it('is true for a limited partner with only fund commitments', async () => {
+        findFirst.mockResolvedValue(investorRow({ _count: { commitments: 3 } }));
+        expect((await service.findOne('sequoia-capital')).indexable).toBe(true);
+      });
+    });
+
+    it('maps an LP commitment with its fund and manager, money as numbers', async () => {
+      findFirst.mockResolvedValue(
+        investorRow({
+          commitments: [
+            {
+              id: 'c-1',
+              amountUsd: 25_000_000n,
+              amountLocal: 23_000_000n,
+              currency: 'EUR',
+              fund: {
+                slug: 'fund-iv',
+                name: 'Fund IV',
+                vintageYear: 2019,
+                strategy: 'Private equity',
+                manager: { slug: 'acme-partners', name: 'Acme Partners' },
+              },
+            },
+          ],
+          _count: { commitments: 40 },
+        }),
+      );
+      const res = await service.findOne('sequoia-capital');
+      expect(res.commitments).toEqual([
+        {
+          id: 'c-1',
+          fund: { slug: 'fund-iv', name: 'Fund IV', vintageYear: 2019, strategy: 'Private equity' },
+          manager: { slug: 'acme-partners', name: 'Acme Partners' },
+          amountUsd: 25_000_000,
+          amountLocal: 23_000_000,
+          currency: 'EUR',
+        },
+      ]);
+      expect(res.commitmentCount).toBe(40);
+    });
+
+    it('caps the people list and reports the total', async () => {
+      findFirst.mockResolvedValue(investorRow({ _count: { people: 4_000 } }));
+      const res = await service.findOne('sequoia-capital');
+      expect(res.peopleCount).toBe(4_000);
+      const include = (findFirst.mock.calls[0]![0] as { include: { people: { take: number } } }).include;
+      expect(include.people.take).toBe(60);
     });
   });
 
@@ -323,24 +401,25 @@ describe('InvestorsService', () => {
       });
     });
 
-    it('lists only firms with a holding, a fund or an officer — on the filters findOne counts', async () => {
+    it('lists only firms with a holding, fund, officer or commitment — on the filters findOne counts', async () => {
       findMany.mockResolvedValue([]);
       await service.listSlugs();
       findFirst.mockResolvedValue(investorRow());
       await service.findOne('sequoia-capital');
 
       const where = (findMany.mock.calls[0]![0] as { where: { OR: unknown[] } }).where;
-      const include = (findFirst.mock.calls[0]![0] as {
-        include: {
-          _count: { select: { holdings: { where: unknown }; funds: { where: unknown } } };
-          people: { where: unknown };
-        };
-      }).include;
+      // The filter each detail count used, minus the firm-id key it adds.
+      const counted = (m: jest.Mock, fk: string) => {
+        const w = { ...((m.mock.calls[0] as unknown[])[0] as { where: Record<string, unknown> }).where };
+        delete w[fk];
+        return w;
+      };
       // A firm can't be indexable on a row its page doesn't show.
       expect(where.OR).toEqual([
-        { holdings: { some: include._count.select.holdings.where } },
-        { funds: { some: include._count.select.funds.where } },
-        { people: { some: include.people.where } },
+        { holdings: { some: counted(relationCounts.holdings, 'investorId') } },
+        { funds: { some: counted(relationCounts.funds, 'managerId') } },
+        { people: { some: counted(relationCounts.people, 'investorId') } },
+        { commitments: { some: counted(relationCounts.commitments, 'investorId') } },
       ]);
     });
   });

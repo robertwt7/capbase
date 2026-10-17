@@ -87,12 +87,20 @@ const INVESTOR_CHILDREN = [
   { model: 'roundInvestor', column: 'investorId' },
   { model: 'fund', column: 'managerId' },
   { model: 'personRole', column: 'investorId' },
+  // An LP's fund commitments. No (fund, investor) unique key, so a pair the
+  // survivor already holds is kept as a second row — the InvestorHolding rule
+  // below — and the merge stays reversible.
+  { model: 'fundCommitment', column: 'investorId' },
 ] as const;
 
-/** A person owns exactly one thing: their roles. Note what is NOT here —
- *  citations. A person citation anchors to the ROLE row, whose id never moves
- *  in a person merge, so there is nothing to remap. */
-const PERSON_CHILDREN = [{ model: 'personRole', column: 'personId' }] as const;
+/** A person owns their roles, and the private contact details attached to them
+ *  (PersonContact — only ids are recorded in `moved`, never values). Note what
+ *  is NOT here — citations. A person citation anchors to the ROLE row, whose id
+ *  never moves in a person merge, so there is nothing to remap. */
+const PERSON_CHILDREN = [
+  { model: 'personRole', column: 'personId' },
+  { model: 'personContact', column: 'personId' },
+] as const;
 
 @Injectable()
 export class MergeService {

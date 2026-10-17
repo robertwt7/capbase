@@ -1,7 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { HttpException, NotFoundException } from '@nestjs/common';
 
-import { PERSON_INDEX_MIN_ROLES } from '@repo/api';
+import { PERSON_INDEX_MIN_ROLES, SITEMAP_PAGE_SIZE } from '@repo/api';
 
 import { PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -314,10 +314,24 @@ describe('PeopleService', () => {
   // merged out) runs against Postgres in test/indexing.e2e-spec.ts; a mocked
   // $queryRaw can only check what the query says.
   describe('listSlugs', () => {
-    /** The raw SQL text with its parameters, from a tagged-template call. */
+    /** The raw SQL text with its parameters, from a tagged-template call —
+     *  with a nested `Prisma.sql` fragment (the shared predicate) inlined. */
     function sqlOf(call: unknown[]): { text: string; values: unknown[] } {
-      const [strings, ...values] = call as [TemplateStringsArray, ...unknown[]];
-      return { text: strings.join('?').replace(/\s+/g, ' '), values };
+      const [strings, ...params] = call as [TemplateStringsArray, ...unknown[]];
+      const values: unknown[] = [];
+      let text = strings[0] ?? '';
+      params.forEach((param, i) => {
+        if (param && typeof param === 'object' && 'strings' in param && 'values' in param) {
+          const fragment = param as { strings: string[]; values: unknown[] };
+          text += fragment.strings.join('?');
+          values.push(...fragment.values);
+        } else {
+          text += '?';
+          values.push(param);
+        }
+        text += strings[i + 1] ?? '';
+      });
+      return { text: text.replace(/\s+/g, ' '), values };
     }
 
     it('maps rows to ISO timestamps for the sitemap', async () => {
@@ -338,11 +352,25 @@ describe('PeopleService', () => {
     it('requires PERSON_INDEX_MIN_ROLES public roles or a Wikidata identifier', async () => {
       await service.listSlugs();
       const { text, values } = sqlOf(queryRaw.mock.calls[0]!);
-      expect(values).toEqual([PERSON_INDEX_MIN_ROLES]);
+      expect(values).toEqual([PERSON_INDEX_MIN_ROLES, SITEMAP_PAGE_SIZE, 0]);
       // The roles counted are PUBLIC_ROLES: approved, on a public company or on none.
       expect(text).toContain(`r."moderationStatus" = 'APPROVED'`);
       expect(text).toContain(`r."companyId" IS NULL OR (c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL)`);
       expect(text).toContain(`e.scheme = 'WIKIDATA'`);
+    });
+
+    it('serves one SITEMAP_PAGE_SIZE page by slug, and counts with the same predicate', async () => {
+      await service.listSlugs(2);
+      const page = sqlOf(queryRaw.mock.calls[0]!);
+      expect(page.text).toContain('ORDER BY p.slug LIMIT ? OFFSET ?');
+      expect(page.values.slice(-2)).toEqual([SITEMAP_PAGE_SIZE, 2 * SITEMAP_PAGE_SIZE]);
+
+      queryRaw.mockResolvedValue([{ count: 7n }]);
+      await expect(service.countSlugs()).resolves.toBe(7);
+      const count = sqlOf(queryRaw.mock.calls[1]!);
+      expect(count.text).toContain('count(*)');
+      expect(count.text).toContain(`e.scheme = 'WIKIDATA'`);
+      expect(count.values).toEqual([PERSON_INDEX_MIN_ROLES]);
     });
   });
 });

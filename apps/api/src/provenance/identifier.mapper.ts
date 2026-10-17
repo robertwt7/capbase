@@ -6,10 +6,10 @@ import {
 } from '@repo/api';
 import type { EntityIdentifier as DbEntityIdentifier } from '@repo/db';
 
-/** DOMAIN is stored — it is a real match key — but never rendered: the profile
- *  already links the website, and repeating the host as an "identifier" is
- *  noise on the page. */
-const HIDDEN_SCHEMES = new Set<IdentifierScheme>(['DOMAIN']);
+/** Stored, never rendered. DOMAIN is a real match key, but the profile already
+ *  links the website and repeating the host is noise. PARTNER is a licensed
+ *  data partner's internal record id: a match key only, never public. */
+const HIDDEN_SCHEMES = new Set<IdentifierScheme>(['DOMAIN', 'PARTNER']);
 
 /** Vocabulary order, so the block reads the same on every profile rather than
  *  in whatever order the rows happened to be written. */

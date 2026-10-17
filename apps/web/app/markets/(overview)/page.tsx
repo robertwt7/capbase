@@ -9,7 +9,7 @@ import { MarketTable } from '../MarketTable';
 export const metadata: Metadata = {
   title: 'Startup Market Data by Sector',
   description:
-    'Deal counts, capital raised, and median valuations across 14 startup sectors, computed live from crowdsourced funding data.',
+    'Deal counts, capital raised, and median valuations across 14 startup sectors, computed live from open funding data.',
   ...canonical('/markets'),
 };
 

@@ -462,7 +462,9 @@ describe('Public API /v1 (e2e)', () => {
       await http().get('/v1/people?pageSize=1').set(key).expect(200);
       await http().get('/v1/funds?pageSize=1').set(key).expect(200);
       await http().get('/v1/search?q=hel').set(key).expect(200);
-    });
+      // The directory reads count every public row; on a full dataset that is
+      // seconds per read, past Jest's 5s default.
+    }, 60_000);
   });
 
   describe('OpenAPI docs', () => {

@@ -161,6 +161,24 @@ describe('normalizeIdentifier', () => {
     });
   });
 
+  describe('PARTNER', () => {
+    it('keeps an opaque id as published, trimmed', () => {
+      expect(normalizeIdentifier('PARTNER', ' 12345 ')).toBe('12345');
+      expect(normalizeIdentifier('PARTNER', 'fm-overdrive-12')).toBe('fm-overdrive-12');
+    });
+
+    it('rejects anything outside the bounded id alphabet', () => {
+      expect(normalizeIdentifier('PARTNER', '')).toBeNull();
+      expect(normalizeIdentifier('PARTNER', 'a b')).toBeNull();
+      expect(normalizeIdentifier('PARTNER', 'x/../y')).toBeNull();
+      expect(normalizeIdentifier('PARTNER', 'a'.repeat(65))).toBeNull();
+    });
+
+    it('has no public page', () => {
+      expect(identifierUrl('PARTNER', '12345')).toBeNull();
+    });
+  });
+
   describe('DOMAIN', () => {
     it('lowercases, strips scheme, path and www.', () => {
       expect(normalizeIdentifier('DOMAIN', 'Acme.com')).toBe('acme.com');
@@ -189,6 +207,7 @@ describe('normalizeIdentifier', () => {
       DUNS: '80736155',
       COMPANIES_HOUSE: 'sc 123456',
       DOMAIN: 'https://www.acme.com/about',
+      PARTNER: ' fm-overdrive-12 ',
     };
 
     for (const scheme of IDENTIFIER_SCHEMES) {

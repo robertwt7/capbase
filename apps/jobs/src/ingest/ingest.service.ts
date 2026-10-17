@@ -14,14 +14,20 @@ import {
   type FetchOptions,
   type IngestionSource,
   type NormalizedFund,
+  type NormalizedFundCommitment,
+  type NormalizedFundMetric,
   type NormalizedInvestor,
   type NormalizedInvestorFirm,
   type NormalizedPerson,
   type NormalizedRecord,
   type NormalizedRound,
+  type SourceBatch,
+  type SourceFirmRef,
+  type SourceFundRef,
   type SourceIdentifier,
 } from '../sources/ingestion-source';
 import { kebab } from '../util/slug';
+import { uniqueFundSlug } from './fund-slug';
 import {
   emptyCounts,
   recordCandidate,
@@ -30,6 +36,7 @@ import {
   type IdentifierWriterClient,
 } from './identifier.writer';
 import { uniquePersonSlug } from './person-matcher';
+import { pairNearDuplicates } from './round-dedup';
 
 export interface IngestResult {
   processed: number;
@@ -57,7 +64,7 @@ interface MatchIndex {
   /** normalizeName(name) → every company id holding that name, in load order.
    *  A list rather than first-wins, because the first holder may be in another
    *  country: "Acme Ltd" (GB) must be able to skip "Acme Inc" (US). */
-  byName: Map<string, string[]>;
+  byName: Map<string, string | string[]>;
   /** company id → its countryCode (null when no source has stated one). Kept
    *  beside byName rather than inside it so filling a blank country updates
    *  every name the row is listed under at once. */
@@ -78,24 +85,41 @@ interface FundIndex {
   /** `${externalSource}:${externalId}` → fund id. */
   byKey: Map<string, string>;
   /**
-   * normalizeFundName(name) → fund id. Names claimed by more than one manager
-   * are REMOVED rather than first-wins: 191 of 94,399 ADV fund names collide
-   * (`fund 5`, `fund b`, `94`), and a Form D filing carries no manager to
-   * disambiguate with, so an ambiguous name must match nothing.
+   * normalizeFundName(name) → every fund holding it, as `${fundId} ${managerId}`
+   * (a bare string for the common single holder — an array per name costs tens
+   * of MB across the whole table).
+   *
+   * Two lookups read it (`fundByName`). A Form D fund carries no manager, so for
+   * it a name claimed by more than one manager matches NOTHING: 191 of 94,399
+   * ADV fund names collide (`fund 5`, `fund b`, `94`). A fund whose source
+   * states its manager only needs the name to be unique within that manager —
+   * another firm's namesake is irrelevant.
    */
-  byName: Map<string, string>;
-  /** normalizeFundName(name) → manager id, used to detect the collisions above. */
-  managerByName: Map<string, string>;
+  holders: Map<string, string | string[]>;
   /** Investor.crdNumber → investor id. Keyed on the column, not on
    *  (externalSource, externalId): investors carry a CRD from enrichment
    *  without carrying SEC_ADV provenance — Andreessen Horowitz among them. */
   investorByCrd: Map<string, string>;
+  /** Every fund slug in use, to mint unique ones without extra queries. */
+  slugs: Set<string>;
 }
 
 /** What upsertFund did with one incoming fund. `skipped` means no manager
  *  could be resolved structurally, which is the rule that keeps every
  *  Fund.managerId real. */
 type FundOutcome = 'written' | 'skipped';
+
+/** A round already on a company, as the cross-source dedup compares it. */
+interface ExistingRound {
+  id: string;
+  name: string;
+  date: Date;
+  amountUsd: number;
+  kind: string;
+  currency: string;
+  amountLocal: bigint | null;
+  externalSource: string | null;
+}
 
 /** The same lookup tables for investor firms. */
 interface InvestorIndex {
@@ -110,8 +134,63 @@ interface InvestorIndex {
   /** investor id → its own InvestorType, which came from source structure and
    *  therefore beats whatever a holding guessed. */
   types: Map<string, InvestorType>;
+  /** investor id → display name, for RoundInvestor rows, which carry one. */
+  names: Map<string, string>;
   slugs: Set<string>;
   identifiers: IdentifierCounts;
+}
+
+/** Counters for the edge kinds a streaming source adds, reported once per run.
+ *  Every "skipped" count is a row dropped on purpose (an unresolvable endpoint),
+ *  never an error. */
+interface EdgeStats {
+  fundsSkipped: number;
+  commitments: number;
+  commitmentsSkipped: number;
+  metrics: number;
+  metricsSkipped: number;
+  roundInvestors: number;
+  roundInvestorsSkipped: number;
+  roundsDeduped: number;
+  roundsEnriched: number;
+  contacts: number;
+}
+
+function emptyEdgeStats(): EdgeStats {
+  return {
+    fundsSkipped: 0,
+    commitments: 0,
+    commitmentsSkipped: 0,
+    metrics: 0,
+    metricsSkipped: 0,
+    roundInvestors: 0,
+    roundInvestorsSkipped: 0,
+    roundsDeduped: 0,
+    roundsEnriched: 0,
+    contacts: 0,
+  };
+}
+
+/** What the edge writers (commitments, metrics, fund refs) read. */
+interface RunIndexes {
+  investor: InvestorIndex;
+  fund: FundIndex;
+  stats: EdgeStats;
+}
+
+/**
+ * The four match indexes, each loaded on first use and then shared for the
+ * rest of the run. A public source needs them all; a streaming stage needs only
+ * some — the partner companies stage never touches the half-million-row person
+ * index, and loading it anyway is what exhausted the heap.
+ */
+interface LazyIndexes {
+  company(): Promise<MatchIndex>;
+  investor(): Promise<InvestorIndex>;
+  person(): Promise<PersonIndex>;
+  fund(): Promise<FundIndex>;
+  /** Whatever has been loaded so far, for the end-of-run report. */
+  loaded: { company?: MatchIndex; investor?: InvestorIndex; person?: PersonIndex };
 }
 
 /**
@@ -142,48 +221,26 @@ interface PersonIndex {
 const SEC_ONE_LINER_PREFIX = 'Private securities offering disclosed';
 const SEC_DESCRIPTION_MARKER = 'filed a Form D';
 
+/** Rows per page when the match indexes are loaded. */
+const INDEX_PAGE = 20_000;
+
+/**
+ * Schemes that are a source's OWN record id. Ingest attaches one to whatever
+ * row the source matched — by name, possibly — so a later hit on it repeats our
+ * earlier decision rather than stating who the entity is. It still resolves the
+ * row (that is its job), but it is not evidence strong enough to rewrite
+ * another source's data on.
+ */
+const SOURCE_RECORD_SCHEMES = new Set<string>(['PARTNER']);
+
+/** Whether a row's provenance key belongs in this run's `byKey` — a record
+ *  source's own keys only matter to that source (the scheme is named for it). */
+const wantKey = (externalSource: string, recordSchemes: boolean) =>
+  recordSchemes || !SOURCE_RECORD_SCHEMES.has(externalSource);
+
 /** How far a chain of merges is followed. A survivor can itself be merged
  *  later; the cap stops a cycle from spinning. */
 const MAX_MERGE_HOPS = 5;
-
-/**
- * id → the live row it resolves to, or null when the chain does not end at one.
- *
- * A merged-away row is KEPT, so every match key it owns — its provenance pair,
- * its domain, its name — must now point at the survivor. Without this, the next
- * ingest run's `byKey` lookup would miss the tombstone, create a fresh row, and
- * silently undo the merge.
- */
-function resolveTombstones<T extends { id: string; mergedIntoId: string | null }>(
-  rows: T[],
-): Map<string, string | null> {
-  // `?? null` so a row present in the set always resolves; `undefined` from a
-  // lookup then means only one thing — a chain pointing outside the set.
-  const mergedInto = new Map<string, string | null>();
-  for (const r of rows) mergedInto.set(r.id, r.mergedIntoId ?? null);
-
-  const out = new Map<string, string | null>();
-  for (const r of rows) {
-    let id: string = r.id;
-    let hops = 0;
-    for (;;) {
-      const next = mergedInto.get(id);
-      if (next === undefined) {
-        // Points at a row this query did not return: unresolvable.
-        id = '';
-        break;
-      }
-      if (next === null) break;
-      if (++hops > MAX_MERGE_HOPS) {
-        id = '';
-        break;
-      }
-      id = next;
-    }
-    out.set(r.id, id || null);
-  }
-  return out;
-}
 
 /** Field-level equality for revision diffs. Arrays compare element-wise (i.e.
  *  `industry`); BigInt money columns compare fine with `===`. */
@@ -202,6 +259,8 @@ export class IngestService {
    * those (see docs/DATA_REBUILD.md).
    */
   private readonly recordRevisions: boolean;
+  /** Edge counters for the current run (runs are serialized by the ingest lock). */
+  private stats: EdgeStats = emptyEdgeStats();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -218,16 +277,14 @@ export class IngestService {
   async run(opts: RunOptions): Promise<IngestResult> {
     const active = opts.sources?.length
       ? this.sources.filter((s) => opts.sources!.includes(s.name))
-      : this.sources;
+      : this.sources.filter((s) => !s.explicitOnly);
     if (active.length === 0) {
       this.logger.warn(`No ingestion sources match [${(opts.sources ?? []).join(', ')}]`);
       return { processed: 0, upserted: 0, investors: 0, funds: 0 };
     }
 
-    const index = await this.loadMatchIndex();
-    const investorIndex = await this.loadInvestorIndex();
-    const personIndex = await this.loadPersonIndex();
-    const fundIndex = await this.loadFundIndex();
+    const lazy = this.lazyIndexes(active.some((src) => SOURCE_RECORD_SCHEMES.has(src.name)));
+    this.stats = emptyEdgeStats();
     let processed = 0;
     let upserted = 0;
     let investors = 0;
@@ -235,6 +292,18 @@ export class IngestService {
 
     for (const source of active) {
       this.logger.log(`Ingesting from ${source.name} (days ${opts.days}, limit ${opts.limit})`);
+      if (source.stream) {
+        const r = await this.runStream(source, opts, lazy);
+        processed += r.processed;
+        upserted += r.upserted;
+        investors += r.investors;
+        funds += r.funds;
+        continue;
+      }
+      const index = await lazy.company();
+      const investorIndex = await lazy.investor();
+      const personIndex = await lazy.person();
+      const fundIndex = await lazy.fund();
       // Rebuilt per source from the live index, so a number an earlier source
       // in this run wrote (Wikidata P2622, an Innovate UK grantee) is known to
       // the register source that follows it.
@@ -296,8 +365,9 @@ export class IngestService {
       let unmatched = 0;
       for (const fund of incoming) {
         try {
-          if ((await this.upsertFund(fund, source.name, fundIndex)) === 'written') written += 1;
-          else unmatched += 1;
+          if ((await this.upsertFund(fund, source.name, fundIndex, investorIndex)) === 'written') {
+            written += 1;
+          } else unmatched += 1;
         } catch (err) {
           const e = err as { code?: string; meta?: unknown; message?: string };
           this.logger.warn(
@@ -317,16 +387,18 @@ export class IngestService {
       }
     }
 
-    const ids = index.identifiers;
-    const inv = investorIndex.identifiers;
-    const per = personIndex.identifiers;
+    const none = emptyCounts();
+    const ids = lazy.loaded.company?.identifiers ?? none;
+    const inv = lazy.loaded.investor?.identifiers ?? none;
+    const per = lazy.loaded.person?.identifiers ?? none;
     this.logger.log(
       `Ingest complete: ${upserted}/${processed} upserted, ${investors} investor firms, ${funds} funds`,
     );
     // Created vs attached is the number that says whether matching is working:
     // a run that creates a person for every role is not deduplicating.
+    const people = lazy.loaded.person;
     this.logger.log(
-      `People: ${personIndex.created} created, ${personIndex.attached} roles attached to a person we already held`,
+      `People: ${people?.created ?? 0} created, ${people?.attached ?? 0} roles attached to a person we already held`,
     );
     this.logger.log(
       `Identifiers: ${ids.written + inv.written + per.written} written, ` +
@@ -334,30 +406,293 @@ export class IngestService {
         `${ids.skipped + inv.skipped + per.skipped} skipped (failed validation), ` +
         `${ids.conflict + inv.conflict + per.conflict} conflicts (merge candidates recorded)`,
     );
+    const st = this.stats;
+    if (Object.values(st).some((n) => n > 0)) {
+      // Counts only — never a value. The contact count in particular is a
+      // number of private rows written, nothing more.
+      this.logger.log(
+        `Edges: ${st.commitments} commitments (${st.commitmentsSkipped} skipped: fund or LP not held), ` +
+          `${st.metrics} fund metrics (${st.metricsSkipped} skipped: fund not held), ` +
+          `${st.roundInvestors} round investors (${st.roundInvestorsSkipped} skipped: firm not held), ` +
+          `${st.roundsDeduped} rounds skipped as duplicates (${st.roundsEnriched} existing rounds corrected), ` +
+          `${st.fundsSkipped} funds skipped (no manager resolved), ` +
+          `${st.contacts} private contact rows written`,
+      );
+    }
     return { processed, upserted, investors, funds };
   }
 
-  private async loadMatchIndex(): Promise<MatchIndex> {
-    const existing = await this.prisma.company.findMany({
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        domain: true,
-        countryCode: true,
-        externalSource: true,
-        externalId: true,
-        mergedIntoId: true,
+  /**
+   * Apply a streaming source's batches in order, releasing each once written.
+   *
+   * Within a batch the order is fixed — firms, funds, records, commitments,
+   * metrics — so a batch may carry an edge and both its endpoints. Each row has
+   * its own try/catch, exactly as the array path does: one bad row is logged
+   * and skipped, never fatal. `opts.limit` bounds the records (companies)
+   * written, across batches.
+   */
+  /**
+   * Memoized index loaders for one run (see LazyIndexes). `recordSchemes`: load
+   * the identifiers in SOURCE_RECORD_SCHEMES too — only when a source that owns
+   * one (the partner) is in the run. Nothing else ever looks them up, and on
+   * the full dataset they are most of the crosswalk (≈770k of ≈1.2M rows).
+   */
+  private lazyIndexes(recordSchemes: boolean): LazyIndexes {
+    const loaded: LazyIndexes['loaded'] = {};
+    const once = <T>(load: () => Promise<T>, keep?: (v: T) => void) => {
+      let p: Promise<T> | undefined;
+      return () =>
+        (p ??= load().then((v) => {
+          keep?.(v);
+          return v;
+        }));
+    };
+    return {
+      loaded,
+      company: once(() => this.loadMatchIndex(recordSchemes), (v) => (loaded.company = v)),
+      investor: once(() => this.loadInvestorIndex(recordSchemes), (v) => (loaded.investor = v)),
+      person: once(() => this.loadPersonIndex(recordSchemes), (v) => (loaded.person = v)),
+      fund: once(() => this.loadFundIndex(recordSchemes)),
+    };
+  }
+
+  private async runStream(
+    source: IngestionSource,
+    opts: RunOptions,
+    lazy: LazyIndexes,
+  ): Promise<IngestResult> {
+    let processed = 0;
+    let upserted = 0;
+    let investors = 0;
+    let funds = 0;
+    let batches = 0;
+
+    const fail = (what: string, id: string, err: unknown) => {
+      const e = err as { code?: string; meta?: unknown; message?: string };
+      this.logger.warn(
+        `${what} upsert failed for ${id}: code=${e.code} meta=${JSON.stringify(e.meta)} ${e.message?.split('\n')[0]}`,
+      );
+    };
+
+    const stats = this.stats;
+    for await (const batch of source.stream!(opts) as AsyncIterable<SourceBatch>) {
+      batches++;
+      // Load only what this batch writes against.
+      const has = (xs?: unknown[]) => (xs?.length ?? 0) > 0;
+      const needsPeople =
+        (batch.investors ?? []).some((f) => has(f.people)) || (batch.records ?? []).some((r) => has(r.people));
+      const investor = await lazy.investor();
+      const person = needsPeople ? await lazy.person() : undefined;
+      const company = has(batch.records) ? await lazy.company() : undefined;
+      const fundIndex =
+        has(batch.funds) || has(batch.commitments) || has(batch.metrics) ? await lazy.fund() : undefined;
+      // Each is loaded above whenever the rows that read it are present.
+      const idx = { investor, fund: fundIndex!, stats };
+      for (const firm of batch.investors ?? []) {
+        try {
+          await this.upsertInvestorFirm(firm, source.name, investor, person ?? (await lazy.person()));
+          investors++;
+        } catch (err) {
+          fail('Investor', firm.externalId, err);
+        }
+      }
+      for (const fund of batch.funds ?? []) {
+        try {
+          if ((await this.upsertFund(fund, source.name, idx.fund, investor)) === 'written') funds++;
+          else stats.fundsSkipped++;
+        } catch (err) {
+          fail('Fund', fund.externalId, err);
+        }
+      }
+      for (const record of batch.records ?? []) {
+        if (processed >= opts.limit) break;
+        processed++;
+        try {
+          // `person` is loaded whenever any record in the batch has people.
+          await this.upsert(record, company!, investor, person!);
+          upserted++;
+        } catch (err) {
+          fail('Record', record.companyExternalId, err);
+        }
+      }
+      for (const c of batch.commitments ?? []) {
+        try {
+          await this.upsertCommitment(c, source.name, idx);
+        } catch (err) {
+          fail('Commitment', c.externalId, err);
+        }
+      }
+      for (const m of batch.metrics ?? []) {
+        try {
+          await this.upsertMetric(m, source.name, idx);
+        } catch (err) {
+          fail('Metric', `${m.fund.externalId}@${m.asAt}`, err);
+        }
+      }
+      if (batches % 10 === 0) {
+        this.logger.log(
+          `${source.name}: ${batches} batches — ${investors} firms, ${funds} funds, ${upserted} records, ` +
+            `${idx.stats.commitments} commitments, ${idx.stats.metrics} metrics`,
+        );
+      }
+    }
+    this.logger.log(
+      `${source.name}: ${batches} batches → ${investors} investor firms, ${funds} funds, ${upserted}/${processed} records`,
+    );
+    return { processed, upserted, investors, funds };
+  }
+
+  /**
+   * A firm the source refers to by its own id: provenance key first (a firm it
+   * created), then its identifier (a firm it matched to an existing row, which
+   * keeps that row's own key). Never by name — an id-keyed edge must not land
+   * on a namesake.
+   */
+  private resolveFirmRef(ref: SourceFirmRef, source: string, index: InvestorIndex): string | undefined {
+    const byKey = index.byKey.get(`${source}:${ref.externalId}`);
+    if (byKey) return byKey;
+    if (!ref.identifier) return undefined;
+    const normalized = normalizeIdentifier(ref.identifier.scheme, ref.identifier.value);
+    return normalized ? index.byIdentifier.get(`${ref.identifier.scheme}:${normalized}`) : undefined;
+  }
+
+  /**
+   * A fund the source refers to by its own id: provenance key first; failing
+   * that, the same match `upsertFund` made — the normalized name, held by the
+   * same (resolved) manager. That second leg is what lets a later run find a
+   * fund this source enriched rather than created.
+   */
+  private resolveFundRef(ref: SourceFundRef, source: string, idx: RunIndexes): string | undefined {
+    const byKey = idx.fund.byKey.get(`${source}:${ref.externalId}`);
+    if (byKey) return byKey;
+    const managerId = this.resolveFirmRef(ref.manager, source, idx.investor);
+    const norm = normalizeFundName(ref.name);
+    if (!managerId || !norm) return undefined;
+    return fundByName(idx.fund, norm, managerId);
+  }
+
+  /** One LP commitment. Both endpoints must already be held; an edge with a
+   *  missing end is skipped and counted, never minted against a guess. */
+  private async upsertCommitment(
+    c: NormalizedFundCommitment,
+    source: string,
+    idx: RunIndexes,
+  ): Promise<void> {
+    const fundId = this.resolveFundRef(c.fund, source, idx);
+    const investorId = this.resolveFirmRef(c.investor, source, idx.investor);
+    if (!fundId || !investorId) {
+      idx.stats.commitmentsSkipped++;
+      return;
+    }
+    const currency = (c.currency ?? 'USD').toUpperCase();
+    const money = {
+      currency,
+      amountUsd: c.amountUsd != null ? BigInt(Math.round(c.amountUsd)) : null,
+      amountLocal:
+        currency !== 'USD' && c.amountLocal != null ? BigInt(Math.round(c.amountLocal)) : null,
+    };
+    await this.prisma.fundCommitment.upsert({
+      where: { externalSource_externalId: { externalSource: source, externalId: c.externalId } },
+      create: {
+        fundId,
+        investorId,
+        ...money,
+        externalSource: source,
+        externalId: c.externalId,
+        moderationStatus: 'APPROVED',
       },
+      update: { fundId, investorId, ...money },
     });
+    idx.stats.commitments++;
+  }
+
+  /** One point-in-time fund figure, keyed on (fund, as-at date). */
+  private async upsertMetric(m: NormalizedFundMetric, source: string, idx: RunIndexes): Promise<void> {
+    const fundId = this.resolveFundRef(m.fund, source, idx);
+    if (!fundId) {
+      idx.stats.metricsSkipped++;
+      return;
+    }
+    const big = (v: number | null | undefined) => (v != null ? BigInt(Math.round(v)) : null);
+    const values = {
+      dryPowderUsd: big(m.dryPowderUsd),
+      aumUsd: big(m.aumUsd),
+      unrealizedUsd: big(m.unrealizedUsd),
+    };
+    const asAt = new Date(m.asAt);
+    await this.prisma.fundMetric.upsert({
+      where: { fundId_asAt: { fundId, asAt } },
+      create: { fundId, asAt, ...values, externalSource: source },
+      update: values,
+    });
+    idx.stats.metrics++;
+  }
+
+  /**
+   * Page through a whole table in id order, a bounded slice at a time.
+   *
+   * The match indexes are built from every row of four tables, and since the
+   * partner snapshot those are hundreds of thousands of rows each. Materialising
+   * any one as a single Prisma array (an object per row, plus the driver's own
+   * copy) was what blew the ~550 MB jobs heap; a page is dropped as soon as its
+   * keys are in the maps.
+   */
+  private async eachPage<T extends { id: string }>(
+    fetch: (after: string | undefined, take: number) => Promise<T[]>,
+    visit: (rows: T[]) => void,
+  ): Promise<void> {
+    let after: string | undefined;
+    for (;;) {
+      const rows = await fetch(after, INDEX_PAGE);
+      if (rows.length === 0) return;
+      visit(rows);
+      if (rows.length < INDEX_PAGE) return;
+      after = rows[rows.length - 1]!.id;
+    }
+  }
+
+  /**
+   * id → the live row it resolves to, from the (few) merged rows alone.
+   *
+   * A merged-away row is KEPT, so every match key it owns must point at the
+   * survivor — without this the next run's `byKey` lookup would miss the
+   * tombstone, create a fresh row and silently undo the merge. `mergedIntoId`
+   * is a foreign key, so every chain ends at a row that exists; a chain longer
+   * than MAX_MERGE_HOPS (a cycle) resolves to null.
+   */
+  private async survivorResolver(
+    model: 'company' | 'investor' | 'person',
+  ): Promise<(id: string) => string | null> {
+    const delegate = this.prisma[model] as unknown as {
+      findMany(args: unknown): Promise<{ id: string; mergedIntoId: string | null }[]>;
+    };
+    const merged = new Map<string, string>();
+    for (const r of await delegate.findMany({
+      where: { mergedIntoId: { not: null } },
+      select: { id: true, mergedIntoId: true },
+    })) {
+      if (r.mergedIntoId) merged.set(r.id, r.mergedIntoId);
+    }
+    return (id: string) => {
+      let cur = id;
+      for (let hops = 0; ; hops++) {
+        const next = merged.get(cur);
+        if (!next) return cur;
+        if (hops >= MAX_MERGE_HOPS) return null;
+        cur = next;
+      }
+    };
+  }
+
+  private async loadMatchIndex(recordSchemes = true): Promise<MatchIndex> {
     // A merged-away row keeps its (externalSource, externalId), so a re-ingest
     // of the loser has to land on the SURVIVOR. This is the half of the
     // tombstone design that stops the next cron run from undoing a merge — and
     // the reason the row is kept rather than deleted.
-    const survivorOf = resolveTombstones(existing);
+    const survivorOf = await this.survivorResolver('company');
     const index: MatchIndex = {
       byKey: new Map(),
-      byIdentifier: await this.loadIdentifiers('company', survivorOf),
+      byIdentifier: await this.loadIdentifiers('company', survivorOf, recordSchemes),
       byDomain: new Map(),
       byName: new Map(),
       countryOf: new Map(),
@@ -365,112 +700,150 @@ export class IngestService {
       slugs: new Set(),
       identifiers: emptyCounts(),
     };
-    for (const c of existing) {
-      index.slugs.add(c.slug);
-      index.countryOf.set(c.id, c.countryCode ?? null);
-    }
     for (const [key, id] of index.byIdentifier) {
       if (key.startsWith(COMPANY_NUMBER_PREFIX)) {
         index.companyNumberOf.set(id, key.slice(COMPANY_NUMBER_PREFIX.length));
       }
     }
-    for (const c of existing) {
-      const target = survivorOf.get(c.id);
-      // A tombstone whose chain does not end at a live row is skipped entirely:
-      // matching onto it would write to a row nobody can see.
-      if (!target) continue;
-      if (c.externalSource && c.externalId) {
-        index.byKey.set(`${c.externalSource}:${c.externalId}`, target);
-      }
-      if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, target);
-      addName(index, normalizeName(c.name), target);
-    }
-    return index;
-  }
-
-  /** One query per run over EntityIdentifier for one entity type — the same
-   *  order of magnitude as the Company load beside it, and it replaces what
-   *  would otherwise be a lookup per incoming record. */
-  private async loadIdentifiers(
-    entityType: IdentifiableType,
-    survivorOf: Map<string, string | null>,
-  ): Promise<Map<string, string>> {
-    const rows = await this.prisma.entityIdentifier.findMany({
-      where: { entityType },
-      select: { scheme: true, value: true, entityId: true },
-    });
-    const map = new Map<string, string>();
-    for (const r of rows) {
-      // A merge moves identifiers onto the survivor, so these usually point at
-      // a live row already; resolving anyway covers a row merged by some other
-      // path and keeps the index consistent with byKey/byDomain/byName.
-      const target = survivorOf.get(r.entityId) ?? r.entityId;
-      if (target) map.set(`${r.scheme}:${r.value}`, target);
-    }
-    return map;
-  }
-
-  private async loadInvestorIndex(): Promise<InvestorIndex> {
-    const existing = await this.prisma.investor.findMany({
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        type: true,
-        domain: true,
-        externalSource: true,
-        externalId: true,
-        mergedIntoId: true,
+    await this.eachPage(
+      (after, take) =>
+        this.prisma.company.findMany({
+          where: after ? { id: { gt: after } } : {},
+          orderBy: { id: 'asc' },
+          take,
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            domain: true,
+            countryCode: true,
+            externalSource: true,
+            externalId: true,
+          },
+        }),
+      (rows) => {
+        for (const c of rows) {
+          index.slugs.add(c.slug);
+          index.countryOf.set(c.id, c.countryCode ?? null);
+          const target = survivorOf(c.id);
+          // A tombstone whose chain does not end at a live row is skipped
+          // entirely: matching onto it would write to a row nobody can see.
+          if (!target) continue;
+          if (c.externalSource && c.externalId && wantKey(c.externalSource, recordSchemes)) {
+            index.byKey.set(`${c.externalSource}:${c.externalId}`, target);
+          }
+          if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, target);
+          addName(index, normalizeName(c.name), target);
+        }
       },
-    });
-    const survivorOf = resolveTombstones(existing);
-    const index: InvestorIndex = {
-      byKey: new Map(),
-      byIdentifier: await this.loadIdentifiers('investor', survivorOf),
-      byDomain: new Map(),
-      byName: new Map(),
-      types: new Map(),
-      slugs: new Set(),
-      identifiers: emptyCounts(),
-    };
-    for (const i of existing) {
-      index.slugs.add(i.slug);
-      index.types.set(i.id, i.type as InvestorType);
-      const target = survivorOf.get(i.id);
-      if (!target) continue;
-      if (i.externalSource && i.externalId) {
-        index.byKey.set(`${i.externalSource}:${i.externalId}`, target);
-      }
-      if (i.domain && !index.byDomain.has(i.domain)) index.byDomain.set(i.domain, target);
-      const norm = normalizeInvestorName(i.name);
-      if (norm && !index.byName.has(norm)) index.byName.set(norm, target);
-    }
+    );
     return index;
   }
 
   /**
-   * One query per run over Person, plus the person slice of EntityIdentifier.
+   * The identifier crosswalk for one entity type, paged — the same order of
+   * magnitude as the entity load beside it, and it replaces what would
+   * otherwise be a lookup per incoming record. A source's own record ids
+   * (SOURCE_RECORD_SCHEMES) are left out unless `recordSchemes`.
+   */
+  private async loadIdentifiers(
+    entityType: IdentifiableType,
+    survivorOf: (id: string) => string | null,
+    recordSchemes: boolean,
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    await this.eachPage(
+      (after, take) =>
+        this.prisma.entityIdentifier.findMany({
+          where: {
+            entityType,
+            ...(recordSchemes ? {} : { scheme: { notIn: [...SOURCE_RECORD_SCHEMES] } }),
+            ...(after ? { id: { gt: after } } : {}),
+          },
+          orderBy: { id: 'asc' },
+          take,
+          select: { id: true, scheme: true, value: true, entityId: true },
+        }),
+      (rows) => {
+        for (const r of rows) {
+          // A merge moves identifiers onto the survivor, so these usually point
+          // at a live row already; resolving anyway covers a row merged by some
+          // other path and keeps the index consistent with byKey/byDomain/byName.
+          const target = survivorOf(r.entityId);
+          if (!target) continue;
+          map.set(`${r.scheme}:${r.value}`, target);
+        }
+      },
+    );
+    return map;
+  }
+
+  private async loadInvestorIndex(recordSchemes = true): Promise<InvestorIndex> {
+    const survivorOf = await this.survivorResolver('investor');
+    const index: InvestorIndex = {
+      byKey: new Map(),
+      byIdentifier: await this.loadIdentifiers('investor', survivorOf, recordSchemes),
+      byDomain: new Map(),
+      byName: new Map(),
+      types: new Map(),
+      names: new Map(),
+      slugs: new Set(),
+      identifiers: emptyCounts(),
+    };
+    await this.eachPage(
+      (after, take) =>
+        this.prisma.investor.findMany({
+          where: after ? { id: { gt: after } } : {},
+          orderBy: { id: 'asc' },
+          take,
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            type: true,
+            domain: true,
+            externalSource: true,
+            externalId: true,
+          },
+        }),
+      (rows) => {
+        for (const i of rows) {
+          index.slugs.add(i.slug);
+          index.types.set(i.id, i.type as InvestorType);
+          index.names.set(i.id, i.name);
+          const target = survivorOf(i.id);
+          if (!target) continue;
+          if (i.externalSource && i.externalId && wantKey(i.externalSource, recordSchemes)) {
+            index.byKey.set(`${i.externalSource}:${i.externalId}`, target);
+          }
+          if (i.domain && !index.byDomain.has(i.domain)) index.byDomain.set(i.domain, target);
+          const norm = normalizeInvestorName(i.name);
+          if (norm && !index.byName.has(norm)) index.byName.set(norm, target);
+        }
+      },
+    );
+    return index;
+  }
+
+  /**
+   * Every Person, paged, plus the person slice of EntityIdentifier.
    *
    * Like `loadInvestorIndex` it resolves merge tombstones, which is what makes a
-   * person merge stick across the next cron run — a merged-away row is KEPT, so
-   * every key it owns must now point at the survivor. Unlike the others it also
+   * person merge stick across the next cron run. Unlike the others it also
    * honours `suppressedAt`: a removal request has to survive ingest, and ingest
    * auto-APPROVES, so a suppressed person is neither matched (their roles stay
    * unresolved rather than reviving them) nor recreated under a new row.
+   *
+   * And it keeps IDENTIFIER-ONLY people (`Person.identifierOnly`, set by a
+   * source that resolves people by its own record id alone — a partner's
+   * contacts) out of `byName`, so a later name-keyed source (a Form D "John
+   * Smith") never attaches to one by name.
    */
-  private async loadPersonIndex(): Promise<PersonIndex> {
-    const existing = await this.prisma.person.findMany({
-      select: {
-        id: true,
-        slug: true,
-        normalizedName: true,
-        mergedIntoId: true,
-        suppressedAt: true,
-      },
-    });
-    const survivorOf = resolveTombstones(existing);
+  private async loadPersonIndex(recordSchemes = true): Promise<PersonIndex> {
+    const survivorOf = await this.survivorResolver('person');
+    const byIdentifier = await this.loadIdentifiers('person', survivorOf, recordSchemes);
     const index: PersonIndex = {
-      byIdentifier: await this.loadIdentifiers('person', survivorOf),
+      byIdentifier,
       byName: new Map(),
       slugs: new Set(),
       identifiers: emptyCounts(),
@@ -480,21 +853,32 @@ export class IngestService {
     };
 
     const suppressedIds = new Set<string>();
-    for (const p of existing) {
-      // Reserved even for a tombstone or a suppressed row: a new person must
-      // never take a slug whose URL already means someone else.
-      index.slugs.add(p.slug);
-      if (p.suppressedAt) {
-        suppressedIds.add(p.id);
-        if (p.normalizedName) index.suppressed.add(p.normalizedName);
-        continue;
-      }
-      const target = survivorOf.get(p.id);
-      if (!target) continue;
-      if (p.normalizedName && !index.byName.has(p.normalizedName)) {
-        index.byName.set(p.normalizedName, target);
-      }
-    }
+    await this.eachPage(
+      (after, take) =>
+        this.prisma.person.findMany({
+          where: after ? { id: { gt: after } } : {},
+          orderBy: { id: 'asc' },
+          take,
+          select: { id: true, slug: true, normalizedName: true, suppressedAt: true, identifierOnly: true },
+        }),
+      (rows) => {
+        for (const p of rows) {
+          // Reserved even for a tombstone or a suppressed row: a new person must
+          // never take a slug whose URL already means someone else.
+          index.slugs.add(p.slug);
+          if (p.suppressedAt) {
+            suppressedIds.add(p.id);
+            if (p.normalizedName) index.suppressed.add(p.normalizedName);
+            continue;
+          }
+          const target = survivorOf(p.id);
+          if (!target || p.identifierOnly) continue;
+          if (p.normalizedName && !index.byName.has(p.normalizedName)) {
+            index.byName.set(p.normalizedName, target);
+          }
+        }
+      },
+    );
 
     // A suppressed person's identifiers must not match either — the QID is the
     // strongest key there is, and honouring only the name would leak them back
@@ -506,12 +890,12 @@ export class IngestService {
     return index;
   }
 
-  private async loadFundIndex(): Promise<FundIndex> {
+  private async loadFundIndex(recordSchemes = true): Promise<FundIndex> {
     const index: FundIndex = {
       byKey: new Map(),
-      byName: new Map(),
-      managerByName: new Map(),
+      holders: new Map(),
       investorByCrd: new Map(),
+      slugs: new Set(),
     };
 
     // Keyed on the crdNumber column rather than (externalSource, externalId):
@@ -527,31 +911,44 @@ export class IngestService {
       }
     }
 
-    const existing = await this.prisma.fund.findMany({
-      select: { id: true, name: true, managerId: true, externalSource: true, externalId: true },
-    });
-    for (const f of existing) {
-      if (f.externalSource && f.externalId) {
-        index.byKey.set(`${f.externalSource}:${f.externalId}`, f.id);
-      }
-      this.indexFundName(index, f.name, f.id, f.managerId);
-    }
+    await this.eachPage(
+      (after, take) =>
+        this.prisma.fund.findMany({
+          where: after ? { id: { gt: after } } : {},
+          orderBy: { id: 'asc' },
+          take,
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            managerId: true,
+            externalSource: true,
+            externalId: true,
+          },
+        }),
+      (rows) => {
+        for (const f of rows) {
+          if (f.slug) index.slugs.add(f.slug);
+          if (f.externalSource && f.externalId && wantKey(f.externalSource, recordSchemes)) {
+            index.byKey.set(`${f.externalSource}:${f.externalId}`, f.id);
+          }
+          this.indexFundName(index, f.name, f.id, f.managerId);
+        }
+      },
+    );
     return index;
   }
 
-  /** Record a fund under its normalized name, dropping the entry entirely once
-   *  a second manager claims the same name — an ambiguous name must resolve to
-   *  no fund, because a Form D filing carries nothing to disambiguate with. */
+  /** Record a fund under its normalized name (see FundIndex.holders). */
   private indexFundName(index: FundIndex, name: string, fundId: string, managerId: string): void {
     const norm = normalizeFundName(name);
     if (!norm) return;
-    const heldBy = index.managerByName.get(norm);
-    if (heldBy === undefined) {
-      index.managerByName.set(norm, managerId);
-      index.byName.set(norm, fundId);
-    } else if (heldBy !== managerId) {
-      index.byName.delete(norm);
-    }
+    const entry = `${fundId} ${managerId}`;
+    const held = index.holders.get(norm);
+    if (held === undefined) index.holders.set(norm, entry);
+    else if (typeof held === 'string') {
+      if (held !== entry) index.holders.set(norm, [held, entry]);
+    } else if (!held.includes(entry)) held.push(entry);
   }
 
   /**
@@ -567,6 +964,7 @@ export class IngestService {
     fund: NormalizedFund,
     source: string,
     index: FundIndex,
+    investorIndex: InvestorIndex,
   ): Promise<FundOutcome> {
     const facts = fundFacts(fund);
     const key = `${source}:${fund.externalId}`;
@@ -580,31 +978,46 @@ export class IngestService {
         where: { id: ownId },
         data: { name: fund.name, ...present(facts) },
       });
+      await this.refreshFundSize(ownId);
       return 'written';
     }
 
+    // A manager stated structurally: by CRD (Form ADV), or by the source's own
+    // id for a source that published the manager itself.
+    const declaresManager = !!fund.managerCrd || !!fund.manager;
+    const managerId =
+      (fund.managerCrd ? index.investorByCrd.get(fund.managerCrd) : undefined) ??
+      (fund.manager ? this.resolveFirmRef(fund.manager, source, investorIndex) : undefined);
+
     const norm = normalizeFundName(fund.name);
-    const crdManagerId = fund.managerCrd ? index.investorByCrd.get(fund.managerCrd) : undefined;
-    const matchId = norm ? index.byName.get(norm) : undefined;
-    if (norm && matchId) {
-      // A fund that knows its own manager may only merge into that manager's
-      // row. Only Form D funds — which have no manager at all — take a name
-      // match's manager on trust.
-      const matchedManagerId = index.managerByName.get(norm);
-      const sameManager = !fund.managerCrd || (!!crdManagerId && crdManagerId === matchedManagerId);
-      if (sameManager) {
-        await this.enrichFund(matchId, facts);
-        return 'written';
-      }
+    // A fund that knows its own manager may only merge into that manager's
+    // row, looked up within that manager. Only Form D funds — which have no
+    // manager at all — use the global name index and take its manager on trust.
+    const matchId = !norm
+      ? undefined
+      : declaresManager
+        ? managerId
+          ? fundByName(index, norm, managerId)
+          : undefined
+        : fundByName(index, norm);
+    if (matchId) {
+      await this.enrichFund(matchId, facts);
+      await this.refreshFundSize(matchId);
+      // Deliberately NOT registered under this source's key: an own-key
+      // update renames the row, and an enrichment must never rename a fund
+      // the other source created. Edges find it again by name + manager.
+      return 'written';
     }
 
-    if (!crdManagerId) return 'skipped';
+    if (!managerId) return 'skipped';
 
     const created = await this.prisma.fund.create({
       data: {
-        managerId: crdManagerId,
+        managerId,
+        slug: uniqueFundSlug(fund.name, fund.externalId, index.slugs),
         name: fund.name,
         ...facts,
+        sizeUsd: (facts.grossAssetsUsd as bigint | null) ?? (facts.closedUsd as bigint | null),
         externalSource: source,
         externalId: fund.externalId,
         moderationStatus: 'APPROVED',
@@ -613,8 +1026,17 @@ export class IngestService {
     });
 
     index.byKey.set(key, created.id);
-    this.indexFundName(index, fund.name, created.id, crdManagerId);
+    this.indexFundName(index, fund.name, created.id, managerId);
     return 'written';
+  }
+
+  /** Keep the directory's size sort key equal to the figure the row shows
+   *  (gross assets, else capital closed) after an update or an enrichment,
+   *  which may have changed either column. */
+  private async refreshFundSize(fundId: string): Promise<void> {
+    await this.prisma.$executeRaw`
+      UPDATE "Fund" SET "sizeUsd" = COALESCE("grossAssetsUsd", "closedUsd")
+       WHERE id = ${fundId} AND "sizeUsd" IS DISTINCT FROM COALESCE("grossAssetsUsd", "closedUsd")`;
   }
 
   /** Fill blank columns on a fund the other source already named. Never
@@ -643,31 +1065,86 @@ export class IngestService {
     investorIndex: InvestorIndex,
     personIndex: PersonIndex,
   ): Promise<void> {
-    const companyId = await this.upsertCompany(r, index);
+    const { id: companyId, matched, own } = await this.upsertCompany(r, index);
 
-    for (const round of r.rounds ?? []) {
-      await this.prisma.fundingRound.upsert({
-        where: {
-          externalSource_externalId: { externalSource: r.source, externalId: round.externalId },
-        },
-        create: {
-          companyId,
-          name: round.name,
-          date: new Date(round.date),
-          amountUsd: BigInt(Math.round(round.amountUsd)),
-          kind: round.kind ?? 'Equity',
-          ...roundMoney(round),
-          externalSource: r.source,
-          externalId: round.externalId,
-          moderationStatus: 'APPROVED',
-        },
-        update: {
-          amountUsd: BigInt(Math.round(round.amountUsd)),
-          date: new Date(round.date),
-          kind: round.kind ?? 'Equity',
-          ...roundMoney(round),
-        },
-      });
+    // Only a record that landed on ANOTHER source's company can duplicate that
+    // source's rounds; a created or own-key company holds none.
+    const held =
+      r.roundDedup && matched && r.rounds?.length
+        ? await this.companyRounds(companyId, r.source)
+        : { others: [], ownKeys: new Set<string>() };
+    // A round this source already wrote is updated in place, never re-paired.
+    const fresh = (r.rounds ?? []).map((round, i) => ({ round, i })).filter(({ round }) => !held.ownKeys.has(round.externalId));
+    const pairs = pairNearDuplicates(
+      fresh.map(({ round }) => ({
+        date: new Date(round.date),
+        amountUsd: round.amountUsd,
+        kind: round.kind ?? 'Equity',
+      })),
+      held.others,
+    );
+    const dupOf = new Map<number, ExistingRound>();
+    fresh.forEach(({ i }, k) => {
+      const hit = pairs.get(k);
+      if (hit) dupOf.set(i, hit);
+    });
+    let roundsChanged = false;
+
+    for (const [i, round] of (r.rounds ?? []).entries()) {
+      const kind = round.kind ?? 'Equity';
+      const date = new Date(round.date);
+      const amountUsd = BigInt(Math.round(round.amountUsd));
+      const dup = dupOf.get(i);
+
+      let roundId: string | undefined;
+      if (dup) {
+        // The same raise, already on the ladder from another source: one rung,
+        // not two. Its investors still attach, to the rung that exists.
+        this.stats.roundsDeduped++;
+        roundId = dup.id;
+        // Correcting another source's round is only safe when the company
+        // match is a statement (identifier) or a strong inference (domain). A
+        // name-only match may be a namesake: it still must not duplicate a
+        // round, but it never rewrites one.
+        if (
+          r.roundDedup === 'enrich' &&
+          (matched === 'identifier' || matched === 'domain') &&
+          (await this.correctRound(dup, round, companyId, r.source))
+        ) {
+          roundsChanged = true;
+        }
+      } else {
+        const written = await this.prisma.fundingRound.upsert({
+          where: {
+            externalSource_externalId: { externalSource: r.source, externalId: round.externalId },
+          },
+          create: {
+            companyId,
+            name: round.name,
+            date,
+            amountUsd,
+            kind,
+            ...roundMoney(round),
+            externalSource: r.source,
+            externalId: round.externalId,
+            moderationStatus: 'APPROVED',
+          },
+          update: { amountUsd, date, kind, ...roundMoney(round) },
+          select: { id: true },
+        });
+        roundId = written?.id;
+        roundsChanged = true;
+      }
+      if (roundId && round.investors?.length) {
+        await this.writeRoundInvestors(roundId, round.investors, r.source, investorIndex);
+      }
+    }
+
+    // A matched company now carries rounds its own source never reported, so
+    // its stored total can be stale. Raise it — never lower it: a total the
+    // other source stated may cover rounds nobody itemised.
+    if (r.roundDedup === 'enrich' && (matched || own) && (roundsChanged || own)) {
+      await this.raiseTotal(companyId, r.source);
     }
 
     for (const p of r.people ?? []) {
@@ -750,6 +1227,168 @@ export class IngestService {
     }
   }
 
+  /** A company's approved rounds, split into other sources' (dedup targets)
+   *  and the keys this source already wrote (updated in place, never paired). */
+  private async companyRounds(
+    companyId: string,
+    source: string,
+  ): Promise<{ others: ExistingRound[]; ownKeys: Set<string> }> {
+    const rows = await this.prisma.fundingRound.findMany({
+      where: { companyId, moderationStatus: 'APPROVED' },
+      select: {
+        id: true,
+        name: true,
+        date: true,
+        amountUsd: true,
+        kind: true,
+        currency: true,
+        amountLocal: true,
+        externalSource: true,
+        externalId: true,
+      },
+    });
+    const others: ExistingRound[] = [];
+    const ownKeys = new Set<string>();
+    for (const r of rows) {
+      if (r.externalSource === source) {
+        if (r.externalId) ownKeys.add(r.externalId);
+        continue;
+      }
+      others.push({
+        id: r.id,
+        name: r.name,
+        date: r.date,
+        amountUsd: Number(r.amountUsd),
+        kind: r.kind,
+        currency: r.currency,
+        amountLocal: r.amountLocal,
+        externalSource: r.externalSource,
+      });
+    }
+    return { others, ownKeys };
+  }
+
+  /**
+   * Correct an INGESTED round that this source's record duplicates, with the
+   * facts this source states better: its stage name (over a placeholder like
+   * "Private placement (Form D)"), its date, and an amount the other source
+   * left undisclosed. Each change is a Revision on the company timeline.
+   *
+   * A human contribution is never modified, and a grant is only ever given a
+   * missing amount — an award's own name and date are the agency's record.
+   * Returns whether anything changed.
+   */
+  private async correctRound(
+    existing: ExistingRound,
+    round: NormalizedRound,
+    companyId: string,
+    source: string,
+  ): Promise<boolean> {
+    if (!existing.externalSource) return false;
+
+    const data: Record<string, unknown> = {};
+    const isGrant = existing.kind === 'Grant';
+    if (!isGrant && !round.genericName && round.name && round.name !== existing.name) {
+      data.name = round.name;
+    }
+    const date = new Date(round.date);
+    if (!isGrant && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) !== existing.date.toISOString().slice(0, 10)) {
+      data.date = date;
+    }
+    if (existing.amountUsd === 0 && round.amountUsd > 0) {
+      data.amountUsd = BigInt(Math.round(round.amountUsd));
+      Object.assign(data, roundMoney(round));
+    }
+    if (Object.keys(data).length === 0) return false;
+
+    const before: Record<string, unknown> = {
+      name: existing.name,
+      date: existing.date,
+      amountUsd: BigInt(Math.round(existing.amountUsd)),
+      currency: existing.currency,
+      amountLocal: existing.amountLocal,
+    };
+    const update = this.prisma.fundingRound.update({ where: { id: existing.id }, data });
+    const revisions = Object.keys(data)
+      .filter((field) => !sameValue(before[field], data[field]))
+      .map((field) => ({
+        companyId,
+        entityType: 'round',
+        entityId: existing.id,
+        field,
+        before: toJsonValue(before[field]),
+        after: toJsonValue(data[field]),
+        action: 'UPDATE',
+        actor: 'INGEST',
+        actorSource: source,
+      }));
+    if (this.recordRevisions && revisions.length > 0) {
+      await this.prisma.$transaction([update, this.prisma.revision.createMany({ data: revisions })]);
+    } else {
+      await update;
+    }
+
+    // Keep the in-memory copy current, so a later pairing in this run compares
+    // against what is now stored.
+    if (data.name) existing.name = data.name as string;
+    if (data.date) existing.date = data.date as Date;
+    if (data.amountUsd != null) existing.amountUsd = Number(data.amountUsd);
+    this.stats.roundsEnriched++;
+    return true;
+  }
+
+  /**
+   * Replace this round's RoundInvestor rows for the firms the source names.
+   * Delete-then-create on exactly those firm ids, so a re-run is idempotent
+   * and a row a contributor added (no investorId, or another firm) survives.
+   */
+  private async writeRoundInvestors(
+    roundId: string,
+    refs: NonNullable<NormalizedRound['investors']>,
+    source: string,
+    index: InvestorIndex,
+  ): Promise<void> {
+    const byFirm = new Map<string, boolean>();
+    for (const ref of refs) {
+      const id = this.resolveFirmRef(ref, source, index);
+      if (!id) {
+        this.stats.roundInvestorsSkipped++;
+        continue;
+      }
+      byFirm.set(id, (byFirm.get(id) ?? false) || !!ref.lead);
+    }
+    if (byFirm.size === 0) return;
+    const ids = [...byFirm.keys()];
+    await this.prisma.$transaction([
+      this.prisma.roundInvestor.deleteMany({ where: { roundId, investorId: { in: ids } } }),
+      this.prisma.roundInvestor.createMany({
+        data: ids.map((investorId) => ({
+          roundId,
+          investorId,
+          name: index.names.get(investorId) ?? '',
+          lead: byFirm.get(investorId) ?? false,
+        })),
+      }),
+    ]);
+    this.stats.roundInvestors += ids.length;
+  }
+
+  /** Raise a matched company's stored total to the sum of its approved
+   *  non-grant rounds when that sum is larger. Never lowers it. */
+  private async raiseTotal(companyId: string, source: string): Promise<void> {
+    const [agg, row] = await Promise.all([
+      this.prisma.fundingRound.aggregate({
+        where: { companyId, moderationStatus: 'APPROVED', kind: { not: 'Grant' } },
+        _sum: { amountUsd: true },
+      }),
+      this.prisma.company.findUnique({ where: { id: companyId }, select: { totalRaisedUsd: true } }),
+    ]);
+    const sum = agg._sum.amountUsd ?? 0n;
+    if (row && sum > row.totalRaisedUsd) {
+      await this.writeCompany(companyId, source, { totalRaisedUsd: sum });
+    }
+  }
+
   /**
    * Write one role row, resolved to the human behind it.
    *
@@ -763,7 +1402,7 @@ export class IngestService {
     owner: { companyId: string } | { investorId: string },
   ): Promise<void> {
     const personId = await this.resolvePerson(p, source, index);
-    await this.prisma.personRole.upsert({
+    const role = await this.prisma.personRole.upsert({
       where: {
         externalSource_externalId: { externalSource: source, externalId: p.externalId },
       },
@@ -784,7 +1423,28 @@ export class IngestService {
       // personId is refreshed on every run so a merge, a suppression lift or a
       // late-arriving QID reaches rows written before it.
       update: { personId, role: p.role, kind: p.kind ?? null, title: p.title ?? null, endYear: p.endYear ?? null },
+      select: { id: true },
     });
+
+    // Private contact details, keyed on the role. Only for a resolved person:
+    // a suppressed or nameless role gets none (and suppression deletes any
+    // already held). Counted, never logged.
+    const contact = p.contact;
+    if (personId && role?.id && contact && (contact.email || contact.phone || contact.linkedinUrl)) {
+      const values = {
+        personId,
+        roleId: role.id,
+        email: contact.email ?? null,
+        phone: contact.phone ?? null,
+        linkedinUrl: contact.linkedinUrl ?? null,
+      };
+      await this.prisma.personContact.upsert({
+        where: { externalSource_externalId: { externalSource: source, externalId: p.externalId } },
+        create: { ...values, externalSource: source, externalId: p.externalId },
+        update: values,
+      });
+      this.stats.contacts++;
+    }
   }
 
   /**
@@ -811,8 +1471,11 @@ export class IngestService {
     if (!norm) return null;
     if (index.suppressed.has(norm)) return null;
 
+    // An identifier-only source never name-matches: its per-person id is the
+    // only statement about who this is (see NormalizedPerson.identifierOnly).
     const known =
-      (await this.matchByIdentifier('person', p.identifiers, index)) ?? index.byName.get(norm);
+      (await this.matchByIdentifier('person', p.identifiers, index)) ??
+      (p.identifierOnly ? undefined : index.byName.get(norm));
     if (known) {
       index.attached++;
       return known;
@@ -820,13 +1483,21 @@ export class IngestService {
 
     const slug = uniquePersonSlug(p.name, index.slugs);
     const created = await this.prisma.person.create({
-      data: { slug, name: p.name, normalizedName: norm, moderationStatus: 'APPROVED' },
+      data: {
+        slug,
+        name: p.name,
+        normalizedName: norm,
+        identifierOnly: !!p.identifierOnly,
+        moderationStatus: 'APPROVED',
+      },
       select: { id: true },
     });
 
     // Update the in-memory index so a later record in the same run matches
-    // without a re-query — what the byDomain/byName writes already do.
-    index.byName.set(norm, created.id);
+    // without a re-query — what the byDomain/byName writes already do. Not for
+    // an identifier-only person: registering the name would let the next
+    // name-keyed source attach a namesake to them.
+    if (!p.identifierOnly) index.byName.set(norm, created.id);
     index.created++;
     await this.writePersonIdentifiers(created.id, source, p.identifiers, index);
     return created.id;
@@ -875,7 +1546,20 @@ export class IngestService {
     if (!norm) return null;
 
     const key = i.investorExternalId ? `${source}:${i.investorExternalId}` : null;
-    const known = (key ? index.byKey.get(key) : undefined) ?? index.byName.get(norm);
+    // A holding that names its firm by identifier is an id-keyed edge: it
+    // resolves by key or identifier, never by name.
+    const byRef =
+      i.investorIdentifier && i.investorExternalId
+        ? this.resolveFirmRef(
+            { externalId: i.investorExternalId, identifier: i.investorIdentifier },
+            source,
+            index,
+          )
+        : undefined;
+    const known =
+      (key ? index.byKey.get(key) : undefined) ??
+      byRef ??
+      (i.investorIdentifier ? undefined : index.byName.get(norm));
     if (known) return { id: known, type: index.types.get(known) ?? null };
 
     // The source publishes this edge only against a firm we already know and
@@ -899,6 +1583,7 @@ export class IngestService {
     if (key) index.byKey.set(key, created.id);
     index.byName.set(norm, created.id);
     index.types.set(created.id, i.type);
+    index.names.set(created.id, i.name);
     return { id: created.id, type: i.type };
   }
 
@@ -977,6 +1662,7 @@ export class IngestService {
     const norm = normalizeInvestorName(firm.name);
     if (norm && !index.byName.has(norm)) index.byName.set(norm, created.id);
     index.types.set(created.id, firm.type);
+    index.names.set(created.id, firm.name);
     await this.writeIdentifiers('investor', created.id, source, firm.identifiers, domain, index);
     await this.writeFirmPeople(firm, source, created.id, personIndex);
   }
@@ -1114,7 +1800,10 @@ export class IngestService {
 
   /** Resolve the record to a company row: update its own provenance-keyed row,
    *  enrich a domain/name match, or create a new row. Returns the company id. */
-  private async upsertCompany(r: NormalizedRecord, index: MatchIndex): Promise<string> {
+  private async upsertCompany(
+    r: NormalizedRecord,
+    index: MatchIndex,
+  ): Promise<{ id: string; matched: 'identifier' | 'domain' | 'name' | 'record' | null; own: boolean }> {
     const key = `${r.source}:${r.companyExternalId}`;
     const c = r.company;
 
@@ -1127,14 +1816,19 @@ export class IngestService {
         hq: c.hq || 'Undisclosed',
         industry: c.industry,
         stage: c.stage,
-        totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
+        // A source that folds its rounds into other sources' (roundDedup) has
+        // its total raised to the company's round sum after the rounds are
+        // written (`raiseTotal`), never set from the record: another of its
+        // own records may have matched this company and added rounds, and
+        // writing the record's figure would undo that on every run.
+        ...(r.roundDedup ? {} : { totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)) }),
         // Only when stated: a source that has no country must not erase one
         // another source (or the geography backfill) recorded.
         ...(c.countryCode ? { countryCode: c.countryCode } : {}),
       });
       if (c.countryCode) index.countryOf.set(ownId, c.countryCode);
       await this.writeIdentifiers('company', ownId, r.source, c.identifiers, c.domain, index);
-      return ownId;
+      return { id: ownId, matched: null, own: true };
     }
 
     // Identifier first: a CIK or a QID is a statement by the publisher about
@@ -1144,15 +1838,32 @@ export class IngestService {
     // *different* publisher's row rather than a statement about this one.
     const number = recordCompanyNumber(c.identifiers);
     const byDomain = c.domain ? index.byDomain.get(c.domain) : undefined;
+    const byIdentifier = await this.matchByIdentifier('company', c.identifiers, index);
+    const byDomainAllowed = byDomain && sameEntityAllowed(index, byDomain, number) ? byDomain : undefined;
     const matchId =
-      (await this.matchByIdentifier('company', c.identifiers, index)) ??
-      (byDomain && sameEntityAllowed(index, byDomain, number) ? byDomain : undefined) ??
-      matchName(index, normalizeName(c.name), c.countryCode ?? null, number);
+      byIdentifier ?? byDomainAllowed ?? matchName(index, normalizeName(c.name), c.countryCode ?? null, number);
+    // How strong the match is, for what a source may then do to the row's
+    // data: an identifier the record carries in someone else's scheme, or a
+    // shared domain, is strong; a hit on the source's own record id ('record')
+    // only repeats an earlier match of unknown strength; a name is weak.
+    const hitScheme = byIdentifier
+      ? c.identifiers?.find((i) => {
+          const v = normalizeIdentifier(i.scheme, i.value);
+          return v !== null && index.byIdentifier.get(`${i.scheme}:${v}`) === byIdentifier;
+        })?.scheme
+      : undefined;
+    const matchedBy = byIdentifier
+      ? hitScheme && SOURCE_RECORD_SCHEMES.has(hitScheme)
+        ? 'record'
+        : 'identifier'
+      : byDomainAllowed
+        ? 'domain'
+        : 'name';
     if (matchId) {
       await this.enrich(matchId, r);
       if (c.countryCode && !index.countryOf.get(matchId)) index.countryOf.set(matchId, c.countryCode);
       await this.writeIdentifiers('company', matchId, r.source, c.identifiers, c.domain, index);
-      return matchId;
+      return { id: matchId, matched: matchedBy, own: false };
     }
 
     const slug = this.uniqueSlug(c.name, r.companyExternalId, index);
@@ -1188,7 +1899,7 @@ export class IngestService {
     index.countryOf.set(created.id, c.countryCode ?? null);
     addName(index, normalizeName(c.name), created.id);
     await this.writeIdentifiers('company', created.id, r.source, c.identifiers, c.domain, index);
-    return created.id;
+    return { id: created.id, matched: null, own: false };
   }
 
   /** Fill blank fields on a matched row; replace copy only when it is the
@@ -1285,12 +1996,33 @@ export class IngestService {
   }
 }
 
-/** Add one name → id entry, once. */
+/**
+ * The fund holding `norm`. With `managerId`: that manager's fund of that name
+ * (first wins). Without (a Form D fund, which names no manager): the name's
+ * fund only when every holder has the same manager — an ambiguous name must
+ * resolve to no fund, because nothing disambiguates it.
+ */
+function fundByName(index: FundIndex, norm: string, managerId?: string): string | undefined {
+  const held = index.holders.get(norm);
+  if (held === undefined) return undefined;
+  const list = typeof held === 'string' ? [held] : held;
+  const parsed = list.map((e) => {
+    const sp = e.indexOf(' ');
+    return { fundId: e.slice(0, sp), managerId: e.slice(sp + 1) };
+  });
+  if (managerId) return parsed.find((h) => h.managerId === managerId)?.fundId;
+  return parsed.every((h) => h.managerId === parsed[0]!.managerId) ? parsed[0]!.fundId : undefined;
+}
+
+/** Add one name → id entry, once. A single holder is stored as a bare string:
+ *  most names have one, and an array per name is tens of MB on the full table. */
 function addName(index: MatchIndex, norm: string, id: string): void {
   if (!norm) return;
-  const ids = index.byName.get(norm);
-  if (!ids) index.byName.set(norm, [id]);
-  else if (!ids.includes(id)) ids.push(id);
+  const held = index.byName.get(norm);
+  if (held === undefined) index.byName.set(norm, id);
+  else if (typeof held === 'string') {
+    if (held !== id) index.byName.set(norm, [held, id]);
+  } else if (!held.includes(id)) held.push(id);
 }
 
 /**
@@ -1308,9 +2040,9 @@ function matchName(
   companyNumber: string | null,
 ): string | undefined {
   if (!norm) return undefined;
-  return index.byName
-    .get(norm)
-    ?.find(
+  const held = index.byName.get(norm);
+  if (held === undefined) return undefined;
+  return (typeof held === 'string' ? [held] : held).find(
       (id) =>
         countriesCompatible(country, index.countryOf.get(id) ?? null) &&
         sameEntityAllowed(index, id, companyNumber),
@@ -1481,7 +2213,27 @@ function fundFacts(fund: NormalizedFund): Record<string, unknown> {
     hq: fund.hq ?? null,
     secFundId: fund.secFundId ?? null,
     cikNumber: fund.cikNumber ?? null,
+    status: fund.status ?? null,
+    launchDate: isoDate(fund.launchDate),
+    latestCloseDate: isoDate(fund.latestCloseDate),
+    finalCloseDate: isoDate(fund.finalCloseDate),
+    hardCapUsd: fund.hardCapUsd != null ? BigInt(Math.round(fund.hardCapUsd)) : null,
+    managementFeePct: fund.managementFeePct ?? null,
+    carriedInterestPct: fund.carriedInterestPct ?? null,
+    hurdleRatePct: fund.hurdleRatePct ?? null,
+    targetIrrNetMinPct: fund.targetIrrNetMinPct ?? null,
+    targetIrrNetMaxPct: fund.targetIrrNetMaxPct ?? null,
+    targetIrrGrossMinPct: fund.targetIrrGrossMinPct ?? null,
+    targetIrrGrossMaxPct: fund.targetIrrGrossMaxPct ?? null,
+    regionFocus: fund.regionFocus ?? null,
   };
+}
+
+/** An ISO date string as a Date, or null for absent/unparseable input. */
+function isoDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** Drop the nulls, so an update writes only what the source actually reported. */

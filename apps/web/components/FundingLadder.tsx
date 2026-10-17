@@ -18,13 +18,21 @@ interface FundingLadderProps {
 // A round published in another currency (an Innovate UK grant in pounds) is
 // labelled in that currency, with its USD equivalent beside the date — but the
 // bar width stays on `amountUsd`, so rungs in two currencies remain comparable.
+//
+// A round whose amount was never disclosed (amountUsd 0, no local figure) is a
+// real event with an unknown size: it keeps the minimum width as an outline,
+// reads "Undisclosed", and is left out of the scale so it cannot squash the
+// rungs that do have a size.
+const isUndisclosed = (r: FundingRound) => r.amountUsd === 0 && r.amountLocal == null;
+
 export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
-  const max = Math.max(...rounds.map((r) => r.amountUsd));
+  const max = Math.max(1, ...rounds.filter((r) => !isUndisclosed(r)).map((r) => r.amountUsd));
 
   return (
     <ol className="flex flex-col">
       {rounds.map((round, i) => {
-        const width = Math.max(8, Math.round((round.amountUsd / max) * 100));
+        const undisclosed = isUndisclosed(round);
+        const width = undisclosed ? 8 : Math.max(8, Math.round((round.amountUsd / max) * 100));
         const last = i === rounds.length - 1;
         const foreign =
           round.currency && round.currency !== 'USD' && round.amountLocal != null
@@ -74,14 +82,23 @@ export function FundingLadder({ rounds, citations = [] }: FundingLadderProps) {
             </div>
 
             <div className="flex h-[34px] items-center max-md:col-start-2">
-              <div
-                className="flex h-full min-w-16 items-center justify-end rounded-[3px] bg-ink px-3 transition-[width] duration-500 ease-out"
-                style={{ width: `${width}%` }}
-              >
-                <span className="font-mono text-[13px] font-medium text-paper">
-                  {foreign ? formatMoney(foreign.amount, foreign.currency) : formatUsd(round.amountUsd)}
-                </span>
-              </div>
+              {undisclosed ? (
+                <div
+                  className="flex h-full min-w-28 items-center rounded-[3px] border border-dashed border-graphite-400 px-3"
+                  style={{ width: `${width}%` }}
+                >
+                  <span className="font-mono text-[13px] text-muted-foreground">Undisclosed</span>
+                </div>
+              ) : (
+                <div
+                  className="flex h-full min-w-16 items-center justify-end rounded-[3px] bg-ink px-3 transition-[width] duration-500 ease-out"
+                  style={{ width: `${width}%` }}
+                >
+                  <span className="font-mono text-[13px] font-medium text-paper">
+                    {foreign ? formatMoney(foreign.amount, foreign.currency) : formatUsd(round.amountUsd)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col items-end gap-0.5 text-right max-md:col-start-2 max-md:items-start max-md:text-left">

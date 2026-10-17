@@ -101,6 +101,14 @@ function fixture() {
     changeProposal: table([{ id: 'pr-1', companyId: 'c-lose' }]),
     roundInvestor: table([{ id: 'ri-1', investorId: 'i-lose' }]),
     fund: table([{ id: 'f-1', managerId: 'i-lose' }]),
+    // Both firms committed to the same fund: no unique key on the pair, so the
+    // merge keeps both rows rather than deleting one.
+    fundCommitment: table([
+      { id: 'fc-1', fundId: 'f-1', investorId: 'i-lose' },
+      { id: 'fc-2', fundId: 'f-1', investorId: 'i-keep' },
+    ]),
+    // Private contact details hang off the human; a merge moves them by id.
+    personContact: table([{ id: 'pc-1', personId: 'h-lose', roleId: 'pr-3' }]),
     savedCompany: table([
       // u-both saved BOTH rows: the collision case.
       { id: 's-1', userId: 'u-both', companyId: 'c-lose', createdAt: new Date('2026-01-01') },
@@ -444,13 +452,24 @@ describe('MergeService unmerge', () => {
 });
 
 describe('MergeService investor merge', () => {
-  it('repoints holdings, round positions and funds', async () => {
+  it('repoints holdings, round positions, funds and fund commitments', async () => {
     const { db, service } = fixture();
     await service.merge('investor', 'i-keep', 'i-lose', 'admin-1');
 
     expect(db.investorHolding.rows[0]!.investorId).toBe('i-keep');
     expect(db.roundInvestor.rows[0]!.investorId).toBe('i-keep');
     expect(db.fund.rows[0]!.managerId).toBe('i-keep');
+    // Both commitments survive the merge, now on the survivor.
+    expect(db.fundCommitment.rows.map((r) => r.investorId)).toEqual(['i-keep', 'i-keep']);
+  });
+
+  it('puts fund commitments back on unmerge', async () => {
+    const { db, service } = fixture();
+    const { mergeRecordId } = await service.merge('investor', 'i-keep', 'i-lose', 'admin-1');
+    await service.unmerge(mergeRecordId, 'admin-1');
+
+    expect(db.fundCommitment.rows.find((r) => r.id === 'fc-1')!.investorId).toBe('i-lose');
+    expect(db.fundCommitment.rows.find((r) => r.id === 'fc-2')!.investorId).toBe('i-keep');
   });
 
   it("moves the firm's own identifiers", async () => {
@@ -500,6 +519,18 @@ describe('MergeService person merge', () => {
     await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
 
     expect(db.personRole.rows.every((r) => r.personId === 'h-keep')).toBe(true);
+  });
+
+  it('moves private contact details with the roles, recording ids only', async () => {
+    const { db, service } = fixture();
+    const { mergeRecordId } = await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+
+    expect(db.personContact.rows[0]!.personId).toBe('h-keep');
+    const record = db.mergeRecord.rows.find((r) => r.id === mergeRecordId)!;
+    expect(JSON.stringify(record.moved)).toContain('pc-1');
+
+    await service.unmerge(mergeRecordId, 'admin-1');
+    expect(db.personContact.rows[0]!.personId).toBe('h-lose');
   });
 
   it("moves the human's own identifiers", async () => {

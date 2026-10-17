@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { Citation } from '@/components/Citation';
+import { CommitmentAmount } from '@/components/CommitmentAmount';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
@@ -55,6 +56,9 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   const country = countryName(investor.countryCode);
 
   const hasLinks = Boolean(investor.websiteUrl || investor.linkedinUrl);
+  // A limited partner (a pension, an endowment) usually manages no funds of its
+  // own; its funds block would only say so. Its commitments say what it does.
+  const showFunds = investor.funds.length > 0 || !!investor.fundCount || investor.commitmentCount === 0;
 
   return (
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
@@ -109,6 +113,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         {investor.fundCount ? <Metric label="Private funds" value={formatCount(investor.fundCount)} /> : null}
       </section>
 
+      {showFunds && (
       <section className="border-t border-line py-8">
         <SectionHeader
           title="Funds"
@@ -131,7 +136,17 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                   className="grid grid-cols-[minmax(0,1fr)_10rem_3.5rem_7rem] items-center gap-x-6 border-b border-line px-4 py-3.5 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-y-1.5"
                 >
                   <span className="min-w-0 font-display text-[15px] font-semibold tracking-tight text-ink">
-                    {fund.name}
+                    {fund.slug ? (
+                      <Link
+                        href={`/funds/${fund.slug}`}
+                        prefetch={false}
+                        className="underline-offset-[3px] transition-colors hover:text-graphite-700 hover:underline"
+                      >
+                        {fund.name}
+                      </Link>
+                    ) : (
+                      fund.name
+                    )}
                     <Citation citations={investor.citations} entityId={fund.id} />
                   </span>
                   {fund.strategy ? (
@@ -174,14 +189,66 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           </EmptyState>
         )}
       </section>
+      )}
+
+      {investor.commitmentCount > 0 && (
+        <section className="border-t border-line py-8">
+          <SectionHeader
+            title="Fund commitments"
+            note={
+              investor.commitmentCount > investor.commitments.length
+                ? `${formatCount(investor.commitments.length)} largest of ${formatCount(investor.commitmentCount)}`
+                : `${formatCount(investor.commitmentCount)} as a limited partner`
+            }
+            size="md"
+            className="mb-5 border-b-0 pb-0"
+          />
+          <ul className="overflow-hidden rounded-[10px] border border-line bg-surface">
+            {investor.commitments.map((c) => (
+              <li
+                key={c.id}
+                className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_3.5rem_8rem] items-center gap-x-6 border-b border-line px-4 py-3.5 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-y-1.5"
+              >
+                <span className="min-w-0 font-display text-[15px] font-semibold tracking-tight text-ink">
+                  {c.fund.slug ? (
+                    <Link
+                      href={`/funds/${c.fund.slug}`}
+                      prefetch={false}
+                      className="underline-offset-[3px] transition-colors hover:text-graphite-700 hover:underline"
+                    >
+                      {c.fund.name}
+                    </Link>
+                  ) : (
+                    c.fund.name
+                  )}
+                </span>
+                <Link
+                  href={`/investors/${c.manager.slug}`}
+                  prefetch={false}
+                  className="max-w-full justify-self-start truncate text-[13px] text-graphite-700 underline-offset-[3px] transition-colors hover:text-ink hover:underline"
+                  title={c.manager.name}
+                >
+                  {c.manager.name}
+                </Link>
+                <span className="text-right font-mono text-sm text-ink max-[720px]:text-left">
+                  {c.fund.vintageYear ?? '—'}
+                </span>
+                <CommitmentAmount amountUsd={c.amountUsd} amountLocal={c.amountLocal} currency={c.currency} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="border-t border-line py-8">
         <SectionHeader
           title="People"
           note={
-            investor.people.length > 0
-              ? `${formatCount(investor.people.length)} named`
-              : undefined
+            investor.peopleCount > investor.people.length
+              ? `${formatCount(investor.people.length)} of ${formatCount(investor.peopleCount)} named`
+              : investor.people.length > 0
+                ? `${formatCount(investor.people.length)} named`
+                : undefined
           }
           size="md"
           className="mb-5 border-b-0 pb-0"
@@ -225,9 +292,11 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         <SectionHeader
           title="Portfolio"
           note={
-            investor.portfolioCount > 0
-              ? `${formatCount(investor.portfolioCount)} known ${investor.portfolioCount === 1 ? 'company' : 'companies'}`
-              : undefined
+            investor.portfolioCount > investor.companies.length
+              ? `${formatCount(investor.companies.length)} largest of ${formatCount(investor.portfolioCount)} known companies`
+              : investor.portfolioCount > 0
+                ? `${formatCount(investor.portfolioCount)} known ${investor.portfolioCount === 1 ? 'company' : 'companies'}`
+                : undefined
           }
           size="md"
           className="mb-5 border-b-0 pb-0"

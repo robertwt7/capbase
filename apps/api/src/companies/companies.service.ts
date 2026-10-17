@@ -9,7 +9,9 @@ import {
   DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
+  SITEMAP_PAGE_SIZE,
   normalizeDomain,
+  publicIngestLabel,
   type CitableType,
   type Citation,
   type Company,
@@ -257,13 +259,22 @@ export class CompaniesService {
   }
 
   /** Every approved company's slug + last update, for the web sitemap. */
-  async listSlugs(): Promise<CompanySlugEntry[]> {
+  /** One `SITEMAP_PAGE_SIZE` page of the sitemap feed, by slug (unique, so
+   *  pages never overlap). Never the whole family — see `SITEMAP_PAGE_SIZE`. */
+  async listSlugs(page = 0): Promise<CompanySlugEntry[]> {
     const rows = await this.prisma.company.findMany({
       where: PUBLIC_COMPANY,
       select: { slug: true, updatedAt: true },
       orderBy: { slug: 'asc' },
+      skip: page * SITEMAP_PAGE_SIZE,
+      take: SITEMAP_PAGE_SIZE,
     });
     return rows.map((r) => ({ slug: r.slug, updatedAt: r.updatedAt.toISOString() }));
+  }
+
+  /** How many rows `listSlugs` pages over — sizes the sitemap index. */
+  countSlugs(): Promise<number> {
+    return this.prisma.company.count({ where: PUBLIC_COMPANY });
   }
 
   /**
@@ -479,8 +490,10 @@ export class CompaniesService {
       after: row.after,
       action: row.action as RevisionAction,
       actor: row.actor as RevisionActor,
-      // Never the email — this endpoint is public.
-      actorName: row.actor === 'INGEST' ? row.actorSource : (row.actorUser?.name ?? null),
+      // Never the email — this endpoint is public. Never the raw ingest tag
+      // either: an internal source name maps through an explicit public label.
+      actorName:
+        row.actor === 'INGEST' ? publicIngestLabel(row.actorSource) : (row.actorUser?.name ?? null),
       createdAt: row.createdAt.toISOString(),
     }));
 
