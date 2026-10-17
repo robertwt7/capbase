@@ -44,10 +44,12 @@ async function main() {
         if (rows.length === 0) break;
         cursor = rows[rows.length - 1]!.id;
         const plan = planFundSlugs(rows, slugs);
-        await prisma.$transaction(
-          plan.map((p) => prisma.fund.update({ where: { id: p.id }, data: { slug: p.slug } })),
-        );
-        written += plan.length;
+        // One statement per page, not 2,000 `update`s in a `$transaction`: on
+        // the VPS those outran Prisma's 5 s transaction timeout and rolled back.
+        written += await prisma.$executeRaw`
+          UPDATE "Fund" f SET "slug" = v.slug
+          FROM unnest(${plan.map((p) => p.id)}::text[], ${plan.map((p) => p.slug)}::text[]) AS v(id, slug)
+          WHERE f.id = v.id AND f."slug" IS NULL`;
         logger.log(`Progress: ${written} slugs written`);
       }
       return written;

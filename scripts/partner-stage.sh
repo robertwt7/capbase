@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Load or drop the licensed partner snapshot's `partner_stage` schema in the
+# Load or drop the partner snapshot's `partner_stage` schema in the
 # capbase database. The schema sits beside `public` (Prisma manages `public`
 # only) for the length of the import, then is dropped.
 #
