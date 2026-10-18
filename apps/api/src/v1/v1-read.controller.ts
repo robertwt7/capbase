@@ -38,8 +38,8 @@ import { V1ListCompaniesDto } from './dto/v1-list-companies.dto';
 
 /**
  * Public API reads. The same services as the website's routes, so visibility (APPROVED, not
- * merged, not suppressed) is identical. A contributor or admin key's owner is always unlocked
- * on a company profile (`UsersService.accessFor`).
+ * merged, not suppressed) is identical. Every read passes the key's owner: a contributor or admin
+ * is always unlocked (`UsersService.accessFor`), so the read gate never withholds anything here.
  */
 @ApiTags('Read')
 @ApiKeyAuth()
@@ -112,8 +112,11 @@ export class V1ReadController {
     },
   })
   @Get('companies')
-  listCompanies(@Query() query: V1ListCompaniesDto): Promise<Paginated<Company>> {
-    return this.companies.findAllApproved(query);
+  listCompanies(
+    @Query() query: V1ListCompaniesDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<Paginated<Company>> {
+    return this.companies.findAllApproved(query, user);
   }
 
   /** A merged slug answers 301 with the survivor's slug in the body; follow it. */
@@ -141,8 +144,11 @@ export class V1ReadController {
     description: '`{ items: InvestorSummary[], total, page, pageSize }`.',
   })
   @Get('investors')
-  listInvestors(@Query() query: ListInvestorsDto): Promise<Paginated<InvestorSummary>> {
-    return this.investors.findAll(query);
+  listInvestors(
+    @Query() query: ListInvestorsDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<Paginated<InvestorSummary>> {
+    return this.investors.findAll(query, user);
   }
 
   @V1ReadThrottle()
@@ -155,8 +161,11 @@ export class V1ReadController {
   })
   @ApiNotFoundResponse({ description: 'No public firm has this slug.' })
   @Get('investors/:slug')
-  investor(@Param('slug') slug: string): Promise<InvestorDetailResponse> {
-    return this.investors.findOne(slug);
+  investor(
+    @Param('slug') slug: string,
+    @CurrentUser() user: RequestUser,
+  ): Promise<InvestorDetailResponse> {
+    return this.investors.findOne(slug, user);
   }
 
   @V1ReadThrottle()
@@ -165,8 +174,11 @@ export class V1ReadController {
     description: '`{ items: PersonSummary[], total, page, pageSize }`.',
   })
   @Get('people')
-  listPeople(@Query() query: ListPeopleDto): Promise<Paginated<PersonSummary>> {
-    return this.people.findAll(query);
+  listPeople(
+    @Query() query: ListPeopleDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<Paginated<PersonSummary>> {
+    return this.people.findAll(query, user);
   }
 
   @V1ReadThrottle()
@@ -179,8 +191,11 @@ export class V1ReadController {
   })
   @ApiNotFoundResponse({ description: 'No public person has this slug.' })
   @Get('people/:slug')
-  person(@Param('slug') slug: string): Promise<PersonDetailResponse> {
-    return this.people.findOne(slug);
+  person(
+    @Param('slug') slug: string,
+    @CurrentUser() user: RequestUser,
+  ): Promise<PersonDetailResponse> {
+    return this.people.findOne(slug, user);
   }
 
   @V1ReadThrottle()
@@ -189,8 +204,11 @@ export class V1ReadController {
     description: '`{ items: FundSummary[], total, page, pageSize }`.',
   })
   @Get('funds')
-  listFunds(@Query() query: ListFundsDto): Promise<Paginated<FundSummary>> {
-    return this.funds.findAll(query);
+  listFunds(
+    @Query() query: ListFundsDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<Paginated<FundSummary>> {
+    return this.funds.findAll(query, user);
   }
 
   @V1ReadThrottle()
@@ -201,8 +219,11 @@ export class V1ReadController {
   })
   @ApiNotFoundResponse({ description: 'No public fund has this slug.' })
   @Get('funds/:slug')
-  fund(@Param('slug') slug: string): Promise<FundDetailResponse> {
-    return this.funds.findOne(slug);
+  fund(
+    @Param('slug') slug: string,
+    @CurrentUser() user: RequestUser,
+  ): Promise<FundDetailResponse> {
+    return this.funds.findOne(slug, user);
   }
 
   @V1ReadThrottle()
@@ -212,7 +233,10 @@ export class V1ReadController {
   })
   @ApiOkResponse({ description: '`{ companies, investors, people }`.' })
   @Get('search')
-  search(@Query() query: SearchQueryDto): Promise<SearchResponse> {
-    return this.searchService.search(query.q);
+  search(
+    @Query() query: SearchQueryDto,
+    @CurrentUser() user: RequestUser,
+  ): Promise<SearchResponse> {
+    return this.searchService.search(query.q, user);
   }
 }

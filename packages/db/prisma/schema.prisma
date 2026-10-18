@@ -214,6 +214,15 @@ model Company {
   externalSource String?
   externalId     String?
 
+  /// Columns whose CURRENT value the licensed partner wrote (created, filled
+  /// blank, or raised). The read gate masks them for signed-out viewers. Fail
+  /// closed: a partner re-run never removes one; only a non-partner overwrite
+  /// or an approved human edit does.
+  partnerFields String[] @default([])
+  /// The row exists only because of the partner: no other source has matched
+  /// it. Signed-out viewers get a stub profile and never see it listed.
+  partnerOnly   Boolean  @default(false)
+
   /// Set when an admin merged this row into another. The row is KEPT, not
   /// deleted: its slug still redirects, and its (externalSource, externalId)
   /// still absorbs the source's next re-ingest. Deleting it would free that key
@@ -240,6 +249,7 @@ model Company {
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
+  @@index([partnerOnly])
   /// Admin queue: one status, newest first, cursor on (createdAt, id).
   @@index([moderationStatus, createdAt, id])
   /// Contribution gate + pending cap: a user's rows in one status, newest first.
@@ -346,6 +356,10 @@ model FundingRound {
   // Provenance for ingested rows (e.g. SEC_EDGAR). Null for human contributions.
   externalSource String?
   externalId     String?
+  /// Columns the partner corrected on another source's round (see
+  /// Company.partnerFields). A round the partner created is wholly partner
+  /// data through `externalSource` instead.
+  partnerFields  String[] @default([])
 
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
@@ -373,6 +387,11 @@ model RoundInvestor {
   // truth for rows whose firm we could not resolve.
   investorId String?
   investor   Investor? @relation(fields: [investorId], references: [id], onDelete: SetNull)
+
+  /// The ingest source that named this investor on the round; null for a
+  /// contributed row. A round can carry rows from several sources, and each
+  /// source replaces only its own.
+  externalSource String?
 
   @@index([roundId])
   @@index([investorId])
@@ -406,6 +425,9 @@ model Investor {
   // Provenance for ingested rows (SEC_ADV, WIKIDATA). Null for human contributions.
   externalSource String?
   externalId     String?
+  /// Same contract as Company.partnerFields / Company.partnerOnly.
+  partnerFields  String[] @default([])
+  partnerOnly    Boolean  @default(false)
 
   /// Set when an admin merged this row into another. Kept, not deleted, for the
   /// same reason as Company.mergedIntoId.
@@ -429,6 +451,7 @@ model Investor {
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
+  @@index([partnerOnly])
   @@index([moderationStatus])
   @@index([moderationStatus, type])
   @@index([moderationStatus, countryCode])
@@ -504,6 +527,9 @@ model Fund {
   // stay citable however the row was created.
   externalSource String?
   externalId     String?
+  /// Same contract as Company.partnerFields / Company.partnerOnly.
+  partnerFields  String[] @default([])
+  partnerOnly    Boolean  @default(false)
 
   moderationStatus ReviewStatus @default(PENDING)
   submittedById    String?
@@ -513,6 +539,7 @@ model Fund {
 
   @@unique([externalSource, externalId])
   @@index([managerId])
+  @@index([partnerOnly])
   @@index([moderationStatus])
   @@index([moderationStatus, strategy])
   /// `(sort: Desc)` here, `DESC NULLS LAST` in the migration SQL: the reads sort
@@ -702,6 +729,9 @@ model Person {
   /// not by that source, and not by any later one — so the ingest index leaves
   /// them out of its name map. A column rather than a lookup of their
   /// identifiers, so the index need not hold half a million ids to know it.
+  /// The partner is the only identifier-only source, so this is also the
+  /// person's `partnerOnly`: the read gate hides such a person from signed-out
+  /// viewers exactly as it hides a partner-only company, firm or fund.
   identifierOnly Boolean @default(false)
 
   moderationStatus ReviewStatus @default(PENDING)

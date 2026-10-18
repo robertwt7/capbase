@@ -26,13 +26,30 @@ export default async function Image({ params }: { params: Promise<{ slug: string
 
   if (!company) return new ImageResponse(<OgFallbackCard />, { ...size, fonts });
 
+  // The image is fetched like any page — signed out, for a crawler — so it
+  // draws only what that viewer may see: a stub is a name, a withheld value is
+  // skipped, and when the ladder is gated a summary line stands in for its bars.
+  const stub = company.partnerOnly === true;
+  const shown = (field: string) => !company.masked?.includes(field);
   const rounds = (company.rounds ?? []).slice(-MAX_BARS);
   const maxAmount = Math.max(...rounds.map((r) => r.amountUsd), 1);
-  const stats = [
-    company.totalRaisedUsd > 0 ? `${formatUsd(company.totalRaisedUsd)} RAISED` : null,
-    company.stage.toUpperCase(),
-    foundedYear(company.founded) && `FOUNDED ${company.founded}`,
-  ].filter((s): s is string => Boolean(s));
+  const roundCount = result?.access.totals.rounds ?? 0;
+  const latest = result?.latestRound;
+  const stats = stub
+    ? []
+    : [
+        shown('totalRaisedUsd') && company.totalRaisedUsd > 0
+          ? `${formatUsd(company.totalRaisedUsd)} RAISED`
+          : null,
+        shown('stage') && company.stage ? company.stage.toUpperCase() : null,
+        shown('founded') && foundedYear(company.founded) && `FOUNDED ${company.founded}`,
+      ].filter((s): s is string => Boolean(s));
+  const summary =
+    !stub && rounds.length === 0 && roundCount > 0
+      ? [`${roundCount} ${roundCount === 1 ? 'ROUND' : 'ROUNDS'}`, latest?.stage.toUpperCase()]
+          .filter(Boolean)
+          .join(' · ')
+      : null;
   const nameSize = company.name.length > 24 ? 56 : company.name.length > 14 ? 72 : 88;
 
   return new ImageResponse(
@@ -79,7 +96,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
               maxWidth: 900,
             }}
           >
-            {company.oneLiner}
+            {stub || !shown('oneLiner') ? '' : company.oneLiner}
           </div>
         </div>
 
@@ -104,7 +121,21 @@ export default async function Image({ params }: { params: Promise<{ slug: string
           ))}
         </div>
 
-        {rounds.length > 0 ? (
+        {summary ? (
+          <div
+            style={{
+              display: 'flex',
+              marginTop: 28,
+              fontFamily: 'IBM Plex Mono',
+              fontSize: 24,
+              color: OG.graphite700,
+              letterSpacing: '0.04em',
+            }}
+          >
+            {summary}
+          </div>
+        ) : null}
+        {!stub && rounds.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 28 }}>
             {rounds.map((round, i) => (
               <div

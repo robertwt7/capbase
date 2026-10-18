@@ -12,6 +12,7 @@ import {
 } from '@repo/api';
 
 import { ALL_COUNTRIES, CountryFilter } from '@/components/CountryFilter';
+import { isMasked, SignInChip } from '@/components/Masked';
 
 import {
   Badge,
@@ -188,9 +189,15 @@ export function InvestorDirectory({
                   <span className="font-display text-base font-semibold tracking-tight text-ink">
                     {inv.name}
                   </span>
-                  <Badge variant="pill" mono className="self-start">
-                    {inv.type}
-                  </Badge>
+                  {isMasked(inv, 'type') ? (
+                    <span className="self-start">
+                      <SignInChip next="/investors" link={false} />
+                    </span>
+                  ) : (
+                    <Badge variant="pill" mono className="self-start">
+                      {inv.type}
+                    </Badge>
+                  )}
                 </span>
                 <span
                   className="text-right font-mono text-base font-medium text-ink max-[820px]:text-left"
@@ -206,6 +213,9 @@ export function InvestorDirectory({
                 <span className="truncate text-[13px] text-graphite-700" role="cell">
                   {inv.companies.length ? (
                     inv.companies.map((c) => c.name).join(', ')
+                  ) : inv.portfolioCount > 0 ? (
+                    // Every holding this viewer may not see (licensed data).
+                    <span className="text-graphite-500">—</span>
                   ) : (
                     <span className="text-graphite-500">No known investments yet →</span>
                   )}

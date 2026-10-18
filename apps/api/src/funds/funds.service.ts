@@ -2,19 +2,37 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
   FUND_COMMITMENT_PREVIEW,
+  PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
   fundIndexable,
+  gateLimit,
+  partnerVisible,
   type FundDetailResponse,
   type FundListQuery,
   type FundSlugEntry,
   type FundSummary,
+  type FundTerms,
   type Paginated,
+  type Role,
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 
+import {
+  FUND_BLANKS,
+  limitRows,
+  listAccess,
+  maskFields,
+  maskPartnerFields,
+  publicRowsWhere,
+  rowVisible,
+  stubFor,
+  takeFor,
+  unmaskedFilters,
+} from '../gate/gate';
 import { PrismaService } from '../prisma/prisma.service';
 import { PUBLIC_INVESTOR } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
+import { UsersService } from '../users/users.service';
 import {
   toFundCommitmentRow,
   toFundMetricRow,
@@ -40,6 +58,8 @@ export const PUBLIC_FUND_COMMITMENTS = {
 const INDEXABLE_FUND = {
   ...PUBLIC_FUND,
   slug: { not: null },
+  // A partner-only fund is a stub for crawlers (who are signed out): noindex.
+  partnerOnly: false,
   OR: [
     { commitments: { some: PUBLIC_FUND_COMMITMENTS } },
     { closedUsd: { not: null } },
@@ -56,20 +76,62 @@ const INDEXABLE_FUND = {
  * `moderationStatus` so it matches every sibling table and a later ticket can
  * open contributions without touching this file.
  */
+/** The terms only a contributor sees (`GATED_SECTIONS.fundTerms`). Region
+ *  focus is a description, not a term, and stays with the facts. */
+const GATED_TERMS = [
+  'launchDate',
+  'latestCloseDate',
+  'finalCloseDate',
+  'hardCapUsd',
+  'managementFeePct',
+  'carriedInterestPct',
+  'hurdleRatePct',
+  'targetIrrNetMinPct',
+  'targetIrrNetMaxPct',
+  'targetIrrGrossMinPct',
+  'targetIrrGrossMaxPct',
+] as const satisfies readonly (keyof FundTerms)[];
+
+/** Every fund fact a partner-only stub withholds: all but its name, slug and
+ *  manager. */
+const FUND_STUB_HIDDEN = [
+  'strategy',
+  'status',
+  'vintageYear',
+  'targetUsd',
+  'closedUsd',
+  'grossAssetsUsd',
+  'hq',
+  'regionFocus',
+  ...GATED_TERMS,
+];
+
 @Injectable()
 export class FundsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly users: UsersService,
+  ) {}
 
-  async findAll(query: FundListQuery = {}): Promise<Paginated<FundSummary>> {
+  /**
+   * One page of funds. A signed-out viewer never sees a partner-only fund, a
+   * partner-written value (masked) or a filter match on one; the status filter
+   * — a partner-only column — is ignored for them outright.
+   */
+  async findAll(query: FundListQuery = {}, viewer?: { id: string; role: Role }): Promise<Paginated<FundSummary>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const access = listAccess(viewer);
+    const status = partnerVisible(access) ? query.status : undefined;
 
     const where: Prisma.FundWhereInput = {
       ...PUBLIC_FUND,
+      ...(partnerVisible(access) ? {} : { partnerOnly: false }),
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
       ...(query.strategy && { strategy: query.strategy }),
-      ...(query.status && { status: query.status }),
+      ...(status && { status }),
       ...(query.manager && { manager: { slug: query.manager } }),
+      AND: unmaskedFilters(access, [query.strategy && 'strategy']),
     };
 
     const [total, rows] = await this.prisma.$transaction([
@@ -84,54 +146,97 @@ export class FundsService {
     ]);
 
     return {
-      items: rows.map((r) => toFundSummary(r as FundWithManager)),
+      items: rows.map((r) => maskPartnerFields(toFundSummary(r as FundWithManager), r.partnerFields, access, FUND_BLANKS)),
       total,
       page,
       pageSize,
     };
   }
 
-  /** The fund page: facts, terms, the largest commitments, metrics, and the
-   *  citations SEC funds carry. 404 for an unknown or unpublished fund. */
-  async findOne(slug: string): Promise<FundDetailResponse> {
+  /**
+   * The fund page: facts, terms, the largest commitments, metrics, and the
+   * citations SEC funds carry. 404 for an unknown or unpublished fund.
+   *
+   * Gated: commitments and metrics are previewed (`gateLimit`, no partner rows
+   * signed out) against counts over all of them; the terms are a contributor's
+   * (`termsHidden`); partner-written facts are masked signed out; a
+   * partner-only fund is a stub for a signed-out viewer.
+   */
+  async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<FundDetailResponse> {
+    const access = await this.users.accessFor(viewer);
     const row = await this.prisma.fund.findFirst({
       where: { slug, ...PUBLIC_FUND },
       include: {
         manager: MANAGER_SELECT,
         commitments: {
-          where: PUBLIC_FUND_COMMITMENTS,
+          where: { ...PUBLIC_FUND_COMMITMENTS, ...publicRowsWhere(access) },
           orderBy: [{ amountUsd: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
-          take: FUND_COMMITMENT_PREVIEW,
+          take: takeFor(Math.min(FUND_COMMITMENT_PREVIEW, gateLimit('fundCommitments', access))),
           include: { investor: { select: { slug: true, name: true, type: true } } },
         },
+        // A handful per fund: loaded whole, so the count covers every one.
         metrics: { orderBy: { asAt: 'asc' } },
         _count: { select: { commitments: { where: PUBLIC_FUND_COMMITMENTS } } },
       },
     });
     if (!row) throw new NotFoundException(`Fund "${slug}" not found`);
 
+    const summary = toFundSummary(row as FundWithManager);
+    const terms = toFundTerms(row);
+    const commitmentCount = row._count.commitments;
+    const gate = { ...access, previewLimit: PREVIEW_LIMIT };
+    const base = {
+      commitmentCount,
+      metricCount: row.metrics.length,
+      // Read off the stored row, before anything is withheld: indexing is a
+      // property of the fund, not of the viewer.
+      indexable:
+        !row.partnerOnly &&
+        fundIndexable({
+          commitmentCount,
+          closedUsd: summary.closedUsd,
+          targetUsd: summary.targetUsd,
+          finalCloseDate: terms.finalCloseDate,
+          managementFeePct: terms.managementFeePct,
+        }),
+      access: gate,
+    };
+
+    if (stubFor(row.partnerOnly, access)) {
+      const fund = maskFields({ ...summary, ...terms }, FUND_STUB_HIDDEN, FUND_BLANKS);
+      return {
+        ...base,
+        fund: { ...fund, manager: { ...fund.manager, domain: null }, partnerOnly: true },
+        commitments: [],
+        metrics: [],
+        termsHidden: false,
+        citations: [],
+      };
+    }
+
+    const termsHidden =
+      gateLimit('fundTerms', access) === 0 && GATED_TERMS.some((t) => terms[t] !== null && terms[t] !== undefined);
+    let fund = maskPartnerFields({ ...summary, ...terms }, row.partnerFields, access, FUND_BLANKS);
+    if (gateLimit('fundTerms', access) === 0) {
+      fund = { ...fund };
+      for (const t of GATED_TERMS) fund[t] = null;
+    }
+
     const citations = await this.prisma.citation.findMany({
       where: { entityType: 'fund', entityId: row.id },
       include: { source: true },
       orderBy: { createdAt: 'asc' },
     });
-
-    const summary = toFundSummary(row as FundWithManager);
-    const terms = toFundTerms(row);
-    const commitmentCount = row._count.commitments;
     return {
-      fund: { ...summary, ...terms },
+      ...base,
+      fund,
       commitments: row.commitments.map((c) => toFundCommitmentRow(c as CommitmentWithInvestor)),
-      commitmentCount,
-      metrics: row.metrics.map(toFundMetricRow),
+      metrics: limitRows(
+        row.metrics.filter((m) => rowVisible(m, access)),
+        gateLimit('fundMetrics', access),
+      ).map(toFundMetricRow),
+      termsHidden,
       citations: citations.map(toCitation),
-      indexable: fundIndexable({
-        commitmentCount,
-        closedUsd: summary.closedUsd,
-        targetUsd: summary.targetUsd,
-        finalCloseDate: terms.finalCloseDate,
-        managementFeePct: terms.managementFeePct,
-      }),
     };
   }
 

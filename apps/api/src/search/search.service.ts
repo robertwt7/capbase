@@ -2,10 +2,13 @@ import { Injectable } from '@nestjs/common';
 import {
   SEARCH_GROUP_LIMIT,
   SEARCH_MIN_CHARS,
+  partnerVisible,
   type SearchHit,
   type SearchResponse,
 } from '@repo/api';
+import { Prisma } from '@repo/db';
 
+import { listAccess, publicRowsWhere } from '../gate/gate';
 import { PrismaService } from '../prisma/prisma.service';
 import { PUBLIC_ROLES } from '../prisma/public-filters';
 
@@ -33,11 +36,20 @@ export class SearchService {
    *
    * Raw SQL because Prisma can't order by a CASE, so each query restates its
    * public filter from `prisma/public-filters.ts` inline — keep them in step.
+   *
+   * Signed out, the partner's entities are not found at all (partner-only
+   * companies and firms, its identifier-only people), and a partner-written
+   * logo domain or sector is never shown — the same rule as the directories.
    */
-  async search(raw: string): Promise<SearchResponse> {
+  async search(raw: string, viewer?: unknown): Promise<SearchResponse> {
     const q = raw.trim();
     if (q.length < SEARCH_MIN_CHARS)
       return { companies: [], investors: [], people: [] };
+    const access = listAccess(viewer);
+    const signedOut = !partnerVisible(access);
+    const notPartnerOnly = signedOut ? Prisma.sql`AND NOT "partnerOnly"` : Prisma.empty;
+    const unmarked = (column: string, expr: Prisma.Sql) =>
+      signedOut ? Prisma.sql`CASE WHEN ${column} = ANY("partnerFields") THEN NULL ELSE ${expr} END` : expr;
 
     const esc = escapeLike(q.toLowerCase());
     const exact = q.toLowerCase();
@@ -48,10 +60,13 @@ export class SearchService {
     const [companies, investors, people] = await Promise.all([
       // PUBLIC_COMPANY
       this.prisma.$queryRaw<SearchHit[]>`
-        SELECT slug, name, NULLIF(domain, '') AS domain, "primarySector" AS meta
+        SELECT slug, name,
+               ${unmarked('domain', Prisma.sql`NULLIF(domain, '')`)} AS domain,
+               ${unmarked('primarySector', Prisma.sql`"primarySector"`)} AS meta
           FROM "Company"
          WHERE "moderationStatus" = 'APPROVED'
            AND "mergedIntoId" IS NULL
+           ${notPartnerOnly}
            AND name ILIKE ${contains}
          ORDER BY CASE WHEN lower(name) = ${exact} THEN 0
                        WHEN lower(name) LIKE ${prefix} THEN 1
@@ -62,10 +77,13 @@ export class SearchService {
       `,
       // PUBLIC_INVESTOR
       this.prisma.$queryRaw<SearchHit[]>`
-        SELECT slug, name, NULLIF(domain, '') AS domain, type AS meta
+        SELECT slug, name,
+               ${unmarked('domain', Prisma.sql`NULLIF(domain, '')`)} AS domain,
+               ${unmarked('type', Prisma.sql`type`)} AS meta
           FROM "Investor"
          WHERE "moderationStatus" = 'APPROVED'
            AND "mergedIntoId" IS NULL
+           ${notPartnerOnly}
            AND name ILIKE ${contains}
          ORDER BY CASE WHEN lower(name) = ${exact} THEN 0
                        WHEN lower(name) LIKE ${prefix} THEN 1
@@ -81,6 +99,7 @@ export class SearchService {
          WHERE "moderationStatus" = 'APPROVED'
            AND "mergedIntoId" IS NULL
            AND "suppressedAt" IS NULL
+           ${signedOut ? Prisma.sql`AND NOT "identifierOnly"` : Prisma.empty}
            AND name ILIKE ${contains}
          ORDER BY CASE WHEN lower(name) = ${exact} THEN 0
                        WHEN lower(name) LIKE ${prefix} THEN 1
@@ -91,7 +110,10 @@ export class SearchService {
       `,
     ]);
 
-    const orgs = await this.latestOrganisations(people.map((p) => p.id));
+    const orgs = await this.latestOrganisations(
+      people.map((p) => p.id),
+      signedOut ? { AND: [publicRowsWhere(access)] } : {},
+    );
     return {
       companies: companies.map(toHit),
       investors: investors.map(toHit),
@@ -105,11 +127,12 @@ export class SearchService {
    *  two people of the same name apart. One query, bounded by the group limit. */
   private async latestOrganisations(
     personIds: string[],
+    visible: Prisma.PersonRoleWhereInput,
   ): Promise<Map<string, string>> {
     const orgs = new Map<string, string>();
     if (personIds.length === 0) return orgs;
     const roles = await this.prisma.personRole.findMany({
-      where: { personId: { in: personIds }, ...PUBLIC_ROLES },
+      where: { personId: { in: personIds }, ...PUBLIC_ROLES, ...visible },
       orderBy: { since: 'desc' },
       select: {
         personId: true,

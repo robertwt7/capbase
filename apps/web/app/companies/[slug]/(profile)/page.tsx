@@ -1,14 +1,16 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import type { CompanyAccess } from '@repo/api';
 
 import { Citation, companyEntityId } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { FundingLadder } from '@/components/FundingLadder';
 import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
+import { LockedSection } from '@/components/LockedSection';
+import { isMasked, Masked, SignInChip } from '@/components/Masked';
 import { SaveCompanyButton } from '@/components/SaveCompanyButton';
+import { StubProfile } from '@/components/StubProfile';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
@@ -44,12 +46,21 @@ export async function generateMetadata({
   // not-found title there rather than later in the body.
   if (!result) notFound();
   const { company } = result;
+  // A partner-only company is a stub for a signed-out viewer: never indexed.
+  if (company.partnerOnly) {
+    return { title: company.name, robots: { index: false, follow: true } };
+  }
 
+  // A withheld fact is blank in the payload; each one is skipped explicitly
+  // anyway, so the description can never state a masked value.
+  const shown = (field: string) => !isMasked(company, field);
   const facts = [
-    company.oneLiner.replace(/\.$/, ''),
-    foundedYear(company.founded) && `Founded ${company.founded}`,
-    company.hq,
-    company.totalRaisedUsd > 0 ? `${formatUsd(company.totalRaisedUsd)} raised` : null,
+    shown('oneLiner') && company.oneLiner.replace(/\.$/, ''),
+    shown('founded') && foundedYear(company.founded) && `Founded ${company.founded}`,
+    shown('hq') && company.hq,
+    shown('totalRaisedUsd') && company.totalRaisedUsd > 0
+      ? `${formatUsd(company.totalRaisedUsd)} raised`
+      : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -71,15 +82,41 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
     notFound();
   }
 
-  const { company, access, citations } = result;
+  const { company, access, citations, latestRound } = result;
+  const path = `/companies/${company.slug}`;
+  if (company.partnerOnly) {
+    return (
+      <StubProfile
+        kind="Company"
+        name={company.name}
+        domain={company.domain}
+        next={path}
+        back={{ href: '/companies', label: 'All companies' }}
+        counts={[
+          { label: 'Funding rounds', value: access.totals.rounds },
+          { label: 'Investors', value: access.totals.investors },
+          { label: 'People', value: access.totals.people },
+        ].filter((c) => c.value > 0)}
+      />
+    );
+  }
+
   // Company-level facts all anchor to the company row; a whole-row citation
   // (what the backfill mints) attests each of them.
   const companyId = companyEntityId(citations);
   const cite = (field: string) => (
     <Citation citations={citations} entityId={companyId} field={field} />
   );
+  /** A fact, or the sign-in chip when the API withheld it from this viewer. */
+  const m = (field: string, node: React.ReactNode) => (
+    <Masked entity={company} field={field} next={path}>
+      {node}
+    </Masked>
+  );
+  const masked = (field: string) => isMasked(company, field);
   const country = countryName(company.countryCode);
   const signedIn = session !== null;
+  const lock = { access, next: path, contributeHref: `/companies/${company.slug}/contribute` };
   const saved = signedIn
     ? (await getSavedStatus(slug).catch(() => ({ saved: false }))).saved
     : false;
@@ -125,11 +162,15 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             <h1 className="font-display text-[clamp(1.875rem,4vw,2.75rem)] leading-none font-extrabold tracking-[-0.035em] text-ink">
               {company.name}
             </h1>
-            <Badge variant="pill" mono>
-              {company.status}
-            </Badge>
+            {!masked('status') && (
+              <Badge variant="pill" mono>
+                {company.status}
+              </Badge>
+            )}
           </div>
-          <p className="mt-3 max-w-[48ch] text-[17px] text-graphite-700">{company.oneLiner}</p>
+          <p className="mt-3 max-w-[48ch] text-[17px] text-graphite-700">
+            {m('oneLiner', company.oneLiner)}
+          </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {company.industry.map((tag) => (
               <Badge key={tag} variant="box">
@@ -137,13 +178,22 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               </Badge>
             ))}
           </div>
-          {(company.websiteUrl || company.linkedinUrl || company.twitterUrl) && (
-            <div className="mt-4 flex flex-wrap gap-4">
+          {(company.websiteUrl ||
+            company.linkedinUrl ||
+            company.twitterUrl ||
+            masked('websiteUrl') ||
+            masked('linkedinUrl')) && (
+            <div className="mt-4 flex flex-wrap items-center gap-4">
               {company.websiteUrl && <OutboundLink href={company.websiteUrl}>Website</OutboundLink>}
               {company.linkedinUrl && (
                 <OutboundLink href={company.linkedinUrl}>LinkedIn</OutboundLink>
               )}
               {company.twitterUrl && <OutboundLink href={company.twitterUrl}>Twitter</OutboundLink>}
+              {(masked('websiteUrl') || masked('linkedinUrl')) && (
+                <span className="flex items-center gap-2 font-mono text-xs text-graphite-500">
+                  Links <SignInChip next={path} />
+                </span>
+              )}
             </div>
           )}
           {/* The crosswalk: which SEC filer, which GLEIF entity, which Wikidata
@@ -152,38 +202,56 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <Identifiers identifiers={company.identifiers} className="mt-5" />
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
-          <Fact label="Founded" value={foundedYear(company.founded) ?? '—'} cite={cite('founded')} />
-          <Fact label="Headquarters" value={company.hq} cite={cite('hq')} />
-          {country && <Fact label="Country" value={country} cite={cite('countryCode')} />}
-          <Fact label="Headcount" value={formatCount(company.headcount)} cite={cite('headcount')} />
-          <Fact label="Stage" value={company.stage} />
-          {company.primarySector && <Fact label="Sector" value={company.primarySector} />}
-          {company.legalName && <Fact label="Legal name" value={company.legalName} />}
-          {company.operatingStatus && (
-            <Fact label="Operating status" value={company.operatingStatus} />
+          <Fact
+            label="Founded"
+            value={m('founded', foundedYear(company.founded) ?? '—')}
+            cite={cite('founded')}
+          />
+          <Fact label="Headquarters" value={m('hq', company.hq)} cite={cite('hq')} />
+          {(country || masked('countryCode')) && (
+            <Fact label="Country" value={m('countryCode', country)} cite={cite('countryCode')} />
           )}
-          {company.companyType && <Fact label="Company type" value={company.companyType} />}
+          <Fact
+            label="Headcount"
+            value={m('headcount', formatCount(company.headcount))}
+            cite={cite('headcount')}
+          />
+          <Fact label="Stage" value={m('stage', company.stage)} />
+          {(company.primarySector || masked('primarySector')) && (
+            <Fact label="Sector" value={m('primarySector', company.primarySector)} />
+          )}
+          {(company.legalName || masked('legalName')) && (
+            <Fact label="Legal name" value={m('legalName', company.legalName)} />
+          )}
+          {(company.operatingStatus || masked('operatingStatus')) && (
+            <Fact label="Operating status" value={m('operatingStatus', company.operatingStatus)} />
+          )}
+          {(company.companyType || masked('companyType')) && (
+            <Fact label="Company type" value={m('companyType', company.companyType)} />
+          )}
         </dl>
       </header>
 
       <section className="flex flex-wrap gap-x-16 gap-y-3.5 border-b border-line py-8">
         <Stat
           label="Total raised"
-          value={
+          value={m(
+            'totalRaisedUsd',
             <>
               {formatUsd(company.totalRaisedUsd)}
               {cite('totalRaisedUsd')}
-            </>
-          }
+            </>,
+          )}
         />
         <Stat
           label="Last valuation"
-          value={
+          value={m(
+            'lastValuationUsd',
             <>
               {formatUsd(company.lastValuationUsd)}
               {cite('lastValuationUsd')}
-            </>
-          }
+            </>,
+          )}
         />
         {company.financials && (
           <>
@@ -196,29 +264,46 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
       <section className="max-w-[70ch] py-9">
         <h2 className="font-display text-xl font-bold tracking-tight text-ink">Overview</h2>
-        <p className="mt-3 text-base leading-[1.65] text-graphite-900">{company.description}</p>
+        <p className="mt-3 text-base leading-[1.65] text-graphite-900">
+          {m('description', company.description)}
+        </p>
       </section>
 
       <Block
         title="Funding rounds"
         note={access.totals.rounds > 0 ? `${access.totals.rounds} rounds` : undefined}
       >
+        {/* The summary line everyone may read, even when the ladder is gated. */}
+        {access.totals.rounds > 0 && (
+          <p className="-mt-2 mb-5 font-mono text-[13px] text-graphite-700">
+            {formatCount(access.totals.rounds)} {access.totals.rounds === 1 ? 'round' : 'rounds'}
+            {latestRound && (
+              <>
+                {' · latest '}
+                <span className="text-ink">{latestRound.stage}</span>, {formatDate(latestRound.date)}
+              </>
+            )}
+            {!masked('totalRaisedUsd') && company.totalRaisedUsd > 0 && (
+              <> · {formatUsd(company.totalRaisedUsd)} raised</>
+            )}
+          </p>
+        )}
         {company.rounds && company.rounds.length > 0 ? (
           <FundingLadder rounds={company.rounds} citations={citations} />
-        ) : (
+        ) : access.totals.rounds === 0 ? (
           <Empty
             action="Add a funding round"
             href={`/companies/${company.slug}/contribute?type=round`}
           >
             No rounds recorded yet for {company.name}.
           </Empty>
-        )}
-        <LockNote
+        ) : null}
+        <LockedSection
+          {...lock}
           shown={company.rounds?.length ?? 0}
           total={access.totals.rounds}
-          access={access}
-          slug={company.slug}
-          signedIn={signedIn}
+          noun="rounds"
+          placeholder="rung"
         />
       </Block>
 
@@ -272,20 +357,20 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               </div>
             ))}
           </div>
-        ) : (
+        ) : access.totals.investors === 0 ? (
           <Empty
             action="Add an investor"
             href={`/companies/${company.slug}/contribute?type=investor`}
           >
             No investors recorded yet for {company.name}.
           </Empty>
-        )}
-        <LockNote
+        ) : null}
+        <LockedSection
+          {...lock}
           shown={company.investors?.length ?? 0}
           total={access.totals.investors}
-          access={access}
-          slug={company.slug}
-          signedIn={signedIn}
+          noun="investors"
+          placeholder="card"
         />
       </Block>
 
@@ -326,17 +411,17 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               </div>
             ))}
           </div>
-        ) : (
+        ) : access.totals.people === 0 ? (
           <Empty action="Add a team member" href={`/companies/${company.slug}/contribute?type=person`}>
             No people recorded yet for {company.name}.
           </Empty>
-        )}
-        <LockNote
+        ) : null}
+        <LockedSection
+          {...lock}
           shown={company.people?.length ?? 0}
           total={access.totals.people}
-          access={access}
-          slug={company.slug}
-          signedIn={signedIn}
+          noun="people"
+          placeholder="card"
         />
       </Block>
 
@@ -358,20 +443,20 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 />
               ))}
             </ul>
-          ) : (
+          ) : access.totals.acquisitions === 0 ? (
             <Empty
               action="Add an acquisition"
               href={`/companies/${company.slug}/contribute?type=acquisition`}
             >
               {company.name} has no recorded acquisitions.
             </Empty>
-          )}
-          <LockNote
+          ) : null}
+          <LockedSection
+            {...lock}
             shown={company.acquisitions?.length ?? 0}
             total={access.totals.acquisitions}
-            access={access}
-            slug={company.slug}
-            signedIn={signedIn}
+            noun="acquisitions"
+            placeholder="row"
           />
         </Block>
 
@@ -389,17 +474,17 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 />
               ))}
             </ul>
-          ) : (
+          ) : access.totals.exits === 0 ? (
             <Empty action="Record an exit" href={`/companies/${company.slug}/contribute?type=exit`}>
               Still private — no exit on record.
             </Empty>
-          )}
-          <LockNote
+          ) : null}
+          <LockedSection
+            {...lock}
             shown={company.exits?.length ?? 0}
             total={access.totals.exits}
-            access={access}
-            slug={company.slug}
-            signedIn={signedIn}
+            noun="exits"
+            placeholder="row"
           />
         </Block>
       </div>
@@ -420,20 +505,20 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               </div>
             ))}
           </div>
-        ) : (
+        ) : access.totals.diversity === 0 ? (
           <Empty
             action="Add diversity data"
             href={`/companies/${company.slug}/contribute?type=diversity`}
           >
             No diversity signals recorded yet for {company.name}.
           </Empty>
-        )}
-        <LockNote
+        ) : null}
+        <LockedSection
+          {...lock}
           shown={company.diversity?.length ?? 0}
           total={access.totals.diversity}
-          access={access}
-          slug={company.slug}
-          signedIn={signedIn}
+          noun="signals"
+          placeholder="card"
         />
       </Block>
 
@@ -451,59 +536,6 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         </Link>
         .
       </footer>
-    </div>
-  );
-}
-
-function LockNote({
-  shown,
-  total,
-  access,
-  slug,
-  signedIn,
-}: {
-  shown: number;
-  total: number;
-  access: CompanyAccess;
-  slug: string;
-  signedIn: boolean;
-}) {
-  // Only shown when the viewer is locked and there is hidden data beyond the preview.
-  if (access.unlocked || total <= shown) return null;
-  return (
-    <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 rounded-[10px] border border-dashed border-graphite-300 bg-paper px-[18px] py-3.5">
-      <span className="font-sans text-[13px] text-graphite-700">
-        Showing <span className="font-mono text-ink">{shown}</span> of{' '}
-        <span className="font-mono text-ink">{total}</span> — any approved contribution unlocks every
-        profile for 30 days.
-      </span>
-      {signedIn ? (
-        <span className="flex flex-wrap items-center gap-3">
-          <Button
-            variant="primary"
-            shape="pill"
-            size="sm"
-            href={`/companies/${slug}/contribute`}
-          >
-            Contribute to unlock
-          </Button>
-          <Link
-            href="/contribute"
-            className="font-sans text-[13px] text-graphite-700 underline underline-offset-[3px] transition-colors hover:text-ink"
-          >
-            or add a new company
-          </Link>
-        </span>
-      ) : (
-        <Button
-          variant="primary"
-          shape="pill"
-          size="sm"
-          href={`/login?next=${encodeURIComponent(`/companies/${slug}`)}`}
-        >
-          Sign in to unlock
-        </Button>
-      )}
     </div>
   );
 }
@@ -527,7 +559,7 @@ function Fact({
   cite,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   cite?: React.ReactNode;
 }) {
   return (

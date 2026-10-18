@@ -2,6 +2,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 import { FundsService, fundOrderBy } from './funds.service';
 import { PrismaService } from '../prisma/prisma.service';
+import type { UsersService } from '../users/users.service';
+
+/** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
+const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
 
 function fundRow(over: Record<string, unknown> = {}) {
   return {
@@ -38,7 +42,7 @@ describe('FundsService', () => {
       citation: { findMany: citations },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    service = new FundsService(prisma);
+    service = new FundsService(prisma, unlockedUsers);
   });
 
   it('maps a row and its manager into a summary, money as numbers', async () => {
@@ -75,12 +79,15 @@ describe('FundsService', () => {
   });
 
   it('filters by strategy, status, manager slug and a case-insensitive name search', async () => {
-    await service.findAll({
-      q: 'growth',
-      strategy: 'Private equity',
-      status: 'Raising',
-      manager: 'blackstone',
-    });
+    await service.findAll(
+      {
+        q: 'growth',
+        strategy: 'Private equity',
+        status: 'Raising',
+        manager: 'blackstone',
+      },
+      { id: 'u1', role: 'USER' },
+    );
     expect(findMany.mock.calls[0]![0]).toMatchObject({
       where: {
         moderationStatus: 'APPROVED',
@@ -177,6 +184,121 @@ describe('FundsService', () => {
         }),
       );
       await expect(service.findOne('x')).resolves.toMatchObject({ indexable: false });
+    });
+  });
+
+  describe('the read gate', () => {
+    const user = { id: 'u1', role: 'USER' as const };
+    const partnerFund = () =>
+      fundRow({ status: 'Closed', closedUsd: 271_828n, partnerFields: ['status', 'closedUsd'] });
+
+    it('keeps partner funds, partner values and partner-column matches from a signed-out list', async () => {
+      findMany.mockResolvedValue([partnerFund()]);
+      const page = await service.findAll({ strategy: 'Venture capital', status: 'Closed' });
+
+      const where = findMany.mock.calls[0]![0].where;
+      expect(where).toMatchObject({
+        partnerOnly: false,
+        strategy: 'Venture capital',
+        AND: [{ NOT: { partnerFields: { has: 'strategy' } } }],
+      });
+      // Status is a partner-only column: its filter is ignored, not applied.
+      expect(where).not.toHaveProperty('status');
+      expect(page.items[0]).toMatchObject({ status: null, closedUsd: null });
+      expect(page.items[0]!.masked?.sort()).toEqual(['closedUsd', 'status']);
+    });
+
+    it('shows a signed-in viewer partner funds and values', async () => {
+      findMany.mockResolvedValue([partnerFund()]);
+      const page = await service.findAll({}, user);
+      expect(findMany.mock.calls[0]![0].where).not.toHaveProperty('partnerOnly');
+      expect(page.items[0]).toMatchObject({ status: 'Closed', closedUsd: 271_828 });
+    });
+
+    describe('findOne', () => {
+      const withAccess = (access: { unlocked: boolean; signedIn: boolean }) => {
+        const prisma = {
+          fund: { findFirst },
+          citation: { findMany: citations },
+        } as unknown as PrismaService;
+        return new FundsService(prisma, {
+          accessFor: async () => ({ ...access, unlockedUntil: null }),
+        } as unknown as UsersService);
+      };
+      const termsRow = (over: Record<string, unknown> = {}) => ({
+        ...fundRow({ partnerFields: ['managementFeePct', 'status'], status: 'Closed' }),
+        launchDate: null,
+        latestCloseDate: null,
+        finalCloseDate: null,
+        hardCapUsd: null,
+        managementFeePct: 2.71828,
+        carriedInterestPct: null,
+        hurdleRatePct: null,
+        targetIrrNetMinPct: null,
+        targetIrrNetMaxPct: null,
+        targetIrrGrossMinPct: null,
+        targetIrrGrossMaxPct: null,
+        regionFocus: 'Europe',
+        commitments: [],
+        metrics: [
+          { asAt: new Date('2022-06-30T00:00:00Z'), aumUsd: 1n, dryPowderUsd: null, unrealizedUsd: null, externalSource: 'PARTNER' },
+          { asAt: new Date('2023-06-30T00:00:00Z'), aumUsd: 2n, dryPowderUsd: null, unrealizedUsd: null, externalSource: 'PARTNER' },
+          { asAt: new Date('2024-06-30T00:00:00Z'), aumUsd: 3n, dryPowderUsd: null, unrealizedUsd: null, externalSource: 'PARTNER' },
+        ],
+        _count: { commitments: 4 },
+        partnerOnly: false,
+        ...over,
+      });
+
+      it('withholds terms, metrics, commitments and partner values from a signed-out viewer', async () => {
+        findFirst.mockResolvedValue(termsRow());
+        const res = await withAccess({ unlocked: false, signedIn: false }).findOne('x');
+
+        expect(res.fund.managementFeePct).toBeNull();
+        expect(res.termsHidden).toBe(true);
+        expect(res.fund.status).toBeNull();
+        expect(res.metrics).toEqual([]);
+        expect(res.metricCount).toBe(3);
+        expect(res.commitmentCount).toBe(4);
+        expect(findFirst.mock.calls[0]![0].include.commitments.take).toBe(0);
+        // Indexing reads the stored fund, not what this viewer sees.
+        expect(res.indexable).toBe(true);
+        expect(JSON.stringify(res)).not.toContain('2.71828');
+      });
+
+      it('previews metrics to a signed-in viewer, but the terms stay a contributor’s', async () => {
+        findFirst.mockResolvedValue(termsRow());
+        const res = await withAccess({ unlocked: false, signedIn: true }).findOne('x');
+
+        expect(res.metrics.map((m) => m.aumUsd)).toEqual([1, 2]);
+        expect(res.fund.status).toBe('Closed');
+        expect(res.fund.managementFeePct).toBeNull();
+        expect(res.termsHidden).toBe(true);
+        expect(res.fund.regionFocus).toBe('Europe');
+      });
+
+      it('shows a contributor everything', async () => {
+        findFirst.mockResolvedValue(termsRow());
+        const res = await withAccess({ unlocked: true, signedIn: true }).findOne('x');
+        expect(res.fund.managementFeePct).toBe(2.71828);
+        expect(res.termsHidden).toBe(false);
+        expect(res.metrics).toHaveLength(3);
+      });
+
+      it('never claims hidden terms for a fund that has none', async () => {
+        findFirst.mockResolvedValue(termsRow({ managementFeePct: null }));
+        const res = await withAccess({ unlocked: false, signedIn: true }).findOne('x');
+        expect(res.termsHidden).toBe(false);
+      });
+
+      it('returns a stub of a partner-only fund to a signed-out viewer', async () => {
+        findFirst.mockResolvedValue(termsRow({ partnerOnly: true }));
+        const res = await withAccess({ unlocked: false, signedIn: false }).findOne('x');
+        expect(res.fund).toMatchObject({ name: fundRow().name, partnerOnly: true, strategy: null, regionFocus: null });
+        expect(res.fund.manager.domain).toBeNull();
+        expect(res.indexable).toBe(false);
+        expect(res.citations).toEqual([]);
+      });
     });
   });
 

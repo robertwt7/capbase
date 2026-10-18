@@ -99,6 +99,21 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   an overlay — the landing page's contribution teaser. Reuse it for any other gated teaser
   rather than re-inlining a blur; there are no gradients, so the fade is the blur plus a
   translucent `bg-paper/45`.
+- **The read gate's UI** (see Backend → the read gate): **`LockedSection`**
+  (`components/LockedSection.tsx`) is what every gated section renders after its visible rows —
+  nothing when unlocked or when `total <= shown`, else up to 3 blurred **text-free**
+  `bg-graphite-200` placeholder shapes (`rung` | `card` | `row` | `terms`, `aria-hidden` + `inert`;
+  fake copy would be indexed) under a `data-nosnippet` `Card`: signed out "Sign in to see N …",
+  signed in "Showing X of Y — any approved contribution unlocks …" (plus "Your access lapsed on …"),
+  or, with `subject`, wording for a block withheld whole (fund terms, history entries). A section
+  renders its `EmptyState` **only when its total is 0** — a gated section with rows withheld is not
+  empty. **`Masked`** / **`SignInChip`** / `isMasked` (`components/Masked.tsx`) render a field the
+  API withheld (`entity.masked`, value blanked in the payload) as a mono "Sign in" chip; never
+  render a maskable value without asking (a blank total reads as "$0"); `link={false}` inside an
+  element that is already a link (directory rows). **`StubProfile`** is the signed-out page of a
+  `partnerOnly` company/investor/fund/person (name, public counts, one sign-in panel) — its
+  `generateMetadata` returns `noindex, follow`. JSON-LD, metadata descriptions and OG images skip
+  masked fields too.
 - **`Sheet`** (Radix Dialog) backs the small-screen nav drawer in `components/SiteNav.tsx`
   (`PrimaryNav` + `MobileNav`, both setting `aria-current`).
 - **`TurnstileField`** — the Cloudflare Turnstile challenge on register and every
@@ -202,7 +217,12 @@ server-side**: `getCompanies`/`getInvestors` take a `CompanyListQuery`/`Investor
 and return `Paginated<T>` (`{ items, total, page, pageSize }` from `@repo/api`). Directory
 pages are URL-driven: the client components only mirror filter state to the URL (debounced
 `router.replace`, page resets on filter change) and render the page plus `<Pagination>`;
-the server component refetches. The mock arrays in the file remain ONLY as an offline
+the server component refetches. Gated reads pass the session: **profile** getters
+(`getCompanyDetail`, `getInvestor`, `getFund`, `getPerson`, `getCompanyHistory`) send the bearer
+token when there is one and are always `no-store`; **directory** getters (`getCompanies`,
+`getInvestors`, `getFunds`, `getPeople`, and the `app/api/search` proxy) send **no token signed
+out** — so the 60s ISR entry stays shared by every signed-out visitor, crawlers included — and
+token + `no-store` signed in (Next keys its fetch cache on headers, so the two never mix). The mock arrays in the file remain ONLY as an offline
 fallback if the API is unreachable in local dev — they are illustrative, not real. Domain
 types are re-exported from `@repo/api` (single source of truth). Company logos resolve from `domain` through the same-origin proxy
 `app/api/logo/[domain]` (DuckDuckGo icons; Clearbit's API is gone) in `components/CompanyLogo.tsx`; the
@@ -211,8 +231,10 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 
 ### Routes
 
-- `/` — landing: hero, market tape, a three-step **How it works** (browse free → contribute →
-  approved contribution unlocks every profile for `CONTRIBUTION_WINDOW_DAYS`), sector cards, and
+- `/` — landing: hero, market tape, a three-step **How it works** (public-record profiles,
+  names, links and counts are open; rounds, deal values, fund terms and licensed data need a free
+  account (`PREVIEW_LIMIT` rows) → contribute → an approved contribution unlocks every profile for
+  `CONTRIBUTION_WINDOW_DAYS`), sector cards, and
   **Popular companies**: a fresh random draw per visit from `GET /companies/featured` (the API
   scores a 120-company pool on saves, named investors, recent rounds and a known valuation,
   caches it 15 min, and shuffles per call). A locked viewer sees the bottom half blurred
@@ -222,7 +244,9 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   definition the profile detail, `/auth/me/contributions` and the featured read all use.
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
-  that invite contribution (open-source angle).
+  that invite contribution (open-source angle). Each section is its gated rows plus a
+  `LockedSection`; a **funding summary line** (round count, the API's `latestRound`, total raised)
+  sits under the Funding rounds header for everyone, even when the ladder itself is gated.
 - `/funds` — fund directory (URL-driven filters, same pattern as companies): search,
   strategy and status filters, sort by size/vintage/name, `?manager=<slug>` scoping. **Sorted
   by size by default** (`Fund.sizeUsd` = gross assets, else capital closed — the figure the
@@ -231,23 +255,31 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `loading.tsx`): manager, strategy/status, vintage, size/target/hard cap, launch and close
   dates, terms (fee, carry, hurdle, target IRR; `formatPct`), a metrics table and the largest
   LP commitments. `noindex` unless `fundIndexable` (`@repo/api` `indexing.ts`): a commitment,
-  a size, a target, a final close or a fee.
+  a size, a target, a final close or a fee (read off the stored row, never a partner-only fund).
+  Gated: metrics and LP commitments are `members` (`metricCount`/`commitmentCount` are public),
+  the terms block and close dates are `contributors` — the API nulls them and sets `termsHidden`
+  only when there were terms to hide, so a fund with none shows no Terms section (no false lock).
+  Signed out, the directory's status filter (a partner-only column) is a "Sign in to filter by
+  status" button and the API ignores `?status=`.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies);
   `/investors/[slug]` — investor profile: facts, fund assets, funds (linked to their pages),
   **fund commitments** for a limited partner, portfolio grid (the `INVESTOR_PORTFOLIO_PREVIEW`
   largest by capital raised; count and sectors cover the whole portfolio), the firm's people
   (capped at `INVESTOR_PEOPLE_PREVIEW`, "N of M named"), or an empty state inviting a
-  contribution. The detail read counts each relation with its own indexed `count()` — never
+  contribution. Every section is also capped by the gate (`gateLimit`; LP commitments are
+  `members`) with a `LockedSection` against the public count. The detail read counts each relation with its own indexed `count()` — never
   Prisma's `_count`, which GROUP BYs the whole child table (~500 ms per profile at this size).
 - `/people` — people directory (URL-driven filters, same pattern as companies): search,
   an "at several companies" toggle, sort by roles held or name. **No role filter** —
   3,744 distinct free-text role strings is not a vocabulary. `/people/[slug]` — person
   profile: roles grouped by organisation, each with its kind, year range and citation.
 - `/companies/[slug]/history` — public, paginated change timeline for one company
-  (what changed, from what to what, who, when). Deliberately ungated: it shows data
-  past the `PREVIEW_LIMIT` contribution gate, which is the right trade for an
-  open-data project's audit trail. `noindex, follow`, so it never competes with the
-  profile in search.
+  (what changed, from what to what, who, when). Gated by an **allowlist** for every locked
+  viewer, signed in or not (a revision's `before`/`after` can carry any value a row ever held):
+  only company-field entries from a moderated edit/merge (`ADMIN`) or a `PUBLIC_INGEST_SOURCES`
+  source, on a field the partner has never written on that company. The rest is counted in
+  `hiddenCount` behind a `LockedSection`; unlocked viewers see everything. `noindex, follow`, so
+  it never competes with the profile in search.
 - `/admin/users` — account list: search, ban/unban (a ban revokes sessions and rejects
   the user's pending queue), and one "Make user / contributor / admin" button per other role
   (a downgrade revokes the API keys the new role no longer permits; a ban revokes all).
@@ -403,32 +435,64 @@ front (`src/reports/`; the admin side is a separate `AdminReportsController` on
 `admin/reports`). The JWT is only
 identity: `JwtStrategy` re-reads the user, so role, ban and `tokenVersion` come from the DB.
 
-**The contribution gate (read side).** Anyone can read; a locked viewer gets only the first
-`PREVIEW_LIMIT` (2) rows of each company-profile section, and an approved contribution unlocks
-every profile for `CONTRIBUTION_WINDOW_DAYS` (30) — both constants in `@repo/api`
-`domain/contributions.ts`, which the web copy reads too. The rule lives in **one** place,
-`UsersService.accessFor(viewer?)` → `ViewerAccess { unlocked, unlockedUntil }`: anonymous is
-locked, an ADMIN or CONTRIBUTOR is unlocked with no query, everyone else is unlocked while their latest
-APPROVED row (any reviewable type, proposals included) is inside the window. `unlockedUntil`
-is still reported after it lapses so the UI can say when. Every read that needs it calls
-`accessFor` — `getCompanyDetail`, `GET /auth/me/contributions`, `GET /companies/featured` —
-never a re-derivation.
+**The read gate.** Anyone can read; how much a viewer receives follows **two rules, applied in
+the API** so a hidden value never reaches the browser:
+
+1. **By section.** `GATED_SECTIONS` (`@repo/api` `domain/contributions.ts`) gives every profile
+   section a tier, and `gateLimit(section, access)` the rows a viewer gets: `open` 2 / 2 / all,
+   `members` 0 / 2 / all, `contributors` 0 / 0 / all (signed out / signed in but locked /
+   unlocked; 2 = `PREVIEW_LIMIT`). Company rounds, diversity, acquisitions and exits, investor LP
+   commitments and fund commitments/metrics are `members`; fund terms `contributors`; the rest
+   `open`. An approved contribution unlocks everything for `CONTRIBUTION_WINDOW_DAYS` (30).
+2. **By provenance.** Anything the licensed partner wrote is `members` at least —
+   `partnerVisible(access)` is false only for a signed-out viewer: partner **rows**
+   (`externalSource = 'PARTNER'`, and partner `RoundInvestor`s) are filtered out of every child
+   query, partner **fields** (`partnerFields`) are blanked and listed in the entity's `masked`
+   everywhere it renders (profile, directory rows, featured, search hits), and a **partner-only
+   entity** (`partnerOnly`; for people `identifierOnly`) is a stub (name and counts,
+   `partnerOnly: true`), always `noindex`, and absent from the sitemaps, the signed-out directories
+   and `/search`. Signed-in viewers see partner data inside the section limits.
+
+**Counts and market aggregates stay public**, partner rows included — a count says rows exist,
+not what they say, and it is the sign-in hook. Signed out, a directory filter on column `X` never
+matches a partner-marked `X` (`unmaskedFilters`); **sort order is an accepted trade** (sorting by
+total raised can reveal the rank, never the value, of a partner-raised total).
+
+Who is unlocked lives in **one** place, `UsersService.accessFor(viewer?)` → `ViewerAccess
+{ unlocked, signedIn, unlockedUntil }`: anonymous is locked and `signedIn: false`, an ADMIN or
+CONTRIBUTOR is unlocked with no query, everyone else is unlocked while their latest APPROVED row
+(any reviewable type, proposals included) is inside the window. `unlockedUntil` is still reported
+after it lapses so the UI can say when. Every profile read calls `accessFor` — company, investor,
+fund, person, history, `GET /auth/me/contributions`, `GET /companies/featured` — never a
+re-derivation. Directory lists and `/search` only apply rule 2, which needs nothing but whether
+the viewer is signed in, so they use `listAccess(viewer)` (no contribution lookup).
+
+Enforcement goes through **one module, `apps/api/src/gate/`**: `publicRowsWhere(access)` (the
+child-row filter, in its `OR` form because Prisma's `{ not: 'PARTNER' }` drops NULL-source rows),
+`maskPartnerFields` / `maskFields` (with per-entity blanks for non-nullable fields), `stubFor`,
+`takeFor`/`limitRows`, `listAccess`, `unmaskedFilters`, and `history.ts`'s `lockedHistoryWhere`
+(the history allowlist; `PUBLIC_INGEST_SOURCES` in `@repo/api` `provenance.ts` is explicit, so a
+new source stays hidden until added). Mappers stay pure: a service maps, then gates. Each
+section is capped **in the query** (`take`), so a gated row is never even loaded, and counts
+come from separate indexed `count()`s over every approved row. A new read has these to call.
 
 Gated reads carry access **in-band**: the route sits behind `OptionalJwtAuthGuard` and the
-response includes `access` (`CompanyDetailResponse`, `FeaturedCompaniesResponse`), so a page
-needs one request and there is no standalone "am I unlocked?" endpoint. **Don't add a guard
-for this**: the guards (`JwtAuthGuard`, `OptionalJwtAuthGuard`, `RolesGuard`,
-`VerifiedEmailGuard`, `PendingCapGuard`, `TurnstileGuard`) decide whether a request may
-proceed, whereas the gate decides how much a request *sees*. Truncate before loading
-citations, so a locked viewer never receives a citation for a row they can't see.
-Directory rows (`/companies`, featured) are public and never truncated.
+response includes `access` (`CompanyDetailResponse`, `InvestorDetailResponse`,
+`FundDetailResponse`, `PersonDetailResponse`, `CompanyHistoryResponse`,
+`FeaturedCompaniesResponse`), so a page needs one request and there is no standalone "am I
+unlocked?" endpoint. **Don't add a guard for this**: the guards (`JwtAuthGuard`,
+`OptionalJwtAuthGuard`, `RolesGuard`, `VerifiedEmailGuard`, `PendingCapGuard`, `TurnstileGuard`)
+decide whether a request may proceed, whereas the gate decides how much a request *sees*. Load
+citations only for rows already in the response, so a locked viewer never receives a citation
+for a row they can't see. `/v1` passes the key owner — a CONTRIBUTOR/ADMIN, so always unlocked.
 
 **`GET /companies/featured?limit=`** (default 8, max 24) is the landing shop window. There is
 no page-view tracking, so popularity is a score over data already held — saves ×5, approved
 investor holdings ×3, non-grant rounds ×1 (each capped), +4 for a round in the last 18 months,
 +3 for a known valuation — with `domain <> ''` required so every row has a logo. The top
 `FEATURED_POOL` (120) ids are cached in-process for 15 min (`loadFeaturedPool`), and each call
-draws a fresh Fisher–Yates shuffle; the web fetches it `no-store` so every visit differs. Tune
+draws a fresh Fisher–Yates shuffle (a signed-out viewer draws only the pool's non-partner-only
+rows, with partner fields masked); the web fetches it `no-store` so every visit differs. Tune
 the weights there. It carries only the default throttle and the web deliberately sends no
 `forwardedForHeaders()` (see Rate limiting below): one page view is one cheap call, already
 limited by nginx's `general` zone.
@@ -440,6 +504,8 @@ plus one `PersonRole` lookup that labels each person with their latest public ro
 organisation. Each query restates its public filter from `public-filters.ts` inline (keep them
 in step), and the input is LIKE-escaped (`escapeLike`). Under `SEARCH_MIN_CHARS` it returns
 empty groups without touching the DB; over `SEARCH_MAX_CHARS` is a 400. `@SearchThrottle()`.
+Optional auth: signed out, the queries add `NOT "partnerOnly"` / `NOT "identifierOnly"` and null a
+partner-marked domain or sector (read gate rule 2).
 
 **Rate limiting (`src/throttle/`).** `@nestjs/throttler` is a global guard
 (`ApiThrottlerGuard`, provided in `AuthModule` because it decodes the JWT), the backstop
@@ -516,6 +582,13 @@ Single source of truth for the schema. Holds `prisma/schema.prisma`, `prisma/mig
 in `prisma.config.ts` (reads `DATABASE_URL`), not the schema. Money is `BigInt`. Contributable
 Company/FundingRound rows — and the ingest-only `Fund` — also have
 `externalSource`/`externalId` (`@@unique`) for idempotent ingestion. Run schema commands via `make` or `yarn workspace @repo/db <generate|migrate|seed>`.
+
+**Partner provenance** (read gate rule 2): `Company`/`Investor`/`Fund`/`FundingRound` carry
+`partnerFields String[]` — the columns whose current value the partner wrote — and
+`Company`/`Investor`/`Fund` a `partnerOnly Boolean` (indexed; the row exists only because of the
+partner). People use `Person.identifierOnly`, the same signal (the partner is the only
+identifier-only source). `RoundInvestor.externalSource` says which source named a firm on a round.
+Ingest maintains them (Jobs → PARTNER); `make backfill-partner-provenance` reconstructs them.
 
 `ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,
 `allowedCidrs`, `lastUsedAt` debounced to once a minute, `revokedAt`); `InvestorChangeProposal`
@@ -833,6 +906,22 @@ last one clobber `totalRaisedUsd`:
   `Person.identifierOnly` and are left out of every name map (ingest's `byName`,
   `backfill-people`'s name pass, both person variant sweeps — `IDENTIFIER_ONLY_SOURCES` in
   `person-matcher.ts`), so a later Form D "John Smith" never attaches to one.
+  **Provenance writes** (what the read gate hides): a partner **create** sets `partnerOnly` and
+  lists every column the record stated in `partnerFields` (`createdProvenance`); a partner
+  enrichment / own-key update / raised total / round correction appends the columns it wrote
+  (`provenanceUpdate`, `syncPartnerFields`; round corrections mark only columns whose value
+  moved); **any other source** landing on a partner-only row makes it public record
+  (`partnerOnly: false` — company/firm/fund matches, and a holding or round investor resolving a
+  partner-only firm via `InvestorIndex.partnerOnly`), and a non-partner own-key overwrite takes
+  the columns it wrote out of `partnerFields`. Partner re-runs never remove a mark (fail closed);
+  an approved human edit does (`AdminService.applyProposal` / `applyInvestorProposal`).
+  `writeRoundInvestors` tags rows with `externalSource`, deletes only its own source's rows, and
+  never writes a firm another source (or a contributor) already named on the round. **`make
+  backfill-partner-provenance`** (`-prod`; `ingest/partner-provenance.ts`) reconstructs the marks
+  for data loaded before ingest recorded them — it needs `partner_stage` loaded (it compares stored
+  values to what the partner stated, failing closed: an equal public value is marked too), is
+  idempotent (a second run changes 0 rows), and must run before any further partner stage and
+  before `partner-stage-drop`.
   **Index memory** (the 1 GB jobs container, ~549 MB heap): `IngestService` loads its four
   match indexes **lazily** (a stream batch loads only what it writes against), **paged**
   (`eachPage`, 20k rows; tombstones resolve from the merged rows alone), and leaves a record

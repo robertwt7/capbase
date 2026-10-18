@@ -1,4 +1,5 @@
 import type { FundStatus, FundStrategy, InvestorType } from './company';
+import type { GateAccess } from './contributions';
 import type { Citation } from './provenance';
 
 /** One private fund, with the manager it belongs to. */
@@ -21,6 +22,10 @@ export interface Fund {
   grossAssetsUsd?: number | null;
   currency: string;
   hq?: string | null;
+  /** Same contract as Company.masked. */
+  masked?: string[];
+  /** Same contract as Company.partnerOnly. */
+  partnerOnly?: boolean;
 }
 
 /** A fund plus enough of its manager to render a directory row. */
@@ -74,11 +79,18 @@ export interface FundDetailResponse {
   /** The largest commitments first, capped (`commitmentCount` is the total). */
   commitments: FundCommitmentRow[];
   commitmentCount: number;
+  /** Oldest first, capped by the gate (`metricCount` is the total). */
   metrics: FundMetricRow[];
+  metricCount: number;
+  /** The fund has terms this viewer may not see (every `FundTerms` field but
+   *  `regionFocus` is then null). False when there are none to hide. */
+  termsHidden: boolean;
   /** Citations attesting the fund row (SEC funds; partner funds carry none). */
   citations: Citation[];
-  /** `fundIndexable` — whether search engines should index the page. */
+  /** `fundIndexable` — whether search engines should index the page. Never for
+   *  a partner-only fund. */
   indexable: boolean;
+  access: GateAccess;
 }
 
 /** Sitemap entry for an indexable fund page. */

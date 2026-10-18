@@ -2,7 +2,10 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import {
   DEFAULT_PAGE_SIZE,
   PERSON_INDEX_MIN_ROLES,
+  PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
+  gateLimit,
+  partnerVisible,
   type Citation,
   type EntityIdentifierRef,
   type Paginated,
@@ -10,13 +13,17 @@ import {
   type PersonListQuery,
   type PersonSlugEntry,
   type PersonSummary,
+  type Role,
+  type ViewerAccess,
 } from '@repo/api';
 import { Prisma } from '@repo/db';
 
+import { limitRows, listAccess, publicRowsWhere, rowVisible, stubFor } from '../gate/gate';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_MERGE_HOPS, PUBLIC_PERSON, PUBLIC_ROLES } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
+import { UsersService } from '../users/users.service';
 import { toPersonSummary, type PersonWithRoles } from './person.mapper';
 
 /** How many roles to include on each person's directory card. */
@@ -37,6 +44,8 @@ const INDEXABLE_PERSON_SQL = Prisma.sql`
   p."moderationStatus" = 'APPROVED'
   AND p."mergedIntoId" IS NULL
   AND p."suppressedAt" IS NULL
+  -- A partner person is a stub for crawlers (who are signed out): noindex.
+  AND NOT p."identifierOnly"
   AND (
     (SELECT count(*)
        FROM "PersonRole" r
@@ -56,9 +65,17 @@ const INDEXABLE_PERSON_SQL = Prisma.sql`
   )
 `;
 
+/** The role sample a viewer may see on a card: no partner role signed out.
+ *  `PUBLIC_ROLES` carries its own `OR`, so the provenance filter goes in an `AND`. */
+const visibleRoles = (access: ViewerAccess): Prisma.PersonRoleWhereInput =>
+  partnerVisible(access) ? PUBLIC_ROLES : { ...PUBLIC_ROLES, AND: [publicRowsWhere(access)] };
+
 @Injectable()
 export class PeopleService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly users: UsersService,
+  ) {}
 
   /**
    * One page of people, read straight from the Person table.
@@ -67,13 +84,18 @@ export class PeopleService {
    * role strings — Form C signature blocks are prose — and offering them as a
    * vocabulary would be a lie about the data. Search, the multi-company flag
    * and the sort are what the data actually supports.
+   *
+   * A signed-out viewer never sees a partner person (`identifierOnly` — the
+   * partner is the only identifier-only source) or a partner role on a card.
    */
-  async findAll(query: PersonListQuery = {}): Promise<Paginated<PersonSummary>> {
+  async findAll(query: PersonListQuery = {}, viewer?: { id: string; role: Role }): Promise<Paginated<PersonSummary>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const access = listAccess(viewer);
 
     const where: Prisma.PersonWhereInput = {
       ...PUBLIC_PERSON,
+      ...(partnerVisible(access) ? {} : { identifierOnly: false }),
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
       ...(query.multiCompany && { id: { in: await this.multiCompanyIds() } }),
     };
@@ -90,11 +112,12 @@ export class PeopleService {
         take: pageSize,
         include: {
           roles: {
-            where: PUBLIC_ROLES,
+            where: visibleRoles(access),
             take: ROLE_SAMPLE,
             orderBy: { since: 'desc' },
             include: ROLE_INCLUDE,
           },
+          // Over every role: a count is public.
           _count: { select: { roles: { where: PUBLIC_ROLES } } },
         },
       }),
@@ -162,13 +185,18 @@ export class PeopleService {
     return counts;
   }
 
-  /** Full profile: every public role, not a sample, plus the crosswalk and the
-   *  citations attesting those roles. */
-  async findOne(slug: string): Promise<PersonDetailResponse> {
+  /**
+   * Full profile: the person's public roles — capped by the gate
+   * (`gateLimit('personRoles')`), without partner roles for a signed-out viewer
+   * — plus the crosswalk and the citations attesting the roles shown. Counts
+   * cover every role. A partner person is a stub for a signed-out viewer.
+   */
+  async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<PersonDetailResponse> {
+    const access = await this.users.accessFor(viewer);
     // No `_count` here: Prisma compiles a filtered relation count into a
     // GROUP BY over the whole PersonRole table (~83k rows, ~300ms idle and
-    // seconds under crawler load) before joining the one person. The detail
-    // read loads every public role anyway, so their length IS that count.
+    // seconds under crawler load) before joining the one person. Every public
+    // role is loaded instead — the counts and `indexable` need all of them.
     const found = await this.prisma.person.findFirst({
       where: { slug, ...PUBLIC_PERSON },
       include: {
@@ -177,19 +205,48 @@ export class PeopleService {
     });
     // Returns `never` — either a 301 to the survivor, or a 404.
     if (!found) return this.redirectOrNotFound(slug);
-    const row = { ...found, _count: { roles: found.roles.length } };
 
-    const summary = toPersonSummary(row as unknown as PersonWithRoles);
-    const identifiers = await this.loadIdentifiers(row.id);
+    const all = toPersonSummary({ ...found, _count: { roles: found.roles.length } } as unknown as PersonWithRoles);
+    const organisationCount = new Set(
+      all.roles.map((r) => (r.company ? `c:${r.company.slug}` : r.investor ? `i:${r.investor.slug}` : null)).filter(Boolean),
+    ).size;
+    const gate = { ...access, previewLimit: PREVIEW_LIMIT };
+
+    if (stubFor(found.identifierOnly, access)) {
+      return {
+        ...all,
+        roles: [],
+        organisationCount,
+        partnerOnly: true,
+        identifiers: [],
+        citations: [],
+        indexable: false,
+        access: gate,
+      };
+    }
+
+    // Sliced BEFORE the citations load: a citation for a withheld role must
+    // never reach the browser.
+    const visibleIds = new Set(
+      limitRows(
+        found.roles.filter((r) => rowVisible(r, access)),
+        gateLimit('personRoles', access),
+      ).map((r) => r.id),
+    );
+    const roles = all.roles.filter((r) => visibleIds.has(r.id));
+    const identifiers = await this.loadIdentifiers(found.id);
     return {
-      ...summary,
+      ...all,
+      roles,
+      organisationCount,
       identifiers,
-      citations: await this.loadRoleCitations(summary.roles.map((r) => r.id)),
+      citations: await this.loadRoleCitations(roles.map((r) => r.id)),
       // The same rule `listSlugs` applies in SQL, so a page is noindex exactly
       // when it is missing from the sitemap.
       indexable:
-        row._count.roles >= PERSON_INDEX_MIN_ROLES ||
-        identifiers.some((i) => i.scheme === 'WIKIDATA'),
+        !found.identifierOnly &&
+        (all.roleCount >= PERSON_INDEX_MIN_ROLES || identifiers.some((i) => i.scheme === 'WIKIDATA')),
+      access: gate,
     };
   }
 

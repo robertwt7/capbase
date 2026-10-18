@@ -1,6 +1,8 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import type { FundDetailResponse, FundSlugEntry, FundSummary, Paginated, SitemapCount } from '@repo/api';
 
+import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { FundsService } from './funds.service';
 import { SitemapPageDto } from '../prisma/sitemap-page.dto';
 import { ListFundsDto } from './dto/list-funds.dto';
@@ -10,11 +12,13 @@ import { SearchThrottle } from '../throttle/throttle';
 export class FundsController {
   constructor(private readonly funds: FundsService) {}
 
-  /** Public read: one page of approved funds. */
+  /** Public read: one page of approved funds. Optional auth: a signed-in
+   *  viewer also sees partner funds and values. */
   @SearchThrottle()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  findAll(@Query() query: ListFundsDto): Promise<Paginated<FundSummary>> {
-    return this.funds.findAll(query);
+  findAll(@Query() query: ListFundsDto, @CurrentUser() user?: RequestUser): Promise<Paginated<FundSummary>> {
+    return this.funds.findAll(query, user);
   }
 
   // Declared before @Get(':slug') so the literal path wins over the param route.
@@ -29,10 +33,11 @@ export class FundsController {
     return { count: await this.funds.countSlugs() };
   }
 
-  /** The fund page. */
+  /** The fund page, gated per viewer (see FundsService.findOne). */
   @SearchThrottle()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':slug')
-  findOne(@Param('slug') slug: string): Promise<FundDetailResponse> {
-    return this.funds.findOne(slug);
+  findOne(@Param('slug') slug: string, @CurrentUser() user?: RequestUser): Promise<FundDetailResponse> {
+    return this.funds.findOne(slug, user);
   }
 }

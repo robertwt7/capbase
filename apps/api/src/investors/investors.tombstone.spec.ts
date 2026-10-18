@@ -2,6 +2,10 @@ import { HttpException } from '@nestjs/common';
 
 import type { PrismaService } from '../prisma/prisma.service';
 import { InvestorsService } from './investors.service';
+import type { UsersService } from '../users/users.service';
+
+/** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
+const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
 
 /** A merged-away investor keeps its slug: the old address redirects, and the
  *  row is gone from every public list. */
@@ -40,7 +44,7 @@ function serviceWith(
     entityIdentifier: { findMany: jest.fn(async () => []) },
   } as unknown as PrismaService;
 
-  return new InvestorsService(prisma);
+  return new InvestorsService(prisma, unlockedUsers);
 }
 
 async function statusOf(fn: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {

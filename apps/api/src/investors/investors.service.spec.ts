@@ -3,6 +3,10 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import { InvestorsService } from './investors.service';
 import { PrismaService } from '../prisma/prisma.service';
+import type { UsersService } from '../users/users.service';
+
+/** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
+const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
 
 function company(slug: string, name: string, primarySector: string | null) {
   return { slug, name, domain: `${slug}.com`, primarySector };
@@ -103,7 +107,7 @@ describe('InvestorsService', () => {
       entityIdentifier: { findMany: identifierFindMany },
       $transaction: transaction,
     } as unknown as PrismaService;
-    service = new InvestorsService(prisma);
+    service = new InvestorsService(prisma, unlockedUsers);
   });
 
   describe('findAll', () => {
@@ -387,6 +391,83 @@ describe('InvestorsService', () => {
     });
   });
 
+  describe('the read gate', () => {
+    const signedOut = { unlocked: false, signedIn: false, unlockedUntil: null };
+    const locked = { unlocked: false, signedIn: true, unlockedUntil: null };
+    const as = (access: typeof signedOut) =>
+      new InvestorsService((service as unknown as { prisma: PrismaService }).prisma, {
+        accessFor: async () => access,
+      } as unknown as UsersService);
+
+    it('keeps partner-only firms, partner values and partner holdings out of a signed-out list', async () => {
+      count.mockResolvedValue(1);
+      findMany.mockResolvedValue([investorRow({ description: 'PARTNER-PROSE', partnerFields: ['description'] })]);
+      const { items } = await service.findAll({ type: 'Venture' });
+
+      const args = findMany.mock.calls[0]![0] as { where: Record<string, unknown>; include: { holdings: { where: Record<string, unknown> } } };
+      expect(args.where).toMatchObject({ partnerOnly: false, type: 'Venture', AND: [{ NOT: { partnerFields: { has: 'type' } } }] });
+      expect(args.include.holdings.where).toMatchObject({
+        OR: [{ externalSource: null }, { externalSource: { not: 'PARTNER' } }],
+        company: { partnerOnly: false },
+      });
+      expect(items[0]).toMatchObject({ description: null, masked: ['description'] });
+    });
+
+    it('previews the open sections and hides the LP commitments from a signed-out viewer', async () => {
+      findFirst.mockResolvedValue(investorRow({ _count: { holdings: 40, commitments: 3 } }));
+      const res = await as(signedOut).findOne('sequoia-capital');
+      const include = (findFirst.mock.calls[0]![0] as { include: Record<string, { take?: number; where: unknown }> }).include;
+
+      expect(include.holdings!.take).toBe(2);
+      expect(include.people!.take).toBe(2);
+      expect(include.funds!.take).toBe(2);
+      expect(include.commitments!.take).toBe(0);
+      expect(include.people!.where).toMatchObject({ OR: [{ externalSource: null }, { externalSource: { not: 'PARTNER' } }] });
+      // Counts are over everything.
+      expect(res.portfolioCount).toBe(40);
+      expect(res.commitmentCount).toBe(3);
+      expect(res.access).toMatchObject({ signedIn: false, previewLimit: 2 });
+    });
+
+    it('previews the commitments to a signed-in viewer, partner rows included', async () => {
+      findFirst.mockResolvedValue(investorRow());
+      await as(locked).findOne('sequoia-capital');
+      const include = (findFirst.mock.calls[0]![0] as { include: Record<string, { take?: number; where: Record<string, unknown> }> }).include;
+      expect(include.commitments!.take).toBe(2);
+      expect(include.commitments!.where).not.toHaveProperty('OR');
+    });
+
+    it('returns a stub of a partner-only firm to a signed-out viewer', async () => {
+      findFirst.mockResolvedValue(
+        investorRow({
+          partnerOnly: true,
+          partnerFields: ['hq', 'description'],
+          description: 'PARTNER-PROSE',
+          _count: { people: 12 },
+        }),
+      );
+      const res = await as(signedOut).findOne('sequoia-capital');
+      expect(res).toMatchObject({
+        name: 'Sequoia Capital',
+        domain: 'sequoiacap.com',
+        partnerOnly: true,
+        hq: null,
+        people: [],
+        peopleCount: 12,
+        indexable: false,
+        citations: [],
+      });
+      expect(res.identifiers).toBeUndefined();
+      expect(JSON.stringify(res)).not.toContain('PARTNER-PROSE');
+      expect(JSON.stringify(res)).not.toContain('Menlo Park');
+    });
+
+    it('is never indexable for a partner-only firm, whoever views it', async () => {
+      findFirst.mockResolvedValue(investorRow({ partnerOnly: true, _count: { holdings: 5 } }));
+      await expect(service.findOne('sequoia-capital')).resolves.toMatchObject({ indexable: false });
+    });
+  });
+
   describe('listSlugs', () => {
     it('returns approved slugs with ISO timestamps for the sitemap', async () => {
       findMany.mockResolvedValue([
@@ -397,7 +478,7 @@ describe('InvestorsService', () => {
         { slug: 'sequoia-capital', updatedAt: '2026-08-02T13:11:06.356Z' },
       ]);
       expect(findMany.mock.calls[0]![0]).toMatchObject({
-        where: { moderationStatus: 'APPROVED', mergedIntoId: null },
+        where: { moderationStatus: 'APPROVED', mergedIntoId: null, partnerOnly: false },
       });
     });
 
@@ -436,7 +517,7 @@ describe('InvestorsService.proposeChange', () => {
       investor: { findFirst },
       investorChangeProposal: { create },
     } as unknown as PrismaService;
-    return { service: new InvestorsService(prisma), findFirst, create };
+    return { service: new InvestorsService(prisma, unlockedUsers), findFirst, create };
   }
 
   const input = (changes: Record<string, unknown>) =>

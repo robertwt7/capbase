@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
+import { isMasked, SignInChip } from '@/components/Masked';
 import { Badge } from '@/components/ui';
 import type { Company } from '@/lib/data';
 import { formatUsd } from '@/lib/format';
@@ -83,6 +84,10 @@ export function CompanyTable({
 }
 
 function CompanyCells({ company }: { company: Company }) {
+  // A value the API withheld from a signed-out viewer is blank in the payload:
+  // a plain chip stands in (the row is already a link, so it cannot be one).
+  const chip = <SignInChip next="/companies" link={false} />;
+  const masked = (field: string) => isMasked(company, field);
   return (
     <>
       <span className="flex min-w-0 items-center gap-3.5" role="cell">
@@ -91,29 +96,31 @@ function CompanyCells({ company }: { company: Company }) {
           <span className="font-display text-base font-semibold tracking-tight text-ink">
             {company.name}
           </span>
-          <span className="truncate text-[13px] text-graphite-500">{company.oneLiner}</span>
+          <span className="truncate text-[13px] text-graphite-500">
+            {masked('oneLiner') ? null : company.oneLiner}
+          </span>
         </span>
       </span>
       <span
         className="flex flex-col items-start gap-1.5 max-[700px]:flex-row max-[700px]:items-center max-[700px]:gap-2"
         role="cell"
       >
-        <Badge variant="pill">{company.stage}</Badge>
+        {masked('stage') ? chip : <Badge variant="pill">{company.stage}</Badge>}
         <span className="text-xs text-graphite-500">
-          {company.primarySector ?? company.industry[0]}
+          {masked('primarySector') ? null : (company.primarySector ?? company.industry[0])}
         </span>
       </span>
       <span
         className="text-right font-mono text-base font-medium text-ink max-[700px]:col-start-1 max-[700px]:text-left"
         role="cell"
       >
-        {formatUsd(company.lastValuationUsd)}
+        {masked('lastValuationUsd') ? chip : formatUsd(company.lastValuationUsd)}
       </span>
       <span
         className="text-right font-mono text-[15px] text-graphite-700 max-[700px]:col-start-1 max-[700px]:text-left"
         role="cell"
       >
-        {formatUsd(company.totalRaisedUsd)}
+        {masked('totalRaisedUsd') ? chip : formatUsd(company.totalRaisedUsd)}
       </span>
     </>
   );

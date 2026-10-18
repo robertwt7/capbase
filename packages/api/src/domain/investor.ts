@@ -1,4 +1,5 @@
 import type { InvestorType, Person } from './company';
+import type { GateAccess } from './contributions';
 import type { Fund, InvestorCommitmentRow } from './fund';
 import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
@@ -26,6 +27,10 @@ export interface Investor {
   foundedYear?: number | null;
   /** Same contract as Company.identifiers: detail reads only, no DOMAIN. */
   identifiers?: EntityIdentifierRef[];
+  /** Same contract as Company.masked. */
+  masked?: string[];
+  /** Same contract as Company.partnerOnly. */
+  partnerOnly?: boolean;
 }
 
 /** A unique investor with the portfolio facts the directory row needs. */
@@ -61,8 +66,12 @@ export interface InvestorDetailResponse extends InvestorSummary {
   /** Citations attesting the fund rows above. */
   citations: Citation[];
   /** Whether search engines should index this profile (`indexing.ts`). The
-   *  sitemap lists exactly the investors for whom this is true. */
+   *  sitemap lists exactly the investors for whom this is true. Never for a
+   *  partner-only firm. */
   indexable: boolean;
+  /** The viewer's gate: each section above holds `gateLimit` rows, while every
+   *  count (`portfolioCount`, `peopleCount`, …) covers all of them. */
+  access: GateAccess;
 }
 
 /** How many portfolio companies the profile lists — a large venture firm holds

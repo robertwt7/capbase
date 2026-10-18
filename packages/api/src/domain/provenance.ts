@@ -2,6 +2,7 @@
 // it changed over time (Revision). Both are read-only on the public surface —
 // citations are minted by contribution and backfill, revisions by moderation.
 
+import type { ViewerAccess } from './contributions';
 import type { ReviewableType } from './moderation';
 
 export type SourceType =
@@ -83,11 +84,32 @@ export interface Revision {
 }
 
 export interface CompanyHistoryResponse {
+  /** Entries this viewer may see (what the pages cover). */
   total: number;
   page: number;
   pageSize: number;
   items: Revision[];
+  /** Entries withheld from this viewer — 0 once unlocked. */
+  hiddenCount: number;
+  access: ViewerAccess;
 }
+
+/**
+ * Ingest sources whose company-field revisions a LOCKED viewer may read on the
+ * history timeline. An explicit allowlist, like the labels below: a new source
+ * stays hidden until it is added here on purpose.
+ */
+export const PUBLIC_INGEST_SOURCES: readonly string[] = [
+  'SEC_EDGAR',
+  'SEC_ADV',
+  'SEC_ADV_FUNDS',
+  'SEC_FORM_C',
+  'SBIR',
+  'SEC_S1',
+  'INNOVATE_UK',
+  'COMPANIES_HOUSE',
+  'WIKIDATA',
+];
 
 /**
  * Internal ingest tag → what the public timeline may say. An explicit table on

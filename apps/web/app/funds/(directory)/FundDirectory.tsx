@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui';
+import { isMasked, Masked, SignInChip } from '@/components/Masked';
 import { formatCount, formatUsd } from '@/lib/format';
 
 import { FUND_COLUMNS } from './columns';
@@ -42,9 +43,13 @@ const isSort = (v: string | undefined): v is Sort =>
 export function FundDirectory({
   result,
   initial,
+  signedIn,
 }: {
   result: Paginated<FundSummary>;
   initial: Record<string, string | undefined>;
+  /** Signed out, status is licensed data: the API ignores its filter, so the
+   *  control is a sign-in prompt instead. */
+  signedIn: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -128,19 +133,25 @@ export function FundDirectory({
             ))}
           </SelectContent>
         </Select>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-[160px]" aria-label="Any status">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Any status</SelectItem>
-            {FUND_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {signedIn ? (
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-[160px]" aria-label="Any status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Any status</SelectItem>
+              {FUND_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Button variant="outline" shape="box" size="sm" href={`/login?next=${encodeURIComponent('/funds')}`} className="self-center">
+            Sign in to filter by status
+          </Button>
+        )}
         <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
           <SelectTrigger className="w-[170px]" aria-label="Sort by">
             <SelectValue />
@@ -222,6 +233,11 @@ export function FundDirectory({
                       {fund.status}
                     </span>
                   )}
+                  {isMasked(fund, 'status') && (
+                    <span className="self-start">
+                      <SignInChip next="/funds" />
+                    </span>
+                  )}
                 </span>
                 <Link
                   href={`/investors/${fund.manager.slug}`}
@@ -233,7 +249,9 @@ export function FundDirectory({
                   {fund.manager.name}
                 </Link>
                 <span role="cell">
-                  {fund.strategy ? (
+                  {isMasked(fund, 'strategy') ? (
+                    <SignInChip next="/funds" />
+                  ) : fund.strategy ? (
                     <Badge variant="pill" mono>
                       {fund.strategy}
                     </Badge>
@@ -245,7 +263,9 @@ export function FundDirectory({
                   className="text-right font-mono text-sm text-ink max-[820px]:text-left"
                   role="cell"
                 >
-                  {fund.vintageYear ?? '—'}
+                  <Masked entity={fund} field="vintageYear" next="/funds">
+                    {fund.vintageYear ?? '—'}
+                  </Masked>
                 </span>
                 {/* Gross assets is what Form ADV reports; a fund with none
                     renders "Undisclosed", never $0. */}
@@ -253,7 +273,11 @@ export function FundDirectory({
                   className="text-right font-mono text-base font-medium text-ink max-[820px]:text-left"
                   role="cell"
                 >
-                  {formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)}
+                  {fund.grossAssetsUsd == null && isMasked(fund, 'closedUsd') ? (
+                    <SignInChip next="/funds" />
+                  ) : (
+                    formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)
+                  )}
                 </span>
               </div>
             ))}

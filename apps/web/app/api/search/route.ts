@@ -7,6 +7,7 @@ import {
 } from '@repo/api';
 
 import { ApiError, apiFetch } from '@/lib/api';
+import { getToken } from '@/lib/auth';
 import { forwardedForHeaders } from '@/lib/client-ip';
 
 const EMPTY: SearchResponse = { companies: [], investors: [], people: [] };
@@ -18,11 +19,20 @@ export async function GET(
 ): Promise<NextResponse<SearchResponse>> {
   const q = req.nextUrl.searchParams.get('q')?.trim() ?? '';
   if (q.length < SEARCH_MIN_CHARS) return NextResponse.json(EMPTY);
+  // Signed in, the session's token: the API then finds the partner's entities
+  // too. Signed out it sends none, and they are not found.
+  const token = await getToken();
   try {
     const result = await apiFetch<SearchResponse>(
       `/search?q=${encodeURIComponent(q.slice(0, SEARCH_MAX_CHARS))}`,
       // Uncached and typed into, so it counts against the visitor's search limit.
-      { cache: 'no-store', headers: await forwardedForHeaders() },
+      {
+        cache: 'no-store',
+        headers: {
+          ...(await forwardedForHeaders()),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+      },
     );
     return NextResponse.json(result);
   } catch (err) {

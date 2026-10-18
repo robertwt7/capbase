@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import request from 'supertest';
@@ -190,8 +191,13 @@ describe('Contact privacy (e2e)', () => {
     }
   });
 
-  it('the public timeline names partner data generically and never leaks a raw tag', async () => {
-    const res = await http().get(`/companies/${tag}-co/history`).expect(200);
+  it('the timeline names partner data generically and never leaks a raw tag', async () => {
+    // Signed out, neither entry is shown at all (the history allowlist).
+    const anon = await http().get(`/companies/${tag}-co/history`).expect(200);
+    expect(anon.body.items).toEqual([]);
+    // An unlocked viewer sees both — and still no raw tag.
+    const jwt = app.get(JwtService).sign({ sub: userId, email: `${tag}@test.dev`, role: 'CONTRIBUTOR', tv: 0 });
+    const res = await http().get(`/companies/${tag}-co/history`).set(bearer(jwt)).expect(200);
     const names = (res.body.items as { field: string; actorName: string }[])
       .map((i) => [i.field, i.actorName])
       .sort();

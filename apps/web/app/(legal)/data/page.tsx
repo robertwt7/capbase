@@ -126,7 +126,9 @@ export default function DataPage() {
       </p>
       <p>
         Partner data is <strong>not</strong> covered by the CC BY-NC licence below. You may
-        read it on Capbase, but you may not copy, export or reuse it from Capbase.
+        read it on Capbase, but you may not copy, export or reuse it from Capbase. It is shown
+        only to signed-in visitors — a free account shows the first rows of each section, and an
+        approved contribution opens every profile in full.
       </p>
       <p>
         For people at investment firms, partners also provide professional contact details. We

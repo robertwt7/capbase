@@ -209,6 +209,8 @@ export interface FundingRound {
   postMoneyUsd: number | null; // post-money valuation, when disclosed
   lead: string | null;
   investors: RoundInvestor[];
+  /** Fields withheld from this viewer (see `Company.masked`). */
+  masked?: string[];
 }
 
 /**
@@ -320,6 +322,13 @@ export interface Company {
    *  filtered out server-side: the profile already links the website, and
    *  repeating the host as an "identifier" is noise. */
   identifiers?: EntityIdentifierRef[];
+  /** Fields withheld from this viewer — partner-written values a signed-out
+   *  viewer may not read. The value in the payload is blanked (null, '' or 0),
+   *  so the web must check this before rendering one. */
+  masked?: string[];
+  /** Set (true) only for a signed-out viewer of a company that exists only
+   *  because of the partner: the payload is a stub — name, counts, nothing else. */
+  partnerOnly?: boolean;
 }
 
 /**

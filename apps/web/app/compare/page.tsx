@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Company } from '@repo/api';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
+import { Masked } from '@/components/Masked';
 import { EmptyState, PageContainer, SectionHeader } from '@/components/ui';
 import { getCompanies } from '@/lib/data';
 import { formatCount, formatUsd, foundedYear } from '@/lib/format';
@@ -20,15 +21,17 @@ export const metadata = {
 const MAX_COMPARE = 4;
 
 // Public summary facts shown side by side — everything on the base Company type.
-const FACTS: { label: string; value: (c: Company) => string }[] = [
-  { label: 'Sector', value: (c) => c.primarySector ?? '—' },
-  { label: 'Stage', value: (c) => c.stage },
-  { label: 'Status', value: (c) => c.status },
-  { label: 'Founded', value: (c) => foundedYear(c.founded) ?? '—' },
-  { label: 'HQ', value: (c) => c.hq },
-  { label: 'Headcount', value: (c) => formatCount(c.headcount) },
-  { label: 'Total raised', value: (c) => formatUsd(c.totalRaisedUsd) },
-  { label: 'Last valuation', value: (c) => formatUsd(c.lastValuationUsd) },
+// `field` names the column, so a value withheld from a signed-out viewer shows
+// the sign-in chip rather than its blank.
+const FACTS: { label: string; field: keyof Company; value: (c: Company) => string }[] = [
+  { label: 'Sector', field: 'primarySector', value: (c) => c.primarySector ?? '—' },
+  { label: 'Stage', field: 'stage', value: (c) => c.stage },
+  { label: 'Status', field: 'status', value: (c) => c.status },
+  { label: 'Founded', field: 'founded', value: (c) => foundedYear(c.founded) ?? '—' },
+  { label: 'HQ', field: 'hq', value: (c) => c.hq },
+  { label: 'Headcount', field: 'headcount', value: (c) => formatCount(c.headcount) },
+  { label: 'Total raised', field: 'totalRaisedUsd', value: (c) => formatUsd(c.totalRaisedUsd) },
+  { label: 'Last valuation', field: 'lastValuationUsd', value: (c) => formatUsd(c.lastValuationUsd) },
 ];
 
 function compareHref(slugs: string[]) {
@@ -121,7 +124,9 @@ export default async function ComparePage({
                       key={c.slug}
                       className="border-t border-l border-line px-4 py-3 font-mono text-sm text-ink"
                     >
-                      {fact.value(c)}
+                      <Masked entity={c} field={fact.field} next={compareHref(current)}>
+                        {fact.value(c)}
+                      </Masked>
                     </td>
                   ))}
                 </tr>

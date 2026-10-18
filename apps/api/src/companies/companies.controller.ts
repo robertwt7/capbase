@@ -35,10 +35,12 @@ export class CompaniesController {
 
   // --- Public reads (approved data only) ---
 
+  // Optional auth: a signed-in viewer also sees partner companies and values.
   @SearchThrottle()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  findAll(@Query() query: ListCompaniesDto): Promise<Paginated<Company>> {
-    return this.companies.findAllApproved(query);
+  findAll(@Query() query: ListCompaniesDto, @CurrentUser() user?: RequestUser): Promise<Paginated<Company>> {
+    return this.companies.findAllApproved(query, user);
   }
 
   // Declared before @Get(':slug') so the literal path wins over the param route.
@@ -72,13 +74,16 @@ export class CompaniesController {
   }
 
   // Declared before @Get(':slug') so the more specific path wins over the param
-  // route. Public and ungated by design — see getCompanyHistory.
+  // route. Public, but gated like the profile: a locked viewer sees the
+  // allowlisted entries and a count of the rest — see getCompanyHistory.
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':slug/history')
   history(
     @Param('slug') slug: string,
     @Query() query: CompanyHistoryDto,
+    @CurrentUser() user?: RequestUser,
   ): Promise<CompanyHistoryResponse> {
-    return this.companies.getCompanyHistory(slug, query.page, query.pageSize);
+    return this.companies.getCompanyHistory(slug, query.page, query.pageSize, user);
   }
 
   @UseGuards(OptionalJwtAuthGuard)

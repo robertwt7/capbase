@@ -274,6 +274,14 @@ backfill-fund-slugs: ## Give every fund without one a /funds/<slug> page address
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill-fund-slugs.js
 
+# Reconstructs partner provenance for data loaded before ingest recorded it.
+# Needs partner_stage loaded; run it BEFORE any further partner stage and before
+# partner-stage-drop. Idempotent (a second run changes 0 rows).
+.PHONY: backfill-partner-provenance
+backfill-partner-provenance: ## Mark partner-only rows and partner-written fields (needs partner_stage; no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-partner-provenance.js
+
 .PHONY: purge-sbir-people
 purge-sbir-people: ## One-shot: delete SBIR person rows read from 'Contact Name' (federal program officers)
 	yarn workspace jobs build
@@ -301,6 +309,10 @@ partner-stage-drop-prod: ## [VPS] Drop schema partner_stage after the partner im
 .PHONY: ingest-partner-prod
 ingest-partner-prod: ## [VPS] Import the partner snapshot inside the deployed jobs container (STAGE=…)
 	$(COMPOSE_STACK) run --rm -e PARTNER_STAGES=$(STAGE) jobs node apps/jobs/dist/backfill.js 1 10000000 PARTNER
+
+.PHONY: backfill-partner-provenance-prod
+backfill-partner-provenance-prod: ## [VPS] Mark partner-only rows and partner-written fields inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-partner-provenance.js
 
 .PHONY: backfill-fund-slugs-prod
 backfill-fund-slugs-prod: ## [VPS] Give every fund a page slug inside the deployed jobs container

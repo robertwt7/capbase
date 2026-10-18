@@ -46,6 +46,27 @@ import {
 import { ApiError, apiFetch } from './api';
 import { getToken } from './auth';
 
+/**
+ * Fetch options for a profile read, which the API gates per viewer: the
+ * session's bearer token (when there is one) and never cached — the response
+ * belongs to that viewer.
+ */
+async function profileInit(): Promise<RequestInit> {
+  const token = await getToken();
+  return { headers: token ? { authorization: `Bearer ${token}` } : {}, cache: 'no-store' };
+}
+
+/**
+ * Fetch options for a directory read. Signed out: no token, so the default 60s
+ * ISR entry stays shared by every signed-out visitor — crawlers included, the
+ * heavy path. Signed in: the token (the API then lists partner data too) and
+ * `no-store`. Next keys its fetch cache on request headers, so the two never mix.
+ */
+async function listInit(): Promise<RequestInit | undefined> {
+  const token = await getToken();
+  return token ? { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' } : undefined;
+}
+
 export type {
   Stage,
   CompanyStatus,
@@ -532,7 +553,7 @@ function paginateFallbackCompanies(query: CompanyListQuery): Paginated<Company> 
 
 export async function getCompanies(query: CompanyListQuery = {}): Promise<Paginated<Company>> {
   try {
-    return await apiFetch<Paginated<Company>>(`/companies${toSearchParams(query)}`);
+    return await apiFetch<Paginated<Company>>(`/companies${toSearchParams(query)}`, await listInit());
   } catch (err) {
     allowMockFallback('getCompanies', err);
     return paginateFallbackCompanies(query);
@@ -558,7 +579,7 @@ export async function getFeaturedCompanies(
     allowMockFallback('getFeaturedCompanies', err);
     return {
       items: paginateFallbackCompanies({ pageSize: limit, sort: 'raised' }).items,
-      access: { unlocked: false, unlockedUntil: null },
+      access: { unlocked: false, signedIn: Boolean(token), unlockedUntil: null },
     };
   }
 }
@@ -613,6 +634,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
       company,
       access: {
         unlocked: true,
+        signedIn: Boolean(token),
         previewLimit: PREVIEW_LIMIT,
         unlockedUntil: null,
         totals: {
@@ -624,6 +646,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
           diversity: company.diversity?.length ?? 0,
         },
       },
+      latestRound: null,
       // The fallback rows have no database identity, so nothing can cite them.
       citations: [],
     };
@@ -631,9 +654,9 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
 });
 
 /**
- * One page of a company's public change timeline. Returns null when the slug is
- * unknown (the page renders notFound) — there is no offline fallback: an
- * invented audit trail would be worse than none.
+ * One page of a company's change timeline, gated per viewer like the profile.
+ * Returns null when the slug is unknown (the page renders notFound) — there is
+ * no offline fallback: an invented audit trail would be worse than none.
  */
 export async function getCompanyHistory(
   slug: string,
@@ -642,6 +665,7 @@ export async function getCompanyHistory(
   try {
     return await apiFetch<CompanyHistoryResponse>(
       `/companies/${encodeURIComponent(slug)}/history?page=${page}`,
+      await profileInit(),
     );
   } catch (err) {
     redirectIfMerged(err, '/companies', '/history');
@@ -699,7 +723,7 @@ export async function getInvestors(
   query: InvestorListQuery = {},
 ): Promise<Paginated<InvestorSummary>> {
   try {
-    return await apiFetch<Paginated<InvestorSummary>>(`/investors${toSearchParams(query)}`);
+    return await apiFetch<Paginated<InvestorSummary>>(`/investors${toSearchParams(query)}`, await listInit());
   } catch (err) {
     allowMockFallback('getInvestors', err);
     return paginateFallbackInvestors(query);
@@ -735,7 +759,7 @@ function paginateFallbackFunds(query: FundListQuery): Paginated<FundSummary> {
 
 export async function getFunds(query: FundListQuery = {}): Promise<Paginated<FundSummary>> {
   try {
-    return await apiFetch<Paginated<FundSummary>>(`/funds${toSearchParams(query)}`);
+    return await apiFetch<Paginated<FundSummary>>(`/funds${toSearchParams(query)}`, await listInit());
   } catch (err) {
     allowMockFallback('getFunds', err);
     return paginateFallbackFunds(query);
@@ -749,7 +773,7 @@ export const getInvestor = cache(async function getInvestor(
   slug: string,
 ): Promise<InvestorDetailResponse | null> {
   try {
-    return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`);
+    return await apiFetch<InvestorDetailResponse>(`/investors/${encodeURIComponent(slug)}`, await profileInit());
   } catch (err) {
     redirectIfMerged(err, '/investors');
     if (err instanceof ApiError && err.status === 404) return null;
@@ -768,6 +792,7 @@ export const getInvestor = cache(async function getInvestor(
       namedFundCount: funds.length,
       citations: [],
       indexable: false,
+      access: { unlocked: true, signedIn: false, unlockedUntil: null, previewLimit: PREVIEW_LIMIT },
     };
   }
 });
@@ -778,7 +803,7 @@ export const getInvestor = cache(async function getInvestor(
  *  generateMetadata and the page share one fetch per request. */
 export const getFund = cache(async function getFund(slug: string): Promise<FundDetailResponse | null> {
   try {
-    return await apiFetch<FundDetailResponse>(`/funds/${encodeURIComponent(slug)}`);
+    return await apiFetch<FundDetailResponse>(`/funds/${encodeURIComponent(slug)}`, await profileInit());
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     console.warn(`[data] getFund(${slug}) failed:`, err);
@@ -795,7 +820,7 @@ export const getFund = cache(async function getFund(slug: string): Promise<FundD
 
 export async function getPeople(query: PersonListQuery = {}): Promise<Paginated<PersonSummary>> {
   try {
-    return await apiFetch<Paginated<PersonSummary>>(`/people${toSearchParams(query)}`);
+    return await apiFetch<Paginated<PersonSummary>>(`/people${toSearchParams(query)}`, await listInit());
   } catch (err) {
     console.warn('[data] getPeople failed; the directory renders empty:', err);
     return { items: [], total: 0, page: query.page ?? 1, pageSize: query.pageSize ?? DEFAULT_PAGE_SIZE };
@@ -808,7 +833,7 @@ export const getPerson = cache(async function getPerson(
   slug: string,
 ): Promise<PersonDetailResponse | undefined> {
   try {
-    return await apiFetch<PersonDetailResponse>(`/people/${encodeURIComponent(slug)}`);
+    return await apiFetch<PersonDetailResponse>(`/people/${encodeURIComponent(slug)}`, await profileInit());
   } catch (err) {
     // A merged person's slug 301s with the survivor in the BODY; the redirect
     // is issued here so no call site has to know about it.

@@ -18,11 +18,14 @@ export default async function Image({ params }: { params: Promise<{ slug: string
 
   if (!investor) return new ImageResponse(<OgFallbackCard />, { ...size, fonts });
 
-  const meta = [investor.type, investor.hq].filter(Boolean).join(' · ');
+  // Fetched like any page — signed out, for a crawler: a stub draws the name
+  // and its public counts, and a withheld value (blank in the payload) is skipped.
+  const shown = (field: string) => !investor.partnerOnly && !investor.masked?.includes(field);
+  const meta = [shown('type') && investor.type, shown('hq') && investor.hq].filter(Boolean).join(' · ');
   // Investors have no rounds, so no ladder: the stat row is the whole story,
   // and each stat appears only when it says something.
   const stats = [
-    investor.assetsUsd ? `${formatUsd(investor.assetsUsd)} FUND ASSETS` : null,
+    shown('assetsUsd') && investor.assetsUsd ? `${formatUsd(investor.assetsUsd)} FUND ASSETS` : null,
     investor.portfolioCount > 0 ? `${formatCount(investor.portfolioCount)} PORTFOLIO` : null,
     investor.namedFundCount > 0 ? `${formatCount(investor.namedFundCount)} FUNDS` : null,
   ].filter((s): s is string => Boolean(s));

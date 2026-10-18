@@ -10,8 +10,11 @@ import {
   INVESTOR_COMMITMENT_PREVIEW,
   INVESTOR_PEOPLE_PREVIEW,
   INVESTOR_PORTFOLIO_PREVIEW,
+  PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
+  gateLimit,
   normalizeDomain,
+  partnerVisible,
   type Citation,
   type CountryFacet,
   type EntityIdentifierRef,
@@ -23,11 +26,24 @@ import {
   type InvestorSlugEntry,
   type InvestorSummary,
   type Paginated,
+  type Role,
+  type ViewerAccess,
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 
 import { toPerson } from '../companies/company.mapper';
 import { toFund } from '../funds/fund.mapper';
+import {
+  FUND_BLANKS,
+  INVESTOR_BLANKS,
+  listAccess,
+  maskFields,
+  maskPartnerFields,
+  publicRowsWhere,
+  stubFor,
+  takeFor,
+  unmaskedFilters,
+} from '../gate/gate';
 import { toFacets } from '../prisma/country-facets';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -37,6 +53,7 @@ import {
 } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
+import { UsersService } from '../users/users.service';
 import { CreateInvestorProposalDto } from './dto/create-investor-proposal.dto';
 import {
   toInvestorEditFields,
@@ -79,6 +96,8 @@ const PUBLIC_LP_COMMITMENTS = {
  */
 const INDEXABLE_INVESTOR = {
   ...PUBLIC_INVESTOR,
+  // A partner-only firm is a stub for crawlers (who are signed out): noindex.
+  partnerOnly: false,
   OR: [
     { holdings: { some: PUBLIC_HOLDINGS } },
     { funds: { some: PUBLIC_FUNDS } },
@@ -94,11 +113,36 @@ const COMPANY_SELECT = {
   select: { slug: true, name: true, domain: true, primarySector: true },
 };
 
+/** Every Investor field a partner-only stub withholds: all but the identity
+ *  (slug, name) and — unless the partner wrote it — the logo domain. */
+const INVESTOR_STUB_HIDDEN = [
+  'legalName',
+  'type',
+  'hq',
+  'countryCode',
+  'websiteUrl',
+  'linkedinUrl',
+  'description',
+  'fundCount',
+  'assetsUsd',
+  'foundedYear',
+];
+
+/** Holdings a viewer may see on a card or profile: no partner edge, and no
+ *  partner-only company, for a signed-out viewer. */
+const visibleHoldings = (access: ViewerAccess): Prisma.InvestorHoldingWhereInput =>
+  partnerVisible(access)
+    ? PUBLIC_HOLDINGS
+    : { ...PUBLIC_HOLDINGS, ...publicRowsWhere(access), company: { ...PUBLIC_COMPANY_RELATION, partnerOnly: false } };
+
 @Injectable()
 export class InvestorsService {
   private countryFacet: { items: CountryFacet[]; expiresAt: number } | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly users: UsersService,
+  ) {}
 
   /** How many public investors each country holds, most first — the
    *  directory's country filter. Same contract as CompaniesService.countries. */
@@ -120,16 +164,26 @@ export class InvestorsService {
    * Investors with no known portfolio are included on purpose: the SEC Form ADV
    * universe is mostly firms whose investments no free source discloses, and
    * their profiles invite a contribution rather than hiding.
+   *
+   * A signed-out viewer never sees a partner-only firm, a partner-written value
+   * (masked), a match on one (filters skip partner-marked columns) or a partner
+   * holding in the card's portfolio sample.
    */
-  async findAll(query: InvestorListQuery = {}): Promise<Paginated<InvestorSummary>> {
+  async findAll(
+    query: InvestorListQuery = {},
+    viewer?: { id: string; role: Role },
+  ): Promise<Paginated<InvestorSummary>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const access = listAccess(viewer);
 
     const where: Prisma.InvestorWhereInput = {
       ...PUBLIC_INVESTOR,
+      ...(partnerVisible(access) ? {} : { partnerOnly: false }),
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
       ...(query.type && { type: query.type }),
       ...(query.country && { countryCode: query.country }),
+      AND: unmaskedFilters(access, [query.type && 'type', query.country && 'countryCode']),
     };
 
     const [total, rows] = await this.prisma.$transaction([
@@ -144,16 +198,24 @@ export class InvestorsService {
         take: pageSize,
         include: {
           holdings: {
-            where: PUBLIC_HOLDINGS,
+            where: visibleHoldings(access),
             take: PORTFOLIO_SAMPLE,
             include: { company: COMPANY_SELECT },
           },
+          // Over every holding: a count is public.
           _count: { select: { holdings: { where: PUBLIC_HOLDINGS } } },
         },
       }),
     ]);
 
-    return { items: rows.map((r) => toInvestorSummary(r as InvestorWithHoldings)), total, page, pageSize };
+    return {
+      items: rows.map((r) =>
+        maskPartnerFields(toInvestorSummary(r as InvestorWithHoldings), r.partnerFields, access, INVESTOR_BLANKS),
+      ),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   /**
@@ -191,36 +253,43 @@ export class InvestorsService {
     return { id: created.id, moderationStatus: created.moderationStatus };
   }
 
-  /** Full profile: the largest slice of the approved portfolio (with the full
-   *  count and every sector), the largest funds we can name and the citations
-   *  attesting them. */
-  async findOne(slug: string): Promise<InvestorDetailResponse> {
+  /**
+   * Full profile: the largest slice of the approved portfolio (with the full
+   * count and every sector), the largest funds we can name and the citations
+   * attesting them — each section capped by the gate (`gateLimit`), without
+   * partner rows for a signed-out viewer, while every count covers all rows.
+   * A partner-only firm is a stub for a signed-out viewer.
+   */
+  async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<InvestorDetailResponse> {
+    const access = await this.users.accessFor(viewer);
+    const take = (cap: number, section: Parameters<typeof gateLimit>[0]) =>
+      takeFor(Math.min(cap, gateLimit(section, access)));
     const found = await this.prisma.investor.findFirst({
       where: { slug, ...PUBLIC_INVESTOR },
       include: {
         holdings: {
-          where: PUBLIC_HOLDINGS,
+          where: visibleHoldings(access),
           orderBy: [{ company: { totalRaisedUsd: 'desc' } }, { id: 'asc' }],
-          take: INVESTOR_PORTFOLIO_PREVIEW,
+          take: take(INVESTOR_PORTFOLIO_PREVIEW, 'investorPortfolio'),
           include: { company: COMPANY_SELECT },
         },
         funds: {
-          where: PUBLIC_FUNDS,
+          where: { ...PUBLIC_FUNDS, ...publicRowsWhere(access) },
           orderBy: [{ grossAssetsUsd: { sort: 'desc', nulls: 'last' } }, { name: 'asc' }],
-          take: FUND_PREVIEW,
+          take: take(FUND_PREVIEW, 'investorFunds'),
         },
         // Capped: a large firm lists thousands of staff. `peopleCount` says how
         // many the page is not showing.
         people: {
-          where: PUBLIC_OFFICERS,
+          where: { ...PUBLIC_OFFICERS, ...publicRowsWhere(access) },
           orderBy: [{ since: 'desc' }, { id: 'asc' }],
-          take: INVESTOR_PEOPLE_PREVIEW,
+          take: take(INVESTOR_PEOPLE_PREVIEW, 'investorPeople'),
           include: { person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } } },
         },
         commitments: {
-          where: PUBLIC_LP_COMMITMENTS,
+          where: { ...PUBLIC_LP_COMMITMENTS, ...publicRowsWhere(access) },
           orderBy: [{ amountUsd: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
-          take: INVESTOR_COMMITMENT_PREVIEW,
+          take: take(INVESTOR_COMMITMENT_PREVIEW, 'investorCommitments'),
           include: {
             fund: {
               select: {
@@ -252,18 +321,48 @@ export class InvestorsService {
       ...found,
       _count: { holdings: holdingCount, funds: fundCount, people: peopleCount, commitments: commitmentCount },
     };
+    const gate = { ...access, previewLimit: PREVIEW_LIMIT };
 
-    const funds = row.funds.map(toFund);
-    const summary = toInvestorSummary(row as unknown as InvestorWithHoldings);
+    if (stubFor(row.partnerOnly, access)) {
+      const hidden = row.partnerFields.includes('domain') ? [...INVESTOR_STUB_HIDDEN, 'domain'] : INVESTOR_STUB_HIDDEN;
+      const summary = maskFields(
+        toInvestorSummary({ ...row, holdings: [] } as unknown as InvestorWithHoldings),
+        hidden,
+        INVESTOR_BLANKS,
+      );
+      return {
+        ...summary,
+        partnerOnly: true,
+        people: [],
+        peopleCount: row._count.people,
+        commitments: [],
+        commitmentCount: row._count.commitments,
+        funds: [],
+        namedFundCount: row._count.funds,
+        citations: [],
+        indexable: false,
+        access: gate,
+      };
+    }
+
+    const funds = row.funds.map((f) => maskPartnerFields(toFund(f), f.partnerFields, access, FUND_BLANKS));
+    const summary = maskPartnerFields(
+      toInvestorSummary(row as unknown as InvestorWithHoldings),
+      row.partnerFields,
+      access,
+      INVESTOR_BLANKS,
+    );
     // The holdings above are a capped slice, so the sector list is read across
-    // the whole portfolio rather than off the sample.
+    // the whole portfolio rather than off the sample — the part of it this
+    // viewer may see (no partner edge or partner-written sector signed out).
     if (summary.portfolioCount > row.holdings.length) {
       summary.sectors = (
         await this.prisma.company.findMany({
           where: {
             ...PUBLIC_COMPANY_RELATION,
             primarySector: { not: null },
-            investors: { some: { investorId: row.id, moderationStatus: 'APPROVED' } },
+            investors: { some: { ...visibleHoldings(access), investorId: row.id } },
+            ...(partnerVisible(access) ? {} : { NOT: { partnerFields: { has: 'primarySector' } } }),
           },
           distinct: ['primarySector'],
           select: { primarySector: true },
@@ -301,10 +400,12 @@ export class InvestorsService {
       citations: await this.loadFundCitations(funds.map((f) => f.id)),
       // INDEXABLE_INVESTOR, read off the counts this response already carries.
       indexable:
-        summary.portfolioCount > 0 ||
-        row._count.funds > 0 ||
-        row._count.people > 0 ||
-        row._count.commitments > 0,
+        !row.partnerOnly &&
+        (summary.portfolioCount > 0 ||
+          row._count.funds > 0 ||
+          row._count.people > 0 ||
+          row._count.commitments > 0),
+      access: gate,
     };
   }
 

@@ -36,7 +36,10 @@ function serviceWith(rows: { id: string; slug: string; mergedIntoId: string | nu
     entityIdentifier: { findMany: jest.fn(async () => []) },
   } as unknown as PrismaService;
 
-  const users = { lastContributionAt: jest.fn(async () => null) } as unknown as UsersService;
+  const users = {
+    lastContributionAt: jest.fn(async () => null),
+    accessFor: jest.fn(async () => ({ unlocked: false, signedIn: false, unlockedUntil: null })),
+  } as unknown as UsersService;
   return new CompaniesService(prisma, users);
 }
 

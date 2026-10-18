@@ -10,11 +10,14 @@ import {
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
+  gateLimit,
   normalizeDomain,
+  partnerVisible,
   publicIngestLabel,
   type CitableType,
   type Citation,
   type Company,
+  type CompanyAccess,
   type CompanyDetailResponse,
   type CompanyEditFields,
   type CompanyHistoryResponse,
@@ -28,8 +31,22 @@ import {
   type RevisionAction,
   type RevisionActor,
   type Role,
+  type ViewerAccess,
 } from '@repo/api';
-import type { Prisma } from '@repo/db';
+import type { Company as DbCompany, Prisma } from '@repo/db';
+import {
+  COMPANY_BLANKS,
+  ROUND_BLANKS,
+  listAccess,
+  maskFields,
+  maskPartnerFields,
+  publicRowsWhere,
+  stubFor,
+  takeFor,
+  unmaskedFilters,
+  visibleRoundInvestors,
+} from '../gate/gate';
+import { lockedHistoryWhere } from '../gate/history';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { toFacets } from '../prisma/country-facets';
@@ -48,37 +65,97 @@ import {
 } from './dto/contributions.dto';
 import { CreateChangeProposalDto } from './dto/create-proposal.dto';
 
-const approvedChildren = {
-  rounds: {
-    where: { moderationStatus: 'APPROVED' as const },
-    include: { investors: true },
-    orderBy: { date: 'asc' as const },
-  },
-  people: {
-    where: { moderationStatus: 'APPROVED' as const },
-    // The deduplicated human, so each card can link to their profile. The
-    // tombstone and suppression columns come too: `toPerson` links only a live,
-    // unsuppressed person, and a suppressed one keeps the name the filing
-    // published — that is what the citation attests — without a link.
-    include: {
-      person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } },
+/**
+ * The child sections one viewer may receive, as a Prisma include: each section
+ * filtered to rows this viewer may see (no partner rows signed out) and capped
+ * at its gate limit in the query itself, so a gated row is never even loaded.
+ */
+function approvedChildren(access: ViewerAccess) {
+  const visible = { moderationStatus: 'APPROVED' as const, ...publicRowsWhere(access) };
+  return {
+    rounds: {
+      where: visible,
+      include: { investors: { where: visibleRoundInvestors(access) } },
+      orderBy: { date: 'asc' as const },
+      take: takeFor(gateLimit('companyRounds', access)),
     },
-  },
-  investors: {
-    where: { moderationStatus: 'APPROVED' as const },
-    // The linked firm's slug turns each card into a link to its profile.
-    include: { investor: { select: { slug: true, moderationStatus: true } } },
-  },
-  acquisitions: {
-    where: { moderationStatus: 'APPROVED' as const },
-    orderBy: { date: 'asc' as const },
-  },
-  exits: {
-    where: { moderationStatus: 'APPROVED' as const },
-    orderBy: { date: 'asc' as const },
-  },
-  diversity: { where: { moderationStatus: 'APPROVED' as const } },
-};
+    people: {
+      where: visible,
+      // The deduplicated human, so each card can link to their profile. The
+      // tombstone and suppression columns come too: `toPerson` links only a live,
+      // unsuppressed person, and a suppressed one keeps the name the filing
+      // published — that is what the citation attests — without a link.
+      include: {
+        person: { select: { slug: true, mergedIntoId: true, suppressedAt: true } },
+      },
+      take: takeFor(gateLimit('companyPeople', access)),
+    },
+    investors: {
+      where: visible,
+      // The linked firm's slug turns each card into a link to its profile.
+      include: { investor: { select: { slug: true, moderationStatus: true } } },
+      take: takeFor(gateLimit('companyInvestors', access)),
+    },
+    acquisitions: {
+      where: visible,
+      orderBy: { date: 'asc' as const },
+      take: takeFor(gateLimit('companyAcquisitions', access)),
+    },
+    exits: {
+      where: visible,
+      orderBy: { date: 'asc' as const },
+      take: takeFor(gateLimit('companyExits', access)),
+    },
+    // Contribution-only (no ingest source writes it), so no provenance filter.
+    diversity: {
+      where: { moderationStatus: 'APPROVED' as const },
+      take: takeFor(gateLimit('companyDiversity', access)),
+    },
+  } satisfies Prisma.CompanyInclude;
+}
+
+/** Every Company field a partner-only stub withholds: all of them but the
+ *  identity (slug, name) and — unless the partner wrote it — the logo domain. */
+const STUB_HIDDEN = [
+  'websiteUrl',
+  'linkedinUrl',
+  'twitterUrl',
+  'legalName',
+  'operatingStatus',
+  'companyType',
+  'primarySector',
+  'countryCode',
+  'oneLiner',
+  'description',
+  'hq',
+  'founded',
+  'headcount',
+  'industry',
+  'status',
+  'stage',
+  'totalRaisedUsd',
+  'lastValuationUsd',
+];
+
+/** What a signed-out viewer gets for a company only the partner knows: its
+ *  name and (via `access.totals`) its counts — no facts, rows or citations. */
+function companyStub(row: DbCompany): Company {
+  const hidden = row.partnerFields.includes('domain') ? [...STUB_HIDDEN, 'domain'] : STUB_HIDDEN;
+  const company = maskFields(toCompany(row), hidden, COMPANY_BLANKS);
+  delete company.financials;
+  return {
+    ...company,
+    partnerOnly: true,
+    rounds: [],
+    people: [],
+    investors: [],
+    acquisitions: [],
+    exits: [],
+    diversity: [],
+  };
+}
+
+const dateOnly = (d: Date): string => d.toISOString().slice(0, 10);
 
 const money = (v: number | null | undefined): bigint | null =>
   v === null || v === undefined ? null : BigInt(v);
@@ -109,9 +186,13 @@ const shuffled = <T>(items: readonly T[], random = Math.random): T[] => {
   return out;
 };
 
+/** The sitemap's companies: public, and not a partner-only stub (crawlers are
+ *  signed out, and a stub is `noindex`). */
+const SITEMAP_COMPANY = { ...PUBLIC_COMPANY, partnerOnly: false } satisfies Prisma.CompanyWhereInput;
+
 @Injectable()
 export class CompaniesService {
-  private featuredPool: { ids: string[]; expiresAt: number } | null = null;
+  private featuredPool: { ids: string[]; partnerOnly: Set<string>; expiresAt: number } | null = null;
   private countryFacet: { items: CountryFacet[]; expiresAt: number } | null = null;
 
   constructor(
@@ -132,7 +213,9 @@ export class CompaniesService {
    *
    * The viewer's gate state rides along (as on the detail read) so the landing
    * page can decide how much to blur without a second request. The rows
-   * themselves are never truncated — directory rows are public.
+   * themselves are never truncated — directory rows are public — but a
+   * signed-out viewer draws only from the pool's public-record companies, with
+   * partner-written values masked.
    */
   async findFeatured(
     limit = DEFAULT_FEATURED_LIMIT,
@@ -142,7 +225,8 @@ export class CompaniesService {
       this.loadFeaturedPool(),
       this.users.accessFor(viewer),
     ]);
-    const pick = shuffled(pool).slice(0, limit);
+    const ids = partnerVisible(access) ? pool.ids : pool.ids.filter((id) => !pool.partnerOnly.has(id));
+    const pick = shuffled(ids).slice(0, limit);
     if (pick.length === 0) return { items: [], access };
     const rows = await this.prisma.company.findMany({
       where: { id: { in: pick }, ...PUBLIC_COMPANY },
@@ -150,18 +234,18 @@ export class CompaniesService {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const items = pick.flatMap((id) => {
       const row = byId.get(id);
-      return row ? [toCompany(row)] : [];
+      return row ? [maskPartnerFields(toCompany(row), row.partnerFields, access, COMPANY_BLANKS)] : [];
     });
     return { items, access };
   }
 
-  private async loadFeaturedPool(): Promise<string[]> {
+  private async loadFeaturedPool(): Promise<{ ids: string[]; partnerOnly: Set<string> }> {
     if (this.featuredPool && this.featuredPool.expiresAt > Date.now()) {
-      return this.featuredPool.ids;
+      return this.featuredPool;
     }
     // Each signal is capped so one firehose company (hundreds of Form D
     // amendments, a 40-firm cap table) can't drown the rest of the score.
-    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+    const rows = await this.prisma.$queryRaw<{ id: string; partnerOnly: boolean }[]>`
       WITH saves AS (
         SELECT "companyId", COUNT(*)::int AS n FROM "SavedCompany" GROUP BY "companyId"
       ),
@@ -173,7 +257,7 @@ export class CompaniesService {
         SELECT "companyId", COUNT(*)::int AS n, MAX(date) AS latest FROM "FundingRound"
         WHERE "moderationStatus" = 'APPROVED' AND "kind" <> 'Grant' GROUP BY "companyId"
       )
-      SELECT c.id
+      SELECT c.id, c."partnerOnly"
       FROM "Company" c
       LEFT JOIN saves s   ON s."companyId" = c.id
       LEFT JOIN holders h ON h."companyId" = c.id
@@ -191,23 +275,41 @@ export class CompaniesService {
         c.id
       LIMIT ${FEATURED_POOL}
     `;
-    const ids = rows.map((r) => r.id);
-    this.featuredPool = { ids, expiresAt: Date.now() + FEATURED_POOL_TTL_MS };
-    return ids;
+    const pool = {
+      ids: rows.map((r) => r.id),
+      partnerOnly: new Set(rows.filter((r) => r.partnerOnly).map((r) => r.id)),
+      expiresAt: Date.now() + FEATURED_POOL_TTL_MS,
+    };
+    this.featuredPool = pool;
+    return pool;
   }
 
-  /** One page of approved companies, filtered/sorted server-side. */
-  async findAllApproved(query: CompanyListQuery = {}): Promise<Paginated<Company>> {
+  /**
+   * One page of approved companies, filtered/sorted server-side. A signed-out
+   * viewer never sees a partner-only company, a partner-written value (masked)
+   * or a filter/search match on one. Sorting stays over the stored values — the
+   * rank of a partner-raised total is an accepted trade, never the value.
+   */
+  async findAllApproved(
+    query: CompanyListQuery = {},
+    viewer?: { id: string; role: Role },
+  ): Promise<Paginated<Company>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const access = listAccess(viewer);
+    const signedOut = !partnerVisible(access);
 
     const where: Prisma.CompanyWhereInput = {
       ...PUBLIC_COMPANY,
+      ...(signedOut && { partnerOnly: false }),
       ...(query.slugs && { slug: { in: query.slugs.split(',').filter(Boolean) } }),
       ...(query.q && {
         OR: [
           { name: { contains: query.q, mode: 'insensitive' as const } },
-          { oneLiner: { contains: query.q, mode: 'insensitive' as const } },
+          {
+            oneLiner: { contains: query.q, mode: 'insensitive' as const },
+            ...(signedOut && { NOT: { partnerFields: { has: 'oneLiner' } } }),
+          },
         ],
       }),
       ...(query.sector && { primarySector: query.sector }),
@@ -219,6 +321,13 @@ export class CompaniesService {
       ...(query.domain !== undefined && {
         domain: { in: domainVariants(query.domain) },
       }),
+      AND: unmaskedFilters(access, [
+        query.sector && 'primarySector',
+        query.stage && 'stage',
+        query.status && 'status',
+        query.country && 'countryCode',
+        query.domain !== undefined && 'domain',
+      ]),
     };
 
     const orderBy: Prisma.CompanyOrderByWithRelationInput =
@@ -238,7 +347,12 @@ export class CompaniesService {
       }),
     ]);
 
-    return { items: rows.map((row) => toCompany(row)), total, page, pageSize };
+    return {
+      items: rows.map((row) => maskPartnerFields(toCompany(row), row.partnerFields, access, COMPANY_BLANKS)),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   /**
@@ -263,7 +377,7 @@ export class CompaniesService {
    *  pages never overlap). Never the whole family — see `SITEMAP_PAGE_SIZE`. */
   async listSlugs(page = 0): Promise<CompanySlugEntry[]> {
     const rows = await this.prisma.company.findMany({
-      where: PUBLIC_COMPANY,
+      where: SITEMAP_COMPANY,
       select: { slug: true, updatedAt: true },
       orderBy: { slug: 'asc' },
       skip: page * SITEMAP_PAGE_SIZE,
@@ -274,56 +388,95 @@ export class CompaniesService {
 
   /** How many rows `listSlugs` pages over — sizes the sitemap index. */
   countSlugs(): Promise<number> {
-    return this.prisma.company.count({ where: PUBLIC_COMPANY });
+    return this.prisma.company.count({ where: SITEMAP_COMPANY });
   }
 
   /**
-   * Full company profile, gated by contribution. A viewer who hasn't contributed
-   * within the rolling window (and isn't an admin) sees only the first
-   * PREVIEW_LIMIT rows of each detail section; `access` reports the full counts.
+   * Full company profile, gated by both rules (see `src/gate/`). Each section
+   * holds the rows `gateLimit` allows this viewer, without partner rows for a
+   * signed-out one; partner-written fields are masked for a signed-out viewer;
+   * a partner-only company is a stub for one. `access.totals` counts every
+   * approved row whatever the viewer — counts are public.
    */
   async getCompanyDetail(
     slug: string,
     viewer?: { id: string; role: Role },
   ): Promise<CompanyDetailResponse> {
+    const access = await this.users.accessFor(viewer);
     const row = await this.prisma.company.findFirst({
       where: { slug, ...PUBLIC_COMPANY },
-      include: approvedChildren,
+      include: approvedChildren(access),
     });
     // Returns `never` — either a 301 to the survivor, or a 404.
     if (!row) return this.redirectOrNotFound(slug);
-    const company = toCompany(row);
 
-    const totals = {
-      rounds: company.rounds?.length ?? 0,
-      people: company.people?.length ?? 0,
-      investors: company.investors?.length ?? 0,
-      acquisitions: company.acquisitions?.length ?? 0,
-      exits: company.exits?.length ?? 0,
-      diversity: company.diversity?.length ?? 0,
+    const gate: CompanyAccess = {
+      ...access,
+      previewLimit: PREVIEW_LIMIT,
+      totals: await this.sectionTotals(row.id),
     };
-
-    const { unlocked, unlockedUntil } = await this.users.accessFor(viewer);
-
-    if (!unlocked) {
-      if (company.rounds) company.rounds = company.rounds.slice(0, PREVIEW_LIMIT);
-      if (company.people) company.people = company.people.slice(0, PREVIEW_LIMIT);
-      if (company.investors) company.investors = company.investors.slice(0, PREVIEW_LIMIT);
-      if (company.acquisitions) company.acquisitions = company.acquisitions.slice(0, PREVIEW_LIMIT);
-      if (company.exits) company.exits = company.exits.slice(0, PREVIEW_LIMIT);
-      if (company.diversity) company.diversity = company.diversity.slice(0, PREVIEW_LIMIT);
+    if (stubFor(row.partnerOnly, access)) {
+      return { company: companyStub(row), access: gate, latestRound: null, citations: [] };
     }
 
-    // Loaded *after* truncation, so a locked viewer never receives a citation
-    // for a row they can't see.
-    const citations = await this.loadCitations(row.id, company);
-    company.identifiers = await this.loadIdentifiers(row.id);
+    const company = maskPartnerFields(toCompany(row), row.partnerFields, access, COMPANY_BLANKS);
+    // A public round the partner corrected shows the corrected columns masked.
+    if (company.rounds) {
+      company.rounds = company.rounds.map((r, i) =>
+        maskPartnerFields(r, row.rounds[i]?.partnerFields, access, ROUND_BLANKS),
+      );
+    }
 
-    return {
-      company,
-      access: { unlocked, previewLimit: PREVIEW_LIMIT, unlockedUntil, totals },
-      citations,
-    };
+    // Only for rows already in the response (each section was capped in the
+    // query), so a locked viewer never receives a citation for a row they
+    // can't see.
+    const [citations, identifiers, latestRound] = await Promise.all([
+      this.loadCitations(row.id, company),
+      this.loadIdentifiers(row.id),
+      this.latestRound(row.id, access),
+    ]);
+    company.identifiers = identifiers;
+
+    return { company, access: gate, latestRound, citations };
+  }
+
+  /** Every approved row per section, partner rows included — six indexed
+   *  counts, independent of what this viewer receives. */
+  private async sectionTotals(companyId: string): Promise<CompanyAccess['totals']> {
+    const where = { companyId, moderationStatus: 'APPROVED' as const };
+    const [rounds, people, investors, acquisitions, exits, diversity] = await Promise.all([
+      this.prisma.fundingRound.count({ where }),
+      this.prisma.personRole.count({ where }),
+      this.prisma.investorHolding.count({ where }),
+      this.prisma.acquisitionDeal.count({ where }),
+      this.prisma.exitEvent.count({ where }),
+      this.prisma.diversitySignal.count({ where }),
+    ]);
+    return { rounds, people, investors, acquisitions, exits, diversity };
+  }
+
+  /** The funding summary line: the latest round whose stage and date this
+   *  viewer may read — for a signed-out viewer, one the partner neither
+   *  created nor renamed/re-dated. */
+  private async latestRound(
+    companyId: string,
+    access: ViewerAccess,
+  ): Promise<CompanyDetailResponse['latestRound']> {
+    const round = await this.prisma.fundingRound.findFirst({
+      where: {
+        companyId,
+        moderationStatus: 'APPROVED',
+        ...(partnerVisible(access)
+          ? {}
+          : {
+              ...publicRowsWhere(access),
+              NOT: [{ partnerFields: { has: 'name' } }, { partnerFields: { has: 'date' } }],
+            }),
+      },
+      orderBy: { date: 'desc' },
+      select: { name: true, date: true },
+    });
+    return round ? { stage: round.name, date: dateOnly(round.date) } : null;
   }
 
   /**
@@ -449,26 +602,52 @@ export class CompaniesService {
   }
 
   /**
-   * The company's public change timeline: every recorded change to the company
-   * row and its children, newest first.
+   * The company's change timeline, newest first.
    *
-   * Deliberately public and ungated — an open-data project's audit trail is
-   * worth more open than it is as a contribution incentive. It reports display
-   * names only; the submitter emails the admin queue shows never appear here.
+   * Unlocked viewers see every recorded change to the company row and its
+   * children. A locked viewer — signed in or not — sees an allowlist
+   * (`lockedHistoryWhere`): company-field changes from public records and
+   * moderated edits whose field the partner never wrote. A revision's
+   * before/after can carry any value the row ever held — a round's amount, a
+   * partner's description — so the rest is withheld and only counted
+   * (`hiddenCount`). A partner-only company shows a signed-out viewer nothing.
+   * Display names only; the submitter emails the admin queue shows never
+   * appear here.
    */
   async getCompanyHistory(
     slug: string,
     page = 1,
     pageSize = DEFAULT_PAGE_SIZE,
+    viewer?: { id: string; role: Role },
   ): Promise<CompanyHistoryResponse> {
-    const company = await this.prisma.company.findFirst({
-      where: { slug, ...PUBLIC_COMPANY },
-      select: { id: true },
-    });
+    const [company, access] = await Promise.all([
+      this.prisma.company.findFirst({
+        where: { slug, ...PUBLIC_COMPANY },
+        select: { id: true, partnerOnly: true },
+      }),
+      this.users.accessFor(viewer),
+    ]);
     if (!company) return this.redirectOrNotFound(slug);
 
-    const where = { companyId: company.id };
-    const [total, rows] = await this.prisma.$transaction([
+    const all = { companyId: company.id };
+    if (stubFor(company.partnerOnly, access)) {
+      const hiddenCount = await this.prisma.revision.count({ where: all });
+      return { total: 0, page, pageSize, items: [], hiddenCount, access };
+    }
+    let where: Prisma.RevisionWhereInput = all;
+    if (!access.unlocked) {
+      const touched = await this.prisma.revision.findMany({
+        where: { companyId: company.id, entityType: 'company', actorSource: 'PARTNER' },
+        distinct: ['field'],
+        select: { field: true },
+      });
+      where = lockedHistoryWhere(
+        company.id,
+        touched.map((r) => r.field),
+      );
+    }
+    const [everything, total, rows] = await this.prisma.$transaction([
+      this.prisma.revision.count({ where: all }),
       this.prisma.revision.count({ where }),
       this.prisma.revision.findMany({
         where,
@@ -497,7 +676,7 @@ export class CompaniesService {
       createdAt: row.createdAt.toISOString(),
     }));
 
-    return { total, page, pageSize, items };
+    return { total, page, pageSize, items, hiddenCount: everything - total, access };
   }
 
   /** Human-readable subject per revision, so the timeline says "Series B round"

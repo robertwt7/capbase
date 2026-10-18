@@ -290,14 +290,14 @@ export class UsersService {
    * the UI can say when access expired.
    */
   async accessFor(viewer?: { id: string; role: Role }): Promise<ViewerAccess> {
-    if (!viewer) return { unlocked: false, unlockedUntil: null };
+    if (!viewer) return { unlocked: false, signedIn: false, unlockedUntil: null };
     if (viewer.role === 'ADMIN' || viewer.role === 'CONTRIBUTOR') {
-      return { unlocked: true, unlockedUntil: null };
+      return { unlocked: true, signedIn: true, unlockedUntil: null };
     }
     const last = await this.lastContributionAt(viewer.id);
-    if (!last) return { unlocked: false, unlockedUntil: null };
+    if (!last) return { unlocked: false, signedIn: true, unlockedUntil: null };
     const until = new Date(last.getTime() + WINDOW_MS);
-    return { unlocked: Date.now() < until.getTime(), unlockedUntil: until.toISOString() };
+    return { unlocked: Date.now() < until.getTime(), signedIn: true, unlockedUntil: until.toISOString() };
   }
 
   /** A user's own submissions across every type, any status, newest first. */

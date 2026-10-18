@@ -19,7 +19,7 @@ const HOME_SECTORS = 5;
 const STEPS = [
   {
     title: 'Browse for free',
-    body: `Every company, investor, fund and person is open to search. Profiles show the first ${PREVIEW_LIMIT} rows of each section — rounds, investors, people — to everyone.`,
+    body: `Profiles, names, links and counts from public records are open to everyone. Rounds, deal values, fund terms and licensed data need a free account, which shows the first ${PREVIEW_LIMIT} rows of each section.`,
   },
   {
     title: 'Contribute a fact',
@@ -27,7 +27,7 @@ const STEPS = [
   },
   {
     title: 'Unlock everything',
-    body: `Once a contribution is accepted, every profile opens in full — complete funding histories, every investor, every person — for ${CONTRIBUTION_WINDOW_DAYS} days.`,
+    body: `Once a contribution is accepted, every profile opens in full — complete funding histories, fund terms, every investor and person — for ${CONTRIBUTION_WINDOW_DAYS} days.`,
   },
 ] as const;
 

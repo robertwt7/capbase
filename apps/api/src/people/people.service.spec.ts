@@ -5,6 +5,10 @@ import { PERSON_INDEX_MIN_ROLES, SITEMAP_PAGE_SIZE } from '@repo/api';
 
 import { PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
+import type { UsersService } from '../users/users.service';
+
+/** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
+const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
 
 function role(over: Record<string, unknown> = {}) {
   return {
@@ -70,7 +74,7 @@ describe('PeopleService', () => {
       entityIdentifier: { findMany: identifierFindMany },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    service = new PeopleService(prisma);
+    service = new PeopleService(prisma, unlockedUsers);
   });
 
   describe('findAll', () => {
@@ -313,6 +317,54 @@ describe('PeopleService', () => {
   // The SQL's row-level behaviour (one role out, two in, QID in, suppressed and
   // merged out) runs against Postgres in test/indexing.e2e-spec.ts; a mocked
   // $queryRaw can only check what the query says.
+  describe('the read gate', () => {
+    const as = (access: { unlocked: boolean; signedIn: boolean }) =>
+      new PeopleService((service as unknown as { prisma: PrismaService }).prisma, {
+        accessFor: async () => ({ ...access, unlockedUntil: null }),
+      } as unknown as UsersService);
+    const roles = () => [
+      role({ id: 'pr-p', externalSource: 'PARTNER', company: null, investor: { slug: 'gp', name: 'PARTNER-FIRM' } }),
+      role({ id: 'pr-1', externalSource: 'SEC_EDGAR', company: { slug: 'a', name: 'A', domain: 'a.com' } }),
+      role({ id: 'pr-2', externalSource: 'SEC_EDGAR', company: { slug: 'b', name: 'B', domain: 'b.com' } }),
+      role({ id: 'pr-3', externalSource: 'SEC_EDGAR', company: { slug: 'c', name: 'C', domain: 'c.com' } }),
+    ];
+
+    it('keeps partner people and partner roles out of a signed-out list', async () => {
+      count.mockResolvedValue(0);
+      findMany.mockResolvedValue([]);
+      await service.findAll();
+      const args = findMany.mock.calls[0]![0] as { where: Record<string, unknown>; include: { roles: { where: Record<string, unknown> } } };
+      expect(args.where).toMatchObject({ identifierOnly: false });
+      expect(args.include.roles.where).toMatchObject({
+        AND: [{ OR: [{ externalSource: null }, { externalSource: { not: 'PARTNER' } }] }],
+      });
+    });
+
+    it('previews public roles to a signed-out viewer, citing only those, counting all', async () => {
+      findFirst.mockResolvedValue(personRow({ identifierOnly: false, roles: roles() }));
+      const res = await as({ unlocked: false, signedIn: false }).findOne('jane-smith');
+
+      expect(res.roles.map((r) => r.id)).toEqual(['pr-1', 'pr-2']);
+      expect(res.roleCount).toBe(4);
+      expect(res.organisationCount).toBe(4);
+      expect(citationFindMany.mock.calls[0]![0]).toMatchObject({ where: { entityId: { in: ['pr-1', 'pr-2'] } } });
+      expect(JSON.stringify(res)).not.toContain('PARTNER-FIRM');
+    });
+
+    it('lets partner roles count toward a signed-in viewer’s preview', async () => {
+      findFirst.mockResolvedValue(personRow({ identifierOnly: false, roles: roles() }));
+      const res = await as({ unlocked: false, signedIn: true }).findOne('jane-smith');
+      expect(res.roles.map((r) => r.id)).toEqual(['pr-p', 'pr-1']);
+    });
+
+    it('returns a stub of a partner person to a signed-out viewer', async () => {
+      findFirst.mockResolvedValue(personRow({ identifierOnly: true, roles: roles() }));
+      const res = await as({ unlocked: false, signedIn: false }).findOne('jane-smith');
+      expect(res).toMatchObject({ name: 'Jane Smith', partnerOnly: true, roles: [], roleCount: 4, indexable: false });
+      expect(citationFindMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('listSlugs', () => {
     /** The raw SQL text with its parameters, from a tagged-template call —
      *  with a nested `Prisma.sql` fragment (the shared predicate) inlined. */
@@ -347,6 +399,8 @@ describe('PeopleService', () => {
       expect(text).toContain(`p."moderationStatus" = 'APPROVED'`);
       expect(text).toContain('p."mergedIntoId" IS NULL');
       expect(text).toContain('p."suppressedAt" IS NULL');
+      // A partner person is a noindex stub: never in the sitemap.
+      expect(text).toContain('NOT p."identifierOnly"');
     });
 
     it('requires PERSON_INDEX_MIN_ROLES public roles or a Wikidata identifier', async () => {

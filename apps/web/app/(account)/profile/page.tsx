@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { MyContribution, Role } from '@repo/api';
+import { CONTRIBUTION_WINDOW_DAYS, type MyContribution, type Role, type ViewerAccess } from '@repo/api';
 
 import { Badge, Button, Card } from '../../../components/ui';
 import { VerifyEmailBanner } from '../../../components/VerifyEmailBanner';
@@ -88,7 +88,7 @@ function AccessPanel({
   role,
   hasPending,
 }: {
-  access: { unlocked: boolean; unlockedUntil: string | null };
+  access: ViewerAccess;
   role: Role;
   hasPending: boolean;
 }) {
@@ -122,8 +122,8 @@ function AccessPanel({
           ? `Your access lapsed after ${formatDate(access.unlockedUntil)}. `
           : ''}
         {hasPending
-          ? 'Your submission is in the review queue — full profiles unlock for 30 days once it is approved.'
-          : 'Contribute anything — a new company, a round, a person — and once it is approved, every full profile unlocks for 30 days.'}
+          ? `Your submission is in the review queue — full profiles unlock for ${CONTRIBUTION_WINDOW_DAYS} days once it is approved.`
+          : `Contribute anything — a new company, a round, a person — and once it is approved, every full profile unlocks for ${CONTRIBUTION_WINDOW_DAYS} days.`}
       </p>
     </Card>
   );

@@ -4,6 +4,9 @@ import { notFound } from 'next/navigation';
 
 import { Citation } from '@/components/Citation';
 import { CommitmentAmount } from '@/components/CommitmentAmount';
+import { LockedSection } from '@/components/LockedSection';
+import { isMasked, Masked, SignInChip } from '@/components/Masked';
+import { StubProfile } from '@/components/StubProfile';
 import { Badge, EmptyState, SectionHeader } from '@/components/ui';
 import { getFund } from '@/lib/data';
 import { formatCount, formatDate, formatPct, formatPctRange, formatUsd } from '@/lib/format';
@@ -22,12 +25,16 @@ export async function generateMetadata({
   // response is a streamed 200, and this is the blocking <head> for bots.
   if (!detail) notFound();
   const { fund } = detail;
+  // A partner-only fund is a stub for a signed-out viewer: never indexed.
+  if (fund.partnerOnly) return { title: fund.name, robots: { index: false, follow: true } };
 
+  // Withheld facts are blank in the payload, and skipped here explicitly too.
+  const shown = (field: string) => !isMasked(fund, field);
   const facts = [
-    fund.strategy ? `${fund.strategy} fund` : 'Private fund',
+    shown('strategy') && fund.strategy ? `${fund.strategy} fund` : 'Private fund',
     `managed by ${fund.manager.name}`,
-    fund.vintageYear ? `vintage ${fund.vintageYear}` : null,
-    fund.closedUsd ? `${formatUsd(fund.closedUsd)} closed` : null,
+    shown('vintageYear') && fund.vintageYear ? `vintage ${fund.vintageYear}` : null,
+    shown('closedUsd') && fund.closedUsd ? `${formatUsd(fund.closedUsd)} closed` : null,
     detail.commitmentCount > 0 ? `${formatCount(detail.commitmentCount)} LP commitments` : null,
   ]
     .filter(Boolean)
@@ -49,7 +56,29 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
   const { slug } = await params;
   const detail = await getFund(slug);
   if (!detail) notFound();
-  const { fund, commitments, commitmentCount, metrics, citations } = detail;
+  const { fund, commitments, commitmentCount, metrics, metricCount, citations, access, termsHidden } = detail;
+  const path = `/funds/${slug}`;
+  if (fund.partnerOnly) {
+    return (
+      <StubProfile
+        kind="Fund"
+        name={fund.name}
+        next={path}
+        back={{ href: '/funds', label: 'All funds' }}
+        counts={[
+          { label: 'LP commitments', value: commitmentCount },
+          { label: 'Metrics', value: metricCount },
+        ].filter((c) => c.value > 0)}
+      />
+    );
+  }
+  const masked = (field: string) => isMasked(fund, field);
+  /** A fact, or the sign-in chip when the API withheld it from this viewer. */
+  const m = (field: string, node: React.ReactNode) => (
+    <Masked entity={fund} field={field} next={path}>
+      {node}
+    </Masked>
+  );
 
   const hasTerms = [
     fund.managementFeePct,
@@ -76,7 +105,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
             {fund.name}
             <Citation citations={citations} entityId={fund.id} />
           </h1>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             {fund.strategy && (
               <Badge variant="pill" mono>
                 {fund.strategy}
@@ -87,6 +116,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
                 {fund.status}
               </Badge>
             )}
+            {(masked('strategy') || masked('status')) && <SignInChip next={path} />}
           </div>
           <p className="mt-4 text-[15px] text-graphite-700">
             Managed by{' '}
@@ -100,9 +130,13 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
           </p>
         </div>
         <dl className="grid grid-cols-[repeat(3,auto)] gap-x-8 gap-y-4 max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
-          {fund.vintageYear ? <Fact label="Vintage" value={String(fund.vintageYear)} /> : null}
-          {fund.regionFocus && <Fact label="Region focus" value={fund.regionFocus} />}
-          {fund.hq && <Fact label="Location" value={fund.hq} />}
+          {fund.vintageYear || masked('vintageYear') ? (
+            <Fact label="Vintage" value={m('vintageYear', String(fund.vintageYear))} />
+          ) : null}
+          {(fund.regionFocus || masked('regionFocus')) && (
+            <Fact label="Region focus" value={m('regionFocus', fund.regionFocus)} />
+          )}
+          {(fund.hq || masked('hq')) && <Fact label="Location" value={m('hq', fund.hq)} />}
           {fund.launchDate && <Fact label="Launched" value={formatDate(fund.launchDate)} />}
           {fund.latestCloseDate && fund.latestCloseDate !== fund.finalCloseDate && (
             <Fact label="Latest close" value={formatDate(fund.latestCloseDate)} />
@@ -113,14 +147,32 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
 
       {/* "Undisclosed", never $0, for a figure no source reported. */}
       <section className="flex flex-wrap gap-x-16 gap-y-3.5 border-b border-line py-8">
-        <Metric label="Fund size" value={formatUsd(fund.closedUsd ?? null)} />
-        <Metric label="Target" value={formatUsd(fund.targetUsd ?? null)} />
+        <Metric label="Fund size" value={m('closedUsd', formatUsd(fund.closedUsd ?? null))} />
+        <Metric label="Target" value={m('targetUsd', formatUsd(fund.targetUsd ?? null))} />
         {fund.hardCapUsd ? <Metric label="Hard cap" value={formatUsd(fund.hardCapUsd)} /> : null}
         {/* Form ADV's figure is NAV at filing time, not capital raised. */}
-        {fund.grossAssetsUsd ? <Metric label="Gross assets" value={formatUsd(fund.grossAssetsUsd)} /> : null}
+        {fund.grossAssetsUsd || masked('grossAssetsUsd') ? (
+          <Metric label="Gross assets" value={m('grossAssetsUsd', formatUsd(fund.grossAssetsUsd ?? null))} />
+        ) : null}
         <Metric label="LP commitments" value={formatCount(commitmentCount)} />
       </section>
 
+      {/* A fund with no terms shows no block at all — never a false lock. */}
+      {termsHidden && (
+        <section className="py-8">
+          <SectionHeader title="Terms" size="md" className="mb-5 border-b-0 pb-0" />
+          <LockedSection
+            access={access}
+            next={path}
+            total={1}
+            shown={0}
+            noun="terms"
+            subject="The fund's terms and close dates"
+            placeholder="terms"
+            className="mt-0"
+          />
+        </section>
+      )}
       {hasTerms && (
         <section className="py-8">
           <SectionHeader title="Terms" size="md" className="mb-5 border-b-0 pb-0" />
@@ -140,9 +192,10 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
         </section>
       )}
 
-      {metrics.length > 0 && (
+      {metricCount > 0 && (
         <section className="border-t border-line py-8">
           <SectionHeader title="Metrics" size="md" className="mb-5 border-b-0 pb-0" />
+          {metrics.length > 0 && (
           <div
             className="overflow-hidden rounded-[10px] border border-line bg-surface"
             role="table"
@@ -182,6 +235,15 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
               </div>
             ))}
           </div>
+          )}
+          <LockedSection
+            access={access}
+            next={path}
+            total={metricCount}
+            shown={metrics.length}
+            noun="metrics"
+            placeholder="row"
+          />
         </section>
       )}
 
@@ -219,7 +281,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
               </li>
             ))}
           </ul>
-        ) : (
+        ) : commitmentCount > 0 ? null : (
           <EmptyState>
             <p>
               No limited partners recorded for {fund.name} yet. Public pension plans publish their
@@ -227,6 +289,14 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
             </p>
           </EmptyState>
         )}
+        <LockedSection
+          access={access}
+          next={path}
+          total={commitmentCount}
+          shown={commitments.length}
+          noun="LP commitments"
+          placeholder="row"
+        />
       </section>
 
       <div className="pb-16" />
@@ -234,7 +304,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <dt className="text-[11px] tracking-[0.04em] text-graphite-500 uppercase">{label}</dt>
@@ -243,7 +313,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase">

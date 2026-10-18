@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import request from 'supertest';
@@ -199,8 +200,14 @@ describe('Funds directory (e2e)', () => {
     expect(res.body.citations).toEqual([]);
   });
 
+  /** A contributor's session: the fund page is gated, and these tests read it
+   *  whole (the gate itself is covered by gate.e2e-spec.ts). */
+  const unlocked = () => ({
+    Authorization: `Bearer ${app.get(JwtService).sign({ sub: userId, email: `e2e-funds-${stamp}@test.dev`, role: 'CONTRIBUTOR', tv: 0 })}`,
+  });
+
   it('serves the fund page with terms, commitments and metrics', async () => {
-    const res = await request(app.getHttpServer()).get(`/funds/${pageSlug}`).expect(200);
+    const res = await request(app.getHttpServer()).get(`/funds/${pageSlug}`).set(unlocked()).expect(200);
     expect(res.body.fund).toMatchObject({
       slug: pageSlug,
       status: 'Closed',
@@ -228,8 +235,18 @@ describe('Funds directory (e2e)', () => {
     await request(app.getHttpServer()).get(`/funds/no-such-fund-${stamp}`).expect(404);
   });
 
+  it('withholds the terms, commitments and metrics from a signed-out viewer', async () => {
+    const res = await request(app.getHttpServer()).get(`/funds/${pageSlug}`).expect(200);
+    expect(res.body.fund.managementFeePct).toBeNull();
+    expect(res.body.termsHidden).toBe(true);
+    expect(res.body.commitments).toEqual([]);
+    expect(res.body.metrics).toEqual([]);
+    expect(res.body.commitmentCount).toBe(1);
+    expect(res.body.indexable).toBe(true);
+  });
+
   it('lists an LP’s commitments on its investor profile, linking the fund', async () => {
-    const res = await request(app.getHttpServer()).get(`/investors/${lpSlug}`).expect(200);
+    const res = await request(app.getHttpServer()).get(`/investors/${lpSlug}`).set(unlocked()).expect(200);
     expect(res.body.commitmentCount).toBe(1);
     expect(res.body.commitments[0]).toMatchObject({
       fund: { slug: pageSlug, name: `E2E Alpha Fund I ${stamp}` },
@@ -256,9 +273,10 @@ describe('Funds directory (e2e)', () => {
     await request(app.getHttpServer()).get('/funds/sitemap?page=-1').expect(400);
   });
 
-  it('filters the directory by status', async () => {
+  it('filters the directory by status (a signed-in filter: status is partner data)', async () => {
     const res = await request(app.getHttpServer())
       .get(`/funds?manager=${managerSlug}&status=Closed`)
+      .set(unlocked())
       .expect(200);
     expect(res.body.items.map((f: { slug: string }) => f.slug)).toEqual([pageSlug]);
     await request(app.getHttpServer()).get('/funds?status=bogus').expect(400);

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Revision } from '@repo/api';
 
+import { LockedSection } from '@/components/LockedSection';
 import { Button, EmptyState, Pagination, SectionHeader } from '@/components/ui';
 import { getCompanyDetail, getCompanyHistory } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
@@ -93,8 +94,9 @@ export default async function CompanyHistory({
         </h1>
         <p className="mt-3 max-w-[60ch] text-[15px] text-graphite-700">
           Every recorded change to {company.name}&apos;s profile — from moderated contributions and
-          from automated ingestion. Public and complete, so anyone can audit where a figure came
-          from.
+          from automated ingestion. Changes to the company&apos;s own fields from public records and
+          moderated edits are open to everyone; the rest of the timeline — rounds, people, licensed
+          data — opens with an approved contribution.
         </p>
       </header>
 
@@ -106,7 +108,7 @@ export default async function CompanyHistory({
           className="mb-5"
         />
 
-        {history.items.length === 0 ? (
+        {history.items.length === 0 && history.hiddenCount === 0 ? (
           <EmptyState
             action={
               <Button
@@ -124,12 +126,26 @@ export default async function CompanyHistory({
             been edited.
           </EmptyState>
         ) : (
-          <ol className="flex flex-col">
-            {history.items.map((item) => (
-              <Entry key={item.id} item={item} />
-            ))}
-          </ol>
+          history.items.length > 0 && (
+            <ol className="flex flex-col">
+              {history.items.map((item) => (
+                <Entry key={item.id} item={item} />
+              ))}
+            </ol>
+          )
         )}
+        {/* Signing in alone does not open these — the allowlist is the same for
+            every locked viewer — so the panel speaks of contributing. */}
+        <LockedSection
+          access={history.access}
+          next={`/companies/${company.slug}/history`}
+          contributeHref={`/companies/${company.slug}/contribute`}
+          total={history.total + history.hiddenCount}
+          shown={history.total}
+          noun="entries"
+          subject={`${formatCount(history.hiddenCount)} more ${history.hiddenCount === 1 ? 'entry' : 'entries'}`}
+          placeholder="row"
+        />
 
         <Pagination
           page={history.page}

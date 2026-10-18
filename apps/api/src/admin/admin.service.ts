@@ -87,6 +87,17 @@ function investorDataFromChanges(changes: InvestorEditFields): Prisma.InvestorUp
 
 /** Company update payload from a proposal diff: BigInt money conversions, all
     other whitelisted fields verbatim. */
+/** The `partnerFields` update after a human edit of `fields`: those columns
+    now hold a moderated value, not the partner's. Empty when none was marked. */
+function withoutPartnerFields(
+  current: readonly string[] | null | undefined,
+  fields: readonly string[],
+): { partnerFields?: string[] } {
+  const marked = current ?? [];
+  const kept = marked.filter((f) => !fields.includes(f));
+  return kept.length === marked.length ? {} : { partnerFields: kept };
+}
+
 function companyDataFromChanges(changes: CompanyEditFields) {
   const { totalRaisedUsd, lastValuationUsd, ...rest } = changes;
   return {
@@ -630,14 +641,19 @@ export class AdminService {
       // Captured inside the transaction, before the update — this is the whole
       // point: applying the diff destroys the values it replaces.
       const before = pickCurrent(proposal.company, changes);
+      const fields = Object.keys(changes) as (keyof CompanyEditFields)[];
 
       await tx.company.update({
         where: { id: proposal.companyId },
-        data: companyDataFromChanges(changes),
+        data: {
+          ...companyDataFromChanges(changes),
+          // A human value replaced whatever the partner wrote there. (The
+          // history still withholds the field from locked viewers: its earlier
+          // revisions carry the partner's value.)
+          ...withoutPartnerFields(proposal.company.partnerFields, fields),
+        },
       });
       await tx.changeProposal.update({ where: { id }, data: { moderationStatus: 'APPROVED' } });
-
-      const fields = Object.keys(changes) as (keyof CompanyEditFields)[];
 
       await tx.revision.createMany({
         data: fields.map((field) => ({
@@ -696,7 +712,10 @@ export class AdminService {
       const previous = pickInvestorFields(proposal.investor, changes);
       await tx.investor.update({
         where: { id: proposal.investorId },
-        data: investorDataFromChanges(changes),
+        data: {
+          ...investorDataFromChanges(changes),
+          ...withoutPartnerFields(proposal.investor.partnerFields, Object.keys(changes)),
+        },
       });
       await tx.investorChangeProposal.update({
         where: { id },

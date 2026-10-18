@@ -3,6 +3,7 @@
 // interface in `company.ts` (also called `Person`) is the SAME role row seen
 // from a company profile, and keeps that name because a Citation anchors to it.
 
+import type { GateAccess } from './contributions';
 import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
 
@@ -61,8 +62,16 @@ export interface PersonDetailResponse extends PersonSummary {
   identifiers: EntityIdentifierRef[];
   citations: Citation[];
   /** Whether search engines should index this profile (`indexing.ts`). The
-   *  sitemap lists exactly the people for whom this is true. */
+   *  sitemap lists exactly the people for whom this is true. Never for a
+   *  partner person. */
   indexable: boolean;
+  /** Distinct companies and firms across every public role — `roles` is
+   *  capped by the gate, so the page cannot count them itself. */
+  organisationCount: number;
+  /** Set (true) only for a signed-out viewer of a person only the partner
+   *  names: the payload is a stub — name and counts. */
+  partnerOnly?: boolean;
+  access: GateAccess;
 }
 
 /**

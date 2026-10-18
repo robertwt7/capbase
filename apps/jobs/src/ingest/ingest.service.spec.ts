@@ -185,6 +185,9 @@ function mockPrisma(
       aggregate: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({ _sum: { amountUsd: null } })),
     },
     roundInvestor: {
+      findMany: jest.fn<(args: unknown) => Promise<{ investorId: string | null; externalSource: string | null }[]>>(
+        async () => [],
+      ),
       deleteMany: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({ count: 0 })),
       createMany: jest.fn<(args: { data: Record<string, unknown>[] }) => Promise<unknown>>(async () => ({})),
     },
@@ -2153,10 +2156,12 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
     await serviceFor(prisma, [{ records: [r] }]).run(RUN);
 
     expect(prisma.roundInvestor.deleteMany.mock.calls[0]![0]).toEqual({
-      where: { roundId: 'r-D1', investorId: { in: ['i-gp'] } },
+      where: { roundId: 'r-D1', investorId: { in: ['i-gp'] }, externalSource: 'PARTNER' },
     });
     expect(prisma.roundInvestor.createMany.mock.calls[0]![0]).toEqual({
-      data: [{ roundId: 'r-D1', investorId: 'i-gp', name: 'Granite Peak Partners', lead: true }],
+      data: [
+        { roundId: 'r-D1', investorId: 'i-gp', name: 'Granite Peak Partners', lead: true, externalSource: 'PARTNER' },
+      ],
     });
     // The re-run issues the same delete-then-create, so nothing accumulates.
     expect(prisma.roundInvestor.createMany.mock.calls[1]![0]).toEqual(
@@ -2323,6 +2328,8 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
           amountUsd: 8_000_000n,
           currency: 'USD',
           amountLocal: null,
+          // Only the columns whose value moved become the partner's.
+          partnerFields: ['name', 'date', 'amountUsd'],
         },
       });
       const revs = revisionsFrom(prisma).filter((r) => r.entityType === 'round');
@@ -2419,5 +2426,245 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
       const lowered = lower.company.update.mock.calls.map((c) => c[0] as unknown as { data: Record<string, unknown> });
       expect(lowered.some((u) => 'totalRaisedUsd' in u.data)).toBe(false);
     });
+  });
+});
+
+describe('IngestService partner provenance', () => {
+  function streamSource(batches: SourceBatch[]): IngestionSource {
+    return {
+      name: 'PARTNER',
+      fetch: async () => [],
+      stream: async function* () {
+        for (const b of batches) yield b;
+      },
+    };
+  }
+  const partnerService = (prisma: ReturnType<typeof mockPrisma>, batches: SourceBatch[]) =>
+    new IngestService(prisma as unknown as PrismaService, [streamSource(batches)], config());
+  const pid = (value: string) => ({ scheme: 'PARTNER' as const, value });
+  const updateData = (calls: { 0: unknown }[]) =>
+    calls.map((c) => (c[0] as { data: Record<string, unknown> }).data);
+
+  it('a partner create is partner-only, with every stated column marked (never the name)', async () => {
+    const prisma = mockPrisma();
+    await partnerService(prisma, [
+      {
+        investors: [{ externalId: '501', name: 'Granite Peak', type: 'Venture', hq: 'Oslo, Norway', identifiers: [pid('501')] }],
+        records: [
+          record({
+            source: 'PARTNER',
+            company: { ...record().company, description: 'From the partner.', hq: 'Oslo, Norway' },
+          }),
+        ],
+      },
+    ]).run(RUN);
+
+    const firm = prisma.investor.create.mock.calls[0]![0].data;
+    expect(firm).toMatchObject({ partnerOnly: true });
+    expect([...(firm.partnerFields as string[])].sort()).toEqual(['hq', 'type']);
+
+    const company = prisma.company.create.mock.calls[0]![0].data;
+    expect(company.partnerOnly).toBe(true);
+    expect(company.partnerFields).toEqual(expect.arrayContaining(['description', 'hq', 'stage', 'totalRaisedUsd']));
+    expect(company.partnerFields).not.toContain('name');
+  });
+
+  it('a public create carries no provenance at all', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [record()]).run(RUN);
+    const company = prisma.company.create.mock.calls[0]![0].data;
+    expect(company).not.toHaveProperty('partnerOnly');
+    expect(company).not.toHaveProperty('partnerFields');
+  });
+
+  it('a partner fund create marks its terms', async () => {
+    const prisma = mockPrisma([], [investorRow({ id: 'i-gp', externalSource: 'PARTNER', externalId: '501' })]);
+    await partnerService(prisma, [
+      {
+        funds: [
+          {
+            externalId: 'F1',
+            name: 'Granite Peak Fund II',
+            manager: { externalId: '501', identifier: pid('501') },
+            status: 'Closed',
+            managementFeePct: 2,
+          },
+        ],
+      },
+    ]).run(RUN);
+    const fund = prisma.fund.create.mock.calls[0]![0].data;
+    expect(fund.partnerOnly).toBe(true);
+    expect([...(fund.partnerFields as string[])].sort()).toEqual(['managementFeePct', 'status']);
+  });
+
+  it('a partner enrichment appends the columns it filled, keeping earlier marks', async () => {
+    const prisma = mockPrisma([companyRow({ domain: 'acme.example', partnerFields: ['websiteUrl'] })]);
+    await partnerService(prisma, [
+      {
+        records: [
+          record({
+            source: 'PARTNER',
+            company: {
+              ...record().company,
+              domain: 'acme.example',
+              description: 'The partner wrote this.',
+              primarySector: 'Technology',
+              foundedYear: 0,
+            },
+          }),
+        ],
+      },
+    ]).run(RUN);
+    const [data] = updateData(prisma.company.update.mock.calls);
+    expect(data).toMatchObject({ description: 'The partner wrote this.', primarySector: 'Technology' });
+    expect(data!.partnerFields).toEqual(['websiteUrl', 'primarySector', 'description']);
+    expect(data).not.toHaveProperty('partnerOnly');
+    // The marks are provenance, not facts: no revision for them.
+    expect(revisionsFrom(prisma).map((r) => r.field)).not.toContain('partnerFields');
+  });
+
+  it('a partner enrichment of a firm or a fund appends what it filled', async () => {
+    const prisma = mockPrisma(
+      [],
+      [investorRow({ id: 'i-adv', crdNumber: '123', externalSource: 'SEC_ADV', externalId: '123' })],
+      [fundRow({ id: 'f-adv', managerId: 'i-adv', name: 'Big Fund I, L.P.', externalSource: 'SEC_ADV_FUNDS', externalId: '805-1' })],
+      [{ scheme: 'PARTNER', value: '501', entityType: 'investor', entityId: 'i-adv', source: 'PARTNER' }],
+    );
+    await partnerService(prisma, [
+      {
+        investors: [{ externalId: '501', name: 'Big Fund', type: 'Venture', description: 'Partner prose.', identifiers: [pid('501')] }],
+        funds: [
+          {
+            externalId: 'F9',
+            name: 'Big Fund I, L.P.',
+            manager: { externalId: '501', identifier: pid('501') },
+            status: 'Closed',
+            carriedInterestPct: 20,
+          },
+        ],
+      },
+    ]).run(RUN);
+    const [firm] = updateData(prisma.investor.update.mock.calls);
+    expect(firm).toMatchObject({ description: 'Partner prose.', partnerFields: ['description'] });
+    const [fund] = updateData(prisma.fund.update.mock.calls);
+    expect(fund).toMatchObject({ status: 'Closed', carriedInterestPct: 20 });
+    expect([...(fund!.partnerFields as string[])].sort()).toEqual(['carriedInterestPct', 'status']);
+  });
+
+  it('a public match makes a partner-only company public record, even with nothing to fill', async () => {
+    const prisma = mockPrisma([
+      companyRow({
+        id: 'c-p',
+        domain: 'acme.com',
+        founded: 2021,
+        oneLiner: 'Partner one-liner.',
+        description: 'Partner prose.',
+        externalSource: 'PARTNER',
+        externalId: 'PC1',
+        partnerOnly: true,
+        partnerFields: ['description', 'oneLiner'],
+      }),
+    ]);
+    await serviceWith(prisma, [
+      record({ source: 'WIKIDATA', companyExternalId: 'Q1', company: { ...record().company, domain: 'acme.com' } }),
+    ]).run(RUN);
+    const [data] = updateData(prisma.company.update.mock.calls);
+    // Public record now — but the partner's own columns stay marked.
+    expect(data).toEqual({ partnerOnly: false });
+  });
+
+  it('a public match makes a partner-only firm public record', async () => {
+    const prisma = mockPrisma([], [
+      investorRow({ id: 'i-p', name: 'Next Coast Ventures', externalSource: 'PARTNER', externalId: '501', partnerOnly: true }),
+    ]);
+    await new IngestService(prisma as unknown as PrismaService, [stubSource([], [firm({ domain: null, websiteUrl: null })])], config()).run(RUN);
+    const [data] = updateData(prisma.investor.update.mock.calls);
+    expect(data).toMatchObject({ partnerOnly: false, crdNumber: '123456' });
+  });
+
+  it('a public holding resolving a partner-only firm makes it public record, once', async () => {
+    const prisma = mockPrisma([], [
+      investorRow({ id: 'i-p', name: 'Granite Peak', externalSource: 'PARTNER', externalId: '501', partnerOnly: true }),
+    ]);
+    const holding = { externalId: 'h1', name: 'Granite Peak', type: 'Venture' as const, firstRound: 'Seed', rounds: 1 };
+    await serviceWith(prisma, [
+      record({ investors: [holding] }),
+      record({ companyExternalId: 'X2', company: { ...record().company, name: 'Other Co' }, investors: [{ ...holding, externalId: 'h2' }] }),
+    ]).run(RUN);
+    expect(prisma.investor.update.mock.calls.map((c) => c[0])).toEqual([
+      { where: { id: 'i-p' }, data: { partnerOnly: false } },
+    ]);
+  });
+
+  it('a public own-key update unmarks the partner columns it overwrote', async () => {
+    const prisma = mockPrisma([
+      companyRow({ partnerFields: ['totalRaisedUsd', 'description'], totalRaisedUsd: 9_000_000n }),
+    ]);
+    await serviceWith(prisma, [
+      record({ source: 'SEC_EDGAR', companyExternalId: '0001', company: { ...record().company, totalRaisedUsd: 7_500_000 } }),
+    ]).run(RUN);
+    const [data] = updateData(prisma.company.update.mock.calls);
+    expect(data!.partnerFields).toEqual(['description']);
+  });
+
+  it('a partner raise of a company total marks totalRaisedUsd', async () => {
+    const prisma = mockPrisma([companyRow({ domain: 'acme.example', totalRaisedUsd: 1_000_000n })]);
+    prisma.fundingRound.aggregate.mockResolvedValue({ _sum: { amountUsd: 8_000_000n } });
+    await partnerService(prisma, [
+      {
+        records: [
+          record({
+            source: 'PARTNER',
+            roundDedup: 'enrich',
+            company: { ...record().company, domain: 'acme.example' },
+            rounds: [{ externalId: 'D1', name: 'Series A', date: '2022-01-10', amountUsd: 8_000_000 }],
+          }),
+        ],
+      },
+    ]).run(RUN);
+    const raised = updateData(prisma.company.update.mock.calls).find((d) => 'totalRaisedUsd' in d);
+    expect(raised).toMatchObject({ totalRaisedUsd: 8_000_000n, partnerFields: ['totalRaisedUsd'] });
+  });
+
+  it('never replaces or duplicates a round investor another source already named', async () => {
+    const prisma = mockPrisma([], [
+      investorRow({ id: 'i-pub', name: 'Public VC', externalSource: 'PARTNER', externalId: '501' }),
+      investorRow({ id: 'i-new', name: 'Partner VC', externalSource: 'PARTNER', externalId: '502' }),
+    ]);
+    // A Form D / contributed row already names i-pub on this round.
+    prisma.roundInvestor.findMany.mockResolvedValue([{ investorId: 'i-pub', externalSource: null }]);
+    await partnerService(prisma, [
+      {
+        records: [
+          record({
+            source: 'PARTNER',
+            rounds: [
+              {
+                externalId: 'D1',
+                name: 'Series A',
+                date: '2022-01-10',
+                amountUsd: 5_000_000,
+                investors: [{ externalId: '501' }, { externalId: '502' }],
+              },
+            ],
+          }),
+        ],
+      },
+    ]).run(RUN);
+    // Only its own rows are deleted…
+    expect(prisma.roundInvestor.deleteMany.mock.calls[0]![0]).toEqual({
+      where: { roundId: 'r-D1', investorId: { in: ['i-pub', 'i-new'] }, externalSource: 'PARTNER' },
+    });
+    // …and the firm someone else named is not written again.
+    expect(prisma.roundInvestor.createMany.mock.calls[0]![0].data.map((d) => d.investorId)).toEqual(['i-new']);
+  });
+
+  it('a public re-write of its own round unmarks the partner corrections', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [
+      record({ rounds: [{ externalId: 'R1', name: 'Seed', date: '2022-01-10', amountUsd: 1 }] }),
+    ]).run(RUN);
+    const sql = prisma.$executeRaw.mock.calls.map((c) => (c[0] as unknown as string[]).join('?'));
+    expect(sql.some((q) => q.includes('"partnerFields" &&'))).toBe(true);
   });
 });

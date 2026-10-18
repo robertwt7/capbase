@@ -6,7 +6,7 @@ import {
   type IdentifiableType,
   type InvestorType,
 } from '@repo/api';
-import { toJsonValue } from '@repo/db';
+import { Prisma, toJsonValue } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -119,6 +119,8 @@ interface ExistingRound {
   currency: string;
   amountLocal: bigint | null;
   externalSource: string | null;
+  /** Columns the partner already corrected on this round. */
+  partnerFields: string[];
 }
 
 /** The same lookup tables for investor firms. */
@@ -136,6 +138,9 @@ interface InvestorIndex {
   types: Map<string, InvestorType>;
   /** investor id → display name, for RoundInvestor rows, which carry one. */
   names: Map<string, string>;
+  /** Firms that exist only because of the partner (Investor.partnerOnly). A
+   *  public source resolving one makes it public record, without a read. */
+  partnerOnly: Set<string>;
   slugs: Set<string>;
   identifiers: IdentifierCounts;
 }
@@ -232,6 +237,19 @@ const INDEX_PAGE = 20_000;
  * another source's data on.
  */
 const SOURCE_RECORD_SCHEMES = new Set<string>(['PARTNER']);
+
+/**
+ * Sources whose writes are partner provenance. A row one of them creates is
+ * `partnerOnly`; a column one of them writes is listed in `partnerFields`; the
+ * API read gate hides both from signed-out viewers. Any other source matching a
+ * partner-only row makes it public record (`partnerOnly: false`), and any other
+ * source overwriting a partner column takes it out of `partnerFields`. A
+ * partner re-run never removes a mark: it fails closed.
+ */
+const PARTNER_SOURCES = new Set<string>(['PARTNER']);
+
+/** The tables that carry `partnerFields`. */
+type PartnerTable = 'Company' | 'Investor' | 'Fund' | 'FundingRound';
 
 /** Whether a row's provenance key belongs in this run's `byKey` — a record
  *  source's own keys only matter to that source (the scheme is named for it). */
@@ -787,6 +805,7 @@ export class IngestService {
       byName: new Map(),
       types: new Map(),
       names: new Map(),
+      partnerOnly: new Set(),
       slugs: new Set(),
       identifiers: emptyCounts(),
     };
@@ -804,6 +823,7 @@ export class IngestService {
             domain: true,
             externalSource: true,
             externalId: true,
+            partnerOnly: true,
           },
         }),
       (rows) => {
@@ -811,6 +831,7 @@ export class IngestService {
           index.slugs.add(i.slug);
           index.types.set(i.id, i.type as InvestorType);
           index.names.set(i.id, i.name);
+          if (i.partnerOnly) index.partnerOnly.add(i.id);
           const target = survivorOf(i.id);
           if (!target) continue;
           if (i.externalSource && i.externalId && wantKey(i.externalSource, recordSchemes)) {
@@ -974,10 +995,12 @@ export class IngestService {
       // Our own row: the source is authoritative for the fields it publishes —
       // but only those. Writing its blanks would erase what the *other* source
       // contributed (an ADV re-run must not wipe a Form D vintage).
+      const written = present(facts);
       await this.prisma.fund.update({
         where: { id: ownId },
-        data: { name: fund.name, ...present(facts) },
+        data: { name: fund.name, ...written },
       });
+      await this.syncPartnerFields('Fund', ownId, source, Object.keys(written));
       await this.refreshFundSize(ownId);
       return 'written';
     }
@@ -1001,7 +1024,7 @@ export class IngestService {
           : undefined
         : fundByName(index, norm);
     if (matchId) {
-      await this.enrichFund(matchId, facts);
+      await this.enrichFund(matchId, facts, source);
       await this.refreshFundSize(matchId);
       // Deliberately NOT registered under this source's key: an own-key
       // update renames the row, and an enrichment must never rename a fund
@@ -1018,6 +1041,7 @@ export class IngestService {
         name: fund.name,
         ...facts,
         sizeUsd: (facts.grossAssetsUsd as bigint | null) ?? (facts.closedUsd as bigint | null),
+        ...createdProvenance(source, Object.keys(present(facts))),
         externalSource: source,
         externalId: fund.externalId,
         moderationStatus: 'APPROVED',
@@ -1042,18 +1066,12 @@ export class IngestService {
   /** Fill blank columns on a fund the other source already named. Never
    *  overwrites — the two SEC sources publish disjoint facts about one fund,
    *  and a name match is not licence to replace a value already recorded. */
-  private async enrichFund(fundId: string, facts: Record<string, unknown>): Promise<void> {
+  private async enrichFund(fundId: string, facts: Record<string, unknown>, source: string): Promise<void> {
     const row = await this.prisma.fund.findUnique({ where: { id: fundId } });
     if (!row) return;
 
-    const current = row as unknown as Record<string, unknown>;
-    const data: Record<string, unknown> = {};
-    for (const [field, value] of Object.entries(facts)) {
-      if (value !== null && value !== undefined && (current[field] === null || current[field] === undefined)) {
-        data[field] = value;
-      }
-    }
-
+    const data = fillBlanks(row as unknown as Record<string, unknown>, facts);
+    Object.assign(data, provenanceUpdate(row, source, Object.keys(data)));
     if (Object.keys(data).length > 0) {
       await this.prisma.fund.update({ where: { id: fundId }, data });
     }
@@ -1134,6 +1152,12 @@ export class IngestService {
         });
         roundId = written?.id;
         roundsChanged = true;
+        // A public source re-writing its own round undoes any correction the
+        // partner made to it. A partner round is partner data as a whole
+        // (externalSource), so it needs no field marks.
+        if (roundId && !PARTNER_SOURCES.has(r.source)) {
+          await this.syncPartnerFields('FundingRound', roundId, r.source, ROUND_OWN_KEY_FIELDS);
+        }
       }
       if (roundId && round.investors?.length) {
         await this.writeRoundInvestors(roundId, round.investors, r.source, investorIndex);
@@ -1245,6 +1269,7 @@ export class IngestService {
         amountLocal: true,
         externalSource: true,
         externalId: true,
+        partnerFields: true,
       },
     });
     const others: ExistingRound[] = [];
@@ -1263,6 +1288,7 @@ export class IngestService {
         currency: r.currency,
         amountLocal: r.amountLocal,
         externalSource: r.externalSource,
+        partnerFields: r.partnerFields,
       });
     }
     return { others, ownKeys };
@@ -1308,9 +1334,15 @@ export class IngestService {
       currency: existing.currency,
       amountLocal: existing.amountLocal,
     };
-    const update = this.prisma.fundingRound.update({ where: { id: existing.id }, data });
-    const revisions = Object.keys(data)
-      .filter((field) => !sameValue(before[field], data[field]))
+    // The columns whose value actually moved: the timeline records them, and
+    // for the partner they are what it now owns on this round.
+    const moved = Object.keys(data).filter((field) => !sameValue(before[field], data[field]));
+    const marks = PARTNER_SOURCES.has(source) ? addPartnerFields(existing.partnerFields, moved) : undefined;
+    const update = this.prisma.fundingRound.update({
+      where: { id: existing.id },
+      data: marks ? { ...data, partnerFields: marks } : data,
+    });
+    const revisions = moved
       .map((field) => ({
         companyId,
         entityType: 'round',
@@ -1333,14 +1365,18 @@ export class IngestService {
     if (data.name) existing.name = data.name as string;
     if (data.date) existing.date = data.date as Date;
     if (data.amountUsd != null) existing.amountUsd = Number(data.amountUsd);
+    if (marks) existing.partnerFields = marks;
     this.stats.roundsEnriched++;
     return true;
   }
 
   /**
-   * Replace this round's RoundInvestor rows for the firms the source names.
-   * Delete-then-create on exactly those firm ids, so a re-run is idempotent
-   * and a row a contributor added (no investorId, or another firm) survives.
+   * Replace THIS SOURCE's RoundInvestor rows for the firms it names on a round.
+   * Delete-then-create on exactly those firm ids and this source, so a re-run
+   * is idempotent, and a row another source or a contributor wrote survives —
+   * including one for the same firm: a firm already named on the round by
+   * someone else is left to that row, never duplicated or replaced (the
+   * partner naming a public investor must not make it partner data).
    */
   private async writeRoundInvestors(
     roundId: string,
@@ -1358,15 +1394,30 @@ export class IngestService {
       byFirm.set(id, (byFirm.get(id) ?? false) || !!ref.lead);
     }
     if (byFirm.size === 0) return;
-    const ids = [...byFirm.keys()];
+    const named = [...byFirm.keys()];
+    const heldElsewhere = new Set(
+      (
+        await this.prisma.roundInvestor.findMany({
+          where: { roundId, investorId: { in: named } },
+          select: { investorId: true, externalSource: true },
+        })
+      )
+        .filter((row) => row.externalSource !== source)
+        .map((row) => row.investorId),
+    );
+    const ids = named.filter((id) => !heldElsewhere.has(id));
+    for (const id of ids) await this.claimInvestor(id, source, index);
     await this.prisma.$transaction([
-      this.prisma.roundInvestor.deleteMany({ where: { roundId, investorId: { in: ids } } }),
+      this.prisma.roundInvestor.deleteMany({
+        where: { roundId, investorId: { in: named }, externalSource: source },
+      }),
       this.prisma.roundInvestor.createMany({
         data: ids.map((investorId) => ({
           roundId,
           investorId,
           name: index.names.get(investorId) ?? '',
           lead: byFirm.get(investorId) ?? false,
+          externalSource: source,
         })),
       }),
     ]);
@@ -1560,7 +1611,10 @@ export class IngestService {
       (key ? index.byKey.get(key) : undefined) ??
       byRef ??
       (i.investorIdentifier ? undefined : index.byName.get(norm));
-    if (known) return { id: known, type: index.types.get(known) ?? null };
+    if (known) {
+      await this.claimInvestor(known, source, index);
+      return { id: known, type: index.types.get(known) ?? null };
+    }
 
     // The source publishes this edge only against a firm we already know and
     // have typed from source structure. Minting one here would be inventing an
@@ -1573,6 +1627,7 @@ export class IngestService {
         slug,
         name: i.name,
         type: i.type,
+        ...createdProvenance(source, ['type']),
         externalSource: i.investorExternalId ? source : null,
         externalId: i.investorExternalId ?? null,
         moderationStatus: 'APPROVED',
@@ -1580,6 +1635,7 @@ export class IngestService {
       select: { id: true },
     });
 
+    if (PARTNER_SOURCES.has(source)) index.partnerOnly.add(created.id);
     if (key) index.byKey.set(key, created.id);
     index.byName.set(norm, created.id);
     index.types.set(created.id, i.type);
@@ -1621,6 +1677,14 @@ export class IngestService {
         where: { id: ownId },
         data: { name: firm.name, type: firm.type, ...facts },
       });
+      // Every fact column is written (nulls too), so a public source's update
+      // replaces all of them; the partner marks only what it actually stated.
+      await this.syncPartnerFields(
+        'Investor',
+        ownId,
+        source,
+        PARTNER_SOURCES.has(source) ? ['type', ...Object.keys(present(facts))] : ['type', ...Object.keys(facts)],
+      );
       await this.writeIdentifiers('investor', ownId, source, firm.identifiers, domain, index);
       await this.writeFirmPeople(firm, source, ownId, personIndex);
       return;
@@ -1636,7 +1700,7 @@ export class IngestService {
       (domain ? index.byDomain.get(domain) : undefined) ??
       index.byName.get(normalizeInvestorName(firm.name));
     if (matchId) {
-      await this.enrichInvestor(matchId, facts);
+      await this.enrichInvestor(matchId, facts, source, index);
       index.byKey.set(key, matchId);
       await this.writeIdentifiers('investor', matchId, source, firm.identifiers, domain, index);
       await this.writeFirmPeople(firm, source, matchId, personIndex);
@@ -1650,6 +1714,7 @@ export class IngestService {
         name: firm.name,
         type: firm.type,
         ...facts,
+        ...createdProvenance(source, ['type', ...Object.keys(present(facts))]),
         externalSource: source,
         externalId: firm.externalId,
         moderationStatus: 'APPROVED',
@@ -1657,6 +1722,7 @@ export class IngestService {
       select: { id: true },
     });
 
+    if (PARTNER_SOURCES.has(source)) index.partnerOnly.add(created.id);
     index.byKey.set(key, created.id);
     if (domain && !index.byDomain.has(domain)) index.byDomain.set(domain, created.id);
     const norm = normalizeInvestorName(firm.name);
@@ -1685,20 +1751,51 @@ export class IngestService {
   private async enrichInvestor(
     investorId: string,
     facts: Record<string, unknown>,
+    source: string,
+    index: InvestorIndex,
   ): Promise<void> {
     const row = await this.prisma.investor.findUnique({ where: { id: investorId } });
     if (!row) return;
 
-    const current = row as unknown as Record<string, unknown>;
-    const data: Record<string, unknown> = {};
-    for (const [field, value] of Object.entries(facts)) {
-      if (value !== null && value !== undefined && (current[field] === null || current[field] === undefined)) {
-        data[field] = value;
-      }
-    }
-
+    const data = fillBlanks(row as unknown as Record<string, unknown>, facts);
+    Object.assign(data, provenanceUpdate(row, source, Object.keys(data)));
     if (Object.keys(data).length > 0) {
       await this.prisma.investor.update({ where: { id: investorId }, data });
+    }
+    if (data.partnerOnly === false) index.partnerOnly.delete(investorId);
+  }
+
+  /** A public source just resolved a partner-only firm (a holding, a round
+   *  investor): the firm is public record from now on. No read — the index
+   *  knows which firms are partner-only. */
+  private async claimInvestor(investorId: string, source: string, index: InvestorIndex): Promise<void> {
+    if (PARTNER_SOURCES.has(source) || !index.partnerOnly.has(investorId)) return;
+    await this.prisma.investor.update({ where: { id: investorId }, data: { partnerOnly: false } });
+    index.partnerOnly.delete(investorId);
+  }
+
+  /**
+   * Keep a row's `partnerFields` in step with a write of `fields` by `source`,
+   * for the write paths that never read the row back: the partner adds what it
+   * wrote, any other source removes what it overwrote. One statement, guarded
+   * so it writes nothing in the common case (a public source, no marks).
+   */
+  private async syncPartnerFields(
+    table: PartnerTable,
+    id: string,
+    source: string,
+    fields: string[],
+  ): Promise<void> {
+    if (fields.length === 0) return;
+    const t = Prisma.raw(`"${table}"`);
+    if (PARTNER_SOURCES.has(source)) {
+      await this.prisma.$executeRaw`
+        UPDATE ${t} SET "partnerFields" = ARRAY(SELECT DISTINCT unnest("partnerFields" || ${fields}::text[]))
+         WHERE id = ${id} AND NOT ("partnerFields" @> ${fields}::text[])`;
+    } else {
+      await this.prisma.$executeRaw`
+        UPDATE ${t} SET "partnerFields" = ARRAY(SELECT f FROM unnest("partnerFields") f WHERE f <> ALL(${fields}::text[]))
+         WHERE id = ${id} AND "partnerFields" && ${fields}::text[]`;
     }
   }
 
@@ -1888,6 +1985,7 @@ export class IngestService {
         status: c.status ?? 'Private',
         stage: c.stage,
         totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
+        ...createdProvenance(r.source, suppliedCompanyFields(c)),
         externalSource: r.source,
         externalId: r.companyExternalId,
         moderationStatus: 'APPROVED',
@@ -1945,11 +2043,11 @@ export class IngestService {
     data: Record<string, unknown>,
     known?: Record<string, unknown>,
   ): Promise<void> {
-    if (Object.keys(data).length === 0) return;
-
-    const update = { where: { id: companyId }, data };
-    if (!this.recordRevisions) {
-      await this.prisma.company.update(update);
+    const fields = Object.keys(data);
+    if (!known && fields.length === 0) return;
+    if (!known && !this.recordRevisions) {
+      await this.prisma.company.update({ where: { id: companyId }, data });
+      await this.syncPartnerFields('Company', companyId, source, fields);
       return;
     }
 
@@ -1960,6 +2058,17 @@ export class IngestService {
         unknown
       > | null) ??
       {};
+    // Provenance columns ride along with the update but never become
+    // revisions: they describe the row, they are not facts on its timeline. A
+    // match with nothing to fill still matters here — a public source landing
+    // on a partner-only row makes it public record.
+    const provenance = provenanceUpdate(before, source, fields);
+    if (fields.length === 0 && Object.keys(provenance).length === 0) return;
+    const update = { where: { id: companyId }, data: { ...data, ...provenance } };
+    if (!this.recordRevisions) {
+      await this.prisma.company.update(update);
+      return;
+    }
 
     const revisions = Object.keys(data)
       .filter((field) => !sameValue(before[field], data[field]))
@@ -2239,4 +2348,89 @@ function isoDate(value: string | null | undefined): Date | null {
 /** Drop the nulls, so an update writes only what the source actually reported. */
 function present(facts: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(facts).filter(([, v]) => v !== null && v !== undefined));
+}
+
+/** The facts a row is blank on, to fill without overwriting anything. */
+function fillBlanks(current: Record<string, unknown>, facts: Record<string, unknown>): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(facts)) {
+    if (value !== null && value !== undefined && (current[field] === null || current[field] === undefined)) {
+      data[field] = value;
+    }
+  }
+  return data;
+}
+
+/** The columns a round's own-key upsert rewrites. */
+const ROUND_OWN_KEY_FIELDS = ['amountUsd', 'date', 'kind', 'currency', 'amountLocal'];
+
+/** `current` plus `add`, or undefined when that adds nothing. */
+export function addPartnerFields(
+  current: readonly string[] | null | undefined,
+  add: readonly string[],
+): string[] | undefined {
+  const have = current ?? [];
+  const extra = [...new Set(add)].filter((f) => !have.includes(f));
+  return extra.length > 0 ? [...have, ...extra] : undefined;
+}
+
+/**
+ * How a write of `fields` by `source` changes a row's provenance, given the row
+ * as read before the write: the partner marks the columns it wrote (never the
+ * name, which is the entity's identity rather than a fact); any other source
+ * unmarks the columns it overwrote and, by landing on the row at all, makes a
+ * partner-only row public record. `{}` when nothing changes.
+ */
+export function provenanceUpdate(
+  row: { partnerFields?: string[] | null; partnerOnly?: boolean | null } | Record<string, unknown>,
+  source: string,
+  fields: readonly string[],
+): { partnerFields?: string[]; partnerOnly?: boolean } {
+  const current = (row.partnerFields as string[] | null | undefined) ?? [];
+  if (PARTNER_SOURCES.has(source)) {
+    const next = addPartnerFields(current, fields.filter((f) => f !== 'name'));
+    return next ? { partnerFields: next } : {};
+  }
+  const out: { partnerFields?: string[]; partnerOnly?: boolean } = {};
+  const kept = current.filter((f) => !fields.includes(f));
+  if (kept.length !== current.length) out.partnerFields = kept;
+  if (row.partnerOnly === true) out.partnerOnly = false;
+  return out;
+}
+
+/** A created row's provenance: a partner create is partner-only, with every
+ *  column it supplied marked. Nothing for any other source. */
+function createdProvenance(
+  source: string,
+  fields: readonly string[],
+): { partnerOnly?: true; partnerFields?: string[] } {
+  if (!PARTNER_SOURCES.has(source)) return {};
+  return { partnerOnly: true, partnerFields: [...new Set(fields.filter((f) => f !== 'name'))] };
+}
+
+/** The company columns a record actually states (the create's own defaults —
+ *  'Private', 'Undisclosed', 0, the SEC placeholder copy — are not statements). */
+function suppliedCompanyFields(c: NormalizedRecord['company']): string[] {
+  const stated: Record<string, unknown> = {
+    domain: c.domain,
+    websiteUrl: c.websiteUrl,
+    linkedinUrl: c.linkedinUrl,
+    legalName: c.legalName,
+    operatingStatus: c.operatingStatus,
+    companyType: c.companyType,
+    primarySector: c.primarySector,
+    countryCode: c.countryCode,
+    oneLiner: c.oneLiner,
+    description: c.description,
+    hq: c.hq,
+    founded: c.foundedYear,
+    headcount: c.headcount,
+    industry: c.industry,
+    status: c.status,
+    stage: c.stage,
+    totalRaisedUsd: c.totalRaisedUsd,
+  };
+  return Object.entries(stated)
+    .filter(([, v]) => v != null && v !== '' && v !== 0 && !(Array.isArray(v) && v.length === 0))
+    .map(([k]) => k);
 }

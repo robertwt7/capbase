@@ -8,6 +8,8 @@ import { Citation } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
+import { LockedSection } from '@/components/LockedSection';
+import { StubProfile } from '@/components/StubProfile';
 import { Badge, SectionHeader } from '@/components/ui';
 import { getPerson } from '@/lib/data';
 import { formatCount } from '@/lib/format';
@@ -51,6 +53,8 @@ export async function generateMetadata({
   // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
   // not-found title there rather than later in the body.
   if (!person) notFound();
+  // A partner person is a stub for a signed-out viewer: never indexed.
+  if (person.partnerOnly) return { title: person.name, robots: { index: false, follow: true } };
 
   const orgs = [...new Set(person.roles.map((r) => org(r).name))].slice(0, 3);
   const facts = [
@@ -79,6 +83,21 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
   const { slug } = await params;
   const person = await getPerson(slug);
   if (!person) notFound();
+  const path = `/people/${person.slug}`;
+  if (person.partnerOnly) {
+    return (
+      <StubProfile
+        kind="Person"
+        name={person.name}
+        next={path}
+        back={{ href: '/people', label: 'All people' }}
+        counts={[
+          { label: 'Roles', value: person.roleCount },
+          { label: 'Organisations', value: person.organisationCount },
+        ].filter((c) => c.value > 0)}
+      />
+    );
+  }
 
   // Roles arrive newest first; group them so one organisation reads as one
   // block even when a source published several roles there.
@@ -119,9 +138,11 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
             label="Roles"
             value={formatCount(person.roleCount)}
           />
+          {/* From the API: the roles below are capped by the gate, so the
+              page cannot count every organisation itself. */}
           <Metric
             label="Organisations"
-            value={formatCount(grouped.size)}
+            value={formatCount(person.organisationCount)}
           />
           {firstYear ? <Metric label="First recorded" value={String(firstYear)} /> : null}
         </dl>
@@ -133,7 +154,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
       <section className="border-t border-line py-8">
         <SectionHeader
           title="Roles"
-          note={`${formatCount(person.roleCount)} across ${formatCount(grouped.size)} ${grouped.size === 1 ? 'organisation' : 'organisations'}`}
+          note={`${formatCount(person.roleCount)} across ${formatCount(person.organisationCount)} ${person.organisationCount === 1 ? 'organisation' : 'organisations'}`}
           size="md"
           className="mb-5 border-b-0 pb-0"
         />
@@ -184,6 +205,14 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
             </li>
           ))}
         </ul>
+        <LockedSection
+          access={person.access}
+          next={path}
+          total={person.roleCount}
+          shown={person.roles.length}
+          noun="roles"
+          placeholder="row"
+        />
       </section>
 
       <footer className="mt-6 border-t border-line pt-7 pb-16 font-mono text-xs text-graphite-500">

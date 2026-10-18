@@ -1,5 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
+import { Prisma } from '@repo/db';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { escapeLike, SearchService } from './search.service';
 
@@ -87,6 +89,37 @@ describe('SearchService', () => {
     expect(sql.find((s) => s.includes('FROM "Person"'))).toContain(
       `"suppressedAt" IS NULL`,
     );
+  });
+
+  describe('the read gate', () => {
+    /** Every SQL fragment of each raw query, nested `Prisma.sql` parts included. */
+    const fragments = () =>
+      queryRaw.mock.calls.map(([strings, ...values]) =>
+        [
+          ...(strings as string[]),
+          ...values.flatMap((v) => (v instanceof Prisma.Sql ? v.strings : [])),
+        ].join('?'),
+      );
+
+    it('never finds the partner’s entities or shows its values to a signed-out viewer', async () => {
+      await service.search('acme');
+      const [company, investor, person] = ['Company', 'Investor', 'Person'].map((t) =>
+        fragments().find((s) => s.includes(`FROM "${t}"`))!,
+      );
+      expect(company).toContain('NOT "partnerOnly"');
+      expect(company).toContain('ANY("partnerFields")');
+      expect(investor).toContain('NOT "partnerOnly"');
+      expect(person).toContain('NOT "identifierOnly"');
+    });
+
+    it('searches everything for a signed-in viewer', async () => {
+      await service.search('acme', { id: 'u1' });
+      for (const s of fragments()) {
+        expect(s).not.toContain('partnerOnly');
+        expect(s).not.toContain('identifierOnly');
+        expect(s).not.toContain('partnerFields');
+      }
+    });
   });
 
   it('maps rows to hits, turning an empty domain or meta into null', async () => {

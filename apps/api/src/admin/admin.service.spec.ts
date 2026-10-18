@@ -168,6 +168,18 @@ describe('AdminService.moderate (proposal)', () => {
     });
   });
 
+  it('unmarks the partner fields a moderated edit replaced, and only those', async () => {
+    const { prisma, tx } = makePrisma({ hq: 'Berlin' }, {}, {
+      ...dbCompany(),
+      partnerFields: ['hq', 'description'],
+    } as ReturnType<typeof dbCompany>);
+    await newService(prisma).moderate('proposal', 'p1', 'APPROVED', 'admin1');
+    expect(tx.company.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { hq: 'Berlin', partnerFields: ['description'] },
+    });
+  });
+
   it('records one revision per changed field, with the pre-change value', async () => {
     const { prisma, tx } = makePrisma({ hq: 'Berlin', headcount: 42 });
     const service = newService(prisma);

@@ -34,6 +34,7 @@ describe('UsersService.accessFor (the contribution gate)', () => {
     const prisma = prismaWith({});
     await expect(new UsersService(prisma).accessFor()).resolves.toEqual({
       unlocked: false,
+      signedIn: false,
       unlockedUntil: null,
     });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
@@ -42,14 +43,14 @@ describe('UsersService.accessFor (the contribution gate)', () => {
   it('is unlocked for an admin, without a query', async () => {
     const prisma = prismaWith({});
     const access = await new UsersService(prisma).accessFor({ id: 'a1', role: 'ADMIN' });
-    expect(access).toEqual({ unlocked: true, unlockedUntil: null });
+    expect(access).toEqual({ unlocked: true, signedIn: true, unlockedUntil: null });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
   });
 
   it('is unlocked for a contributor, without a query', async () => {
     const prisma = prismaWith({});
     const access = await new UsersService(prisma).accessFor({ id: 'c1', role: 'CONTRIBUTOR' });
-    expect(access).toEqual({ unlocked: true, unlockedUntil: null });
+    expect(access).toEqual({ unlocked: true, signedIn: true, unlockedUntil: null });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
   });
 
@@ -58,6 +59,7 @@ describe('UsersService.accessFor (the contribution gate)', () => {
     const service = new UsersService(prismaWith({ fundingRound: { createdAt: last } }));
     await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
       unlocked: true,
+      signedIn: true,
       unlockedUntil: new Date(last.getTime() + 30 * DAY).toISOString(),
     });
   });
@@ -74,6 +76,7 @@ describe('UsersService.accessFor (the contribution gate)', () => {
     const service = new UsersService(prismaWith({}));
     await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
       unlocked: false,
+      signedIn: true,
       unlockedUntil: null,
     });
   });

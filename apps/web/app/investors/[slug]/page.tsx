@@ -7,6 +7,9 @@ import { CommitmentAmount } from '@/components/CommitmentAmount';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
+import { LockedSection } from '@/components/LockedSection';
+import { isMasked, Masked, SignInChip } from '@/components/Masked';
+import { StubProfile } from '@/components/StubProfile';
 import { Badge, Button, EmptyState, SectionHeader } from '@/components/ui';
 import { getInvestor } from '@/lib/data';
 import { countryName, formatCount, formatUsd } from '@/lib/format';
@@ -27,12 +30,16 @@ export async function generateMetadata({
   // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
   // not-found title there rather than later in the body.
   if (!investor) notFound();
+  // A partner-only firm is a stub for a signed-out viewer: never indexed.
+  if (investor.partnerOnly) return { title: investor.name, robots: { index: false, follow: true } };
 
+  // Withheld facts are blank in the payload, and skipped here explicitly too.
+  const shown = (field: string) => !isMasked(investor, field);
   const facts = [
-    `${investor.type} investor`,
-    investor.hq,
+    shown('type') && `${investor.type} investor`,
+    shown('hq') && investor.hq,
     investor.portfolioCount > 0 ? `${formatCount(investor.portfolioCount)} portfolio companies` : null,
-    investor.assetsUsd ? `${formatUsd(investor.assetsUsd)} in fund assets` : null,
+    shown('assetsUsd') && investor.assetsUsd ? `${formatUsd(investor.assetsUsd)} in fund assets` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -53,12 +60,40 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   const { slug } = await params;
   const investor = await getInvestor(slug);
   if (!investor) notFound();
+  const path = `/investors/${investor.slug}`;
+  if (investor.partnerOnly) {
+    return (
+      <StubProfile
+        kind="Investor"
+        name={investor.name}
+        domain={investor.domain}
+        next={path}
+        back={{ href: '/investors', label: 'All investors' }}
+        counts={[
+          { label: 'Portfolio companies', value: investor.portfolioCount },
+          { label: 'Funds named', value: investor.namedFundCount },
+          { label: 'Fund commitments', value: investor.commitmentCount },
+          { label: 'People', value: investor.peopleCount },
+        ].filter((c) => c.value > 0)}
+      />
+    );
+  }
   const country = countryName(investor.countryCode);
+  const { access } = investor;
+  const masked = (field: string) => isMasked(investor, field);
+  /** A fact, or the sign-in chip when the API withheld it from this viewer. */
+  const m = (field: string, node: React.ReactNode) => (
+    <Masked entity={investor} field={field} next={path}>
+      {node}
+    </Masked>
+  );
 
-  const hasLinks = Boolean(investor.websiteUrl || investor.linkedinUrl);
+  const hasLinks = Boolean(
+    investor.websiteUrl || investor.linkedinUrl || masked('websiteUrl') || masked('linkedinUrl'),
+  );
   // A limited partner (a pension, an endowment) usually manages no funds of its
   // own; its funds block would only say so. Its commitments say what it does.
-  const showFunds = investor.funds.length > 0 || !!investor.fundCount || investor.commitmentCount === 0;
+  const showFunds = investor.namedFundCount > 0 || !!investor.fundCount || investor.commitmentCount === 0;
 
   return (
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
@@ -78,18 +113,27 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
             <h1 className="font-display text-[clamp(1.875rem,4vw,2.75rem)] leading-none font-extrabold tracking-[-0.035em] text-ink">
               {investor.name}
             </h1>
-            <Badge variant="pill" mono>
-              {investor.type}
-            </Badge>
+            {!masked('type') && (
+              <Badge variant="pill" mono>
+                {investor.type}
+              </Badge>
+            )}
           </div>
-          {investor.description && (
-            <p className="mt-3 max-w-[52ch] text-[17px] text-graphite-700">{investor.description}</p>
+          {(investor.description || masked('description')) && (
+            <p className="mt-3 max-w-[52ch] text-[17px] text-graphite-700">
+              {m('description', investor.description)}
+            </p>
           )}
           {hasLinks && (
-            <div className="mt-4 flex flex-wrap gap-4">
+            <div className="mt-4 flex flex-wrap items-center gap-4">
               {investor.websiteUrl && <OutboundLink href={investor.websiteUrl}>Website</OutboundLink>}
               {investor.linkedinUrl && (
                 <OutboundLink href={investor.linkedinUrl}>LinkedIn</OutboundLink>
+              )}
+              {(masked('websiteUrl') || masked('linkedinUrl')) && (
+                <span className="flex items-center gap-2 font-mono text-xs text-graphite-500">
+                  Links <SignInChip next={path} />
+                </span>
               )}
             </div>
           )}
@@ -98,12 +142,18 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           <Identifiers identifiers={investor.identifiers} className="mt-5" />
         </div>
         <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
-          {investor.hq && <Fact label="Headquarters" value={investor.hq} />}
-          {country && <Fact label="Country" value={country} />}
-          {investor.foundedYear ? <Fact label="Founded" value={String(investor.foundedYear)} /> : null}
+          {(investor.hq || masked('hq')) && <Fact label="Headquarters" value={m('hq', investor.hq)} />}
+          {(country || masked('countryCode')) && <Fact label="Country" value={m('countryCode', country)} />}
+          {investor.foundedYear || masked('foundedYear') ? (
+            <Fact label="Founded" value={m('foundedYear', String(investor.foundedYear))} />
+          ) : null}
           {investor.fundCount ? <Fact label="Funds" value={formatCount(investor.fundCount)} /> : null}
-          {investor.assetsUsd ? <Fact label="Fund assets" value={formatUsd(investor.assetsUsd)} /> : null}
-          {investor.legalName && <Fact label="Legal name" value={investor.legalName} />}
+          {investor.assetsUsd || masked('assetsUsd') ? (
+            <Fact label="Fund assets" value={m('assetsUsd', formatUsd(investor.assetsUsd ?? null))} />
+          ) : null}
+          {(investor.legalName || masked('legalName')) && (
+            <Fact label="Legal name" value={m('legalName', investor.legalName)} />
+          )}
         </dl>
       </header>
 
@@ -149,7 +199,11 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                     )}
                     <Citation citations={investor.citations} entityId={fund.id} />
                   </span>
-                  {fund.strategy ? (
+                  {isMasked(fund, 'strategy') ? (
+                    <span className="justify-self-start">
+                      <SignInChip next={path} />
+                    </span>
+                  ) : fund.strategy ? (
                     <Badge variant="pill" mono className="justify-self-start">
                       {fund.strategy}
                     </Badge>
@@ -157,18 +211,27 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                     <span className="font-mono text-[13px] text-graphite-500">—</span>
                   )}
                   <span className="text-right font-mono text-sm text-ink max-[720px]:text-left">
-                    {fund.vintageYear ?? '—'}
+                    <Masked entity={fund} field="vintageYear" next={path}>
+                      {fund.vintageYear ?? '—'}
+                    </Masked>
                   </span>
                   {/* Never $0: a fund that reported no value shows "Undisclosed". */}
                   <span className="text-right font-mono text-[15px] font-medium text-ink max-[720px]:text-left">
-                    {formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)}
+                    {/* The size shown is gross assets, else capital closed —
+                        withheld when that figure is the partner's. */}
+                    {fund.grossAssetsUsd == null && isMasked(fund, 'closedUsd') ? (
+                      <SignInChip next={path} />
+                    ) : (
+                      formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)
+                    )}
                   </span>
                 </li>
               ))}
             </ul>
             {/* The API returns a preview, so a shortfall IS the "more" signal —
-                no need to duplicate its page size here. */}
-            {investor.namedFundCount > investor.funds.length && (
+                no need to duplicate its page size here. A gated preview says
+                so below instead. */}
+            {access.unlocked && investor.namedFundCount > investor.funds.length && (
               <Link
                 href={`/funds?manager=${investor.slug}`}
                 className="mt-4 inline-block font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
@@ -177,7 +240,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
               </Link>
             )}
           </>
-        ) : (
+        ) : investor.namedFundCount > 0 ? null : (
           // The firm told the SEC how many funds it runs; the public archive
           // just has not named them yet (it stops at 2024-12-31).
           <EmptyState>
@@ -188,6 +251,14 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
             </p>
           </EmptyState>
         )}
+        <LockedSection
+          access={access}
+          next={path}
+          total={investor.namedFundCount}
+          shown={investor.funds.length}
+          noun="funds"
+          placeholder="row"
+        />
       </section>
       )}
 
@@ -237,6 +308,14 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
               </li>
             ))}
           </ul>
+          <LockedSection
+            access={access}
+            next={path}
+            total={investor.commitmentCount}
+            shown={investor.commitments.length}
+            noun="commitments"
+            placeholder="row"
+          />
         </section>
       )}
 
@@ -276,7 +355,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
               </li>
             ))}
           </ul>
-        ) : (
+        ) : investor.peopleCount > 0 ? null : (
           // Only Wikidata names a firm's officers, and it covers a few hundred
           // firms — so an empty block is the norm, not a failure.
           <EmptyState>
@@ -286,6 +365,14 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
             </p>
           </EmptyState>
         )}
+        <LockedSection
+          access={access}
+          next={path}
+          total={investor.peopleCount}
+          shown={investor.people.length}
+          noun="people"
+          placeholder="card"
+        />
       </section>
 
       <section className="border-t border-line py-8">
@@ -328,6 +415,14 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                 </li>
               ))}
             </ul>
+            <LockedSection
+              access={access}
+              next={path}
+              total={investor.portfolioCount}
+              shown={investor.companies.length}
+              noun="portfolio companies"
+              placeholder="card"
+            />
           </>
         ) : (
           // The common case for the SEC Form ADV universe: the filing names the
@@ -368,7 +463,7 @@ function OutboundLink({ href, children }: { href: string; children: React.ReactN
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <dt className="text-[11px] tracking-[0.04em] text-graphite-500 uppercase">{label}</dt>

@@ -35,25 +35,34 @@ export function siteOrganizationJsonLd() {
   };
 }
 
-/** The profiled company on /companies/[slug]. */
+/** The profiled company on /companies/[slug]. A field the API withheld from
+ *  this viewer (`company.masked`) is left out — the markup never states what
+ *  the page itself does not show. */
 export function companyJsonLd(company: Company) {
-  const sameAs = [company.linkedinUrl, company.twitterUrl].filter((u): u is string => Boolean(u));
+  const has = (field: keyof Company) => !company.masked?.includes(field);
+  const sameAs = [has('linkedinUrl') && company.linkedinUrl, company.twitterUrl].filter(
+    (u): u is string => Boolean(u),
+  );
   return {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: company.name,
-    description: company.oneLiner,
-    ...(company.websiteUrl && { url: company.websiteUrl }),
+    ...(has('oneLiner') && company.oneLiner && { description: company.oneLiner }),
+    ...(has('websiteUrl') && company.websiteUrl && { url: company.websiteUrl }),
     // 0 means no source recorded the year; schema.org rejects "0".
-    ...(company.founded > 0 && { foundingDate: String(company.founded) }),
-    address: {
-      '@type': 'PostalAddress',
-      addressLocality: company.hq,
-      ...(company.countryCode && { addressCountry: company.countryCode }),
-    },
+    ...(has('founded') && company.founded > 0 && { foundingDate: String(company.founded) }),
+    ...(has('hq') &&
+      company.hq && {
+        address: {
+          '@type': 'PostalAddress',
+          addressLocality: company.hq,
+          ...(has('countryCode') && company.countryCode && { addressCountry: company.countryCode }),
+        },
+      }),
     ...(sameAs.length > 0 && { sameAs }),
     // Same logo source CompanyLogo uses.
-    ...(company.domain && { logo: `${SITE_URL}/api/logo/${encodeURIComponent(company.domain)}` }),
+    ...(has('domain') &&
+      company.domain && { logo: `${SITE_URL}/api/logo/${encodeURIComponent(company.domain)}` }),
   };
 }
 
@@ -82,6 +91,7 @@ export function companyBreadcrumbJsonLd(company: Company) {
  * markup gets from a QID.
  */
 export function investorJsonLd(investor: InvestorDetailResponse) {
+  // Withheld fields are blank in the payload (null), so they drop out below.
   const sameAs = [
     investor.linkedinUrl,
     ...(investor.identifiers ?? []).map((i) => i.url),
