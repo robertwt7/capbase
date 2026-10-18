@@ -360,8 +360,17 @@ export class PartnerProvenanceBackfill {
    * Fund columns: for every staged fund, the row it created (its provenance
    * key) or matched (its normalized name under the same resolved manager — the
    * match `upsertFund` made), and the columns holding the partner's value.
+   *
+   * Skipped entirely when the funds stage has never run (no fund carries the
+   * partner's provenance): the partner has then written nothing to any fund,
+   * and the name match would only mark public SEC values that happen to equal
+   * the staged ones. The funds stage, run later, marks its own writes.
    */
   private async fundFields(kept: Map<string, KeptFirm>, firmIds: Map<string, string>): Promise<number> {
+    if ((await this.prisma.fund.count({ where: { externalSource: 'PARTNER' } })) === 0) {
+      this.log('Funds: the funds stage has not run — nothing to reconstruct');
+      return 0;
+    }
     const byKey = new Map<string, string>();
     const byManagerName = new Map<string, string>();
     let after: string | undefined;
