@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
+import { Prisma } from '@repo/db';
+
 import { InvestorsService } from './investors.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
@@ -10,6 +12,11 @@ const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true
 
 function company(slug: string, name: string, primarySector: string | null) {
   return { slug, name, domain: `${slug}.com`, primarySector };
+}
+
+/** A row of the list's raw portfolio-sample query. */
+function sampleRow(investorId: string, slug: string, name: string, primarySector: string | null) {
+  return { investorId, ...company(slug, name, primarySector) };
 }
 
 function investorRow(over: Record<string, unknown> = {}) {
@@ -70,6 +77,11 @@ describe('InvestorsService', () => {
   let citationFindMany: jest.Mock;
   let identifierFindMany: jest.Mock;
   let holdingGroupBy: jest.Mock;
+  let queryRaw: jest.Mock<(...args: unknown[]) => Promise<unknown[]>>;
+  /** Every raw query, flattened: nested Prisma.sql fragments inlined. */
+  let rawCalls: { sql: string; values: unknown[] }[];
+  /** What the sample query returns. */
+  let sample: unknown[];
   let relationCounts: Record<'holdings' | 'funds' | 'people' | 'commitments', jest.Mock>;
 
   beforeEach(() => {
@@ -78,8 +90,16 @@ describe('InvestorsService', () => {
     findFirst = jest.fn();
     citationFindMany = jest.fn(async () => []);
     identifierFindMany = jest.fn(async () => []);
-    // The list's per-page portfolio counts.
+    // Must never be called: the list reads the stored holdingCount.
     holdingGroupBy = jest.fn(async () => []);
+    // The list's portfolio sample. A tagged-template call passes (strings, ...values).
+    rawCalls = [];
+    sample = [];
+    queryRaw = jest.fn(async (strings: unknown, ...values: unknown[]) => {
+      const q = Prisma.sql(strings as TemplateStringsArray, ...values);
+      rawCalls.push({ sql: q.sql, values: q.values });
+      return sample;
+    });
     // $transaction resolves the array of queries it is handed.
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     // The detail read counts each relation with its own query; these read the
@@ -109,6 +129,7 @@ describe('InvestorsService', () => {
       citation: { findMany: citationFindMany },
       entityIdentifier: { findMany: identifierFindMany },
       $transaction: transaction,
+      $queryRaw: queryRaw,
     } as unknown as PrismaService;
     service = new InvestorsService(prisma, unlockedUsers);
   });
@@ -116,15 +137,11 @@ describe('InvestorsService', () => {
   describe('findAll', () => {
     it('maps a row and its portfolio into a summary', async () => {
       count.mockResolvedValue(1);
-      findMany.mockResolvedValue([
-        investorRow({
-          holdings: [
-            { company: company('sable-labs', 'Sable Labs', 'Artificial intelligence') },
-            { company: company('helia', 'Helia', 'Fintech') },
-          ],
-        }),
-      ]);
-      holdingGroupBy.mockResolvedValue([{ investorId: 'i-1', _count: { _all: 2 } }]);
+      findMany.mockResolvedValue([investorRow({ holdingCount: 2 })]);
+      sample = [
+        sampleRow('i-1', 'sable-labs', 'Sable Labs', 'Artificial intelligence'),
+        sampleRow('i-1', 'helia', 'Helia', 'Fintech'),
+      ];
 
       const { items, total } = await service.findAll();
       const [investor] = items;
@@ -136,24 +153,54 @@ describe('InvestorsService', () => {
       // Companies are sorted by name, sectors deduped and sorted.
       expect(investor!.companies.map((c) => c.name)).toEqual(['Helia', 'Sable Labs']);
       expect(investor!.sectors).toEqual(['Artificial intelligence', 'Fintech']);
+      expect(investor!.companies[0]).toEqual({ slug: 'helia', name: 'Helia', domain: 'helia.com' });
     });
 
-    it('takes portfolioCount from the per-page count query, not the sample or the stored key', async () => {
+    it('takes portfolioCount from the stored holdingCount, not the sample', async () => {
       count.mockResolvedValue(1);
-      findMany.mockResolvedValue([
-        investorRow({
-          // The list read only loads a sample of holdings…
-          holdings: [{ company: company('helia', 'Helia', 'Fintech') }],
-          // …and a stale stored sort key must never show as the card's number…
-          holdingCount: 5,
-        }),
-      ]);
-      // …so the real total comes from the page's own count.
-      holdingGroupBy.mockResolvedValue([{ investorId: 'i-1', _count: { _all: 28 } }]);
+      // The list read only loads a sample of holdings…
+      findMany.mockResolvedValue([investorRow({ holdingCount: 28 })]);
+      sample = [sampleRow('i-1', 'helia', 'Helia', 'Fintech')];
 
+      // …so the card's number is the stored count.
       const { items } = await service.findAll();
       expect(items[0]!.portfolioCount).toBe(28);
       expect(items[0]!.companies).toHaveLength(1);
+    });
+
+    it('groups the sample per firm, one query for the whole page', async () => {
+      count.mockResolvedValue(2);
+      findMany.mockResolvedValue([
+        investorRow({ id: 'i-1', holdingCount: 2 }),
+        investorRow({ id: 'i-2', slug: 'accel', name: 'Accel', holdingCount: 1 }),
+      ]);
+      sample = [
+        sampleRow('i-2', 'loom', 'Loom', 'Enterprise SaaS'),
+        sampleRow('i-1', 'helia', 'Helia', 'Fintech'),
+        sampleRow('i-1', 'sable-labs', 'Sable Labs', null),
+      ];
+
+      const { items } = await service.findAll();
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      expect(rawCalls[0]!.values).toContainEqual(['i-1', 'i-2']);
+      expect(items.map((i) => i.companies.map((c) => c.slug))).toEqual([['helia', 'sable-labs'], ['loom']]);
+      expect(items[1]!.sectors).toEqual(['Enterprise SaaS']);
+    });
+
+    it('caps the sample per firm in SQL', async () => {
+      count.mockResolvedValue(1);
+      findMany.mockResolvedValue([investorRow()]);
+      await service.findAll();
+      expect(rawCalls[0]!.sql).toContain('CROSS JOIN LATERAL');
+      expect(rawCalls[0]!.sql).toMatch(/LIMIT \?\s*\) s/);
+      expect(rawCalls[0]!.values).toContain(6);
+    });
+
+    it('issues no sample query for an empty page', async () => {
+      count.mockResolvedValue(0);
+      findMany.mockResolvedValue([]);
+      await service.findAll();
+      expect(queryRaw).not.toHaveBeenCalled();
     });
 
     it('includes investors with no portfolio at all', async () => {
@@ -161,7 +208,7 @@ describe('InvestorsService', () => {
       // hiding them would drop ~85% of the directory.
       count.mockResolvedValue(1);
       findMany.mockResolvedValue([
-        investorRow({ slug: 'next-coast-ventures', name: 'Next Coast Ventures' }),
+        investorRow({ slug: 'next-coast-ventures', name: 'Next Coast Ventures', holdingCount: 0 }),
       ]);
 
       const { items } = await service.findAll();
@@ -212,30 +259,26 @@ describe('InvestorsService', () => {
       expect(findMany.mock.calls[0]![0]).toMatchObject({ where: { countryCode: 'GB' } });
     });
 
-    it('counts the page only, over approved holdings on approved companies', async () => {
-      count.mockResolvedValue(2);
-      findMany.mockResolvedValue([investorRow({ id: 'i-1' }), investorRow({ id: 'i-2', slug: 'b' })]);
+    it('samples only approved holdings on public companies', async () => {
+      count.mockResolvedValue(1);
+      findMany.mockResolvedValue([investorRow()]);
       await service.findAll();
-
-      expect(holdingGroupBy.mock.calls[0]![0]).toEqual({
-        by: ['investorId'],
-        where: {
-          investorId: { in: ['i-1', 'i-2'] },
-          moderationStatus: 'APPROVED',
-          company: { moderationStatus: 'APPROVED', mergedIntoId: null },
-        },
-        _count: { _all: true },
-      });
+      const { sql } = rawCalls[0]!;
+      expect(sql).toContain(`h."moderationStatus" = 'APPROVED'`);
+      expect(sql).toContain(`c."moderationStatus" = 'APPROVED'`);
+      expect(sql).toContain(`c."mergedIntoId" IS NULL`);
     });
 
-    it('asks for no relation count on the page query', async () => {
+    it('asks for no relation count and no holdings include on the page query', async () => {
       // A filtered `_count` (or a relation-count orderBy) GROUP BYs the whole
-      // InvestorHolding table before the LIMIT.
-      count.mockResolvedValue(0);
-      findMany.mockResolvedValue([]);
+      // InvestorHolding table before the LIMIT, and a nested `take` is not a
+      // per-firm LIMIT in SQL — it loads every holding of the page's firms.
+      count.mockResolvedValue(1);
+      findMany.mockResolvedValue([investorRow()]);
       await service.findAll();
-      const args = findMany.mock.calls[0]![0] as { include: Record<string, unknown> };
-      expect(args.include).not.toHaveProperty('_count');
+      const args = findMany.mock.calls[0]![0] as Record<string, unknown>;
+      expect(args).not.toHaveProperty('include');
+      expect(args).not.toHaveProperty('_count');
       expect(holdingGroupBy).not.toHaveBeenCalled();
     });
   });
@@ -422,13 +465,31 @@ describe('InvestorsService', () => {
       findMany.mockResolvedValue([investorRow({ description: 'PARTNER-PROSE', partnerFields: ['description'] })]);
       const { items } = await service.findAll({ type: 'Venture' });
 
-      const args = findMany.mock.calls[0]![0] as { where: Record<string, unknown>; include: { holdings: { where: Record<string, unknown> } } };
+      const args = findMany.mock.calls[0]![0] as { where: Record<string, unknown> };
       expect(args.where).toMatchObject({ partnerOnly: false, type: 'Venture', AND: [{ NOT: { partnerFields: { has: 'type' } } }] });
-      expect(args.include.holdings.where).toMatchObject({
-        OR: [{ externalSource: null }, { externalSource: { not: 'PARTNER' } }],
-        company: { partnerOnly: false },
-      });
       expect(items[0]).toMatchObject({ description: null, masked: ['description'] });
+
+      // The sample: no partner edge (as three index ranges), no partner-only
+      // company, and a partner-written domain or sector blanked.
+      const { sql, values } = rawCalls[0]!;
+      expect(sql).toContain('h."externalSource" IS NULL OR h."externalSource" < ? OR h."externalSource" > ?');
+      expect(sql).toContain('NOT c."partnerOnly"');
+      expect(sql.match(/CASE WHEN \? = ANY\(c\."partnerFields"\)/g)).toHaveLength(2);
+      expect(values).toEqual(expect.arrayContaining(['PARTNER', 'domain', 'primarySector']));
+    });
+
+    it('samples partner holdings unmasked for a signed-in viewer', async () => {
+      count.mockResolvedValue(1);
+      findMany.mockResolvedValue([investorRow()]);
+      await service.findAll({}, { id: 'u-1', role: 'USER' });
+
+      const { sql, values } = rawCalls[0]!;
+      expect(sql).not.toContain('externalSource" IS NULL');
+      expect(sql).not.toContain('partnerOnly');
+      expect(sql).not.toContain('partnerFields');
+      expect(values).not.toContain('PARTNER');
+      // Ordered to walk the (investorId, externalSource, id) index.
+      expect(sql).toContain('ORDER BY h."externalSource", h.id');
     });
 
     it('previews the open sections and hides the LP commitments from a signed-out viewer', async () => {

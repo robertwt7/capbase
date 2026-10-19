@@ -29,13 +29,14 @@ import {
   type Role,
   type ViewerAccess,
 } from '@repo/api';
-import type { Prisma } from '@repo/db';
+import { Prisma } from '@repo/db';
 
 import { toPerson } from '../companies/company.mapper';
 import { toFund } from '../funds/fund.mapper';
 import {
   FUND_BLANKS,
   INVESTOR_BLANKS,
+  PARTNER_SOURCE,
   listAccess,
   maskFields,
   maskPartnerFields,
@@ -113,6 +114,10 @@ const COMPANY_SELECT = {
   select: { slug: true, name: true, domain: true, primarySector: true },
 };
 
+/** One row of the directory's portfolio sample: a holding's company, per firm. */
+type SampleRow = { investorId: string; slug: string; name: string; domain: string; primarySector: string | null };
+type SampleHolding = { company: Omit<SampleRow, 'investorId'> };
+
 /** Every Investor field a partner-only stub withholds: all but the identity
  *  (slug, name) and — unless the partner wrote it — the logo domain. */
 const INVESTOR_STUB_HIDDEN = [
@@ -166,8 +171,9 @@ export class InvestorsService {
    * their profiles invite a contribution rather than hiding.
    *
    * A signed-out viewer never sees a partner-only firm, a partner-written value
-   * (masked), a match on one (filters skip partner-marked columns) or a partner
-   * holding in the card's portfolio sample.
+   * (masked), a match on one (filters skip partner-marked columns), a partner
+   * holding in the card's portfolio sample, or a sample company's
+   * partner-written domain or sector.
    */
   async findAll(
     query: InvestorListQuery = {},
@@ -186,9 +192,11 @@ export class InvestorsService {
       AND: unmaskedFilters(access, [query.type && 'type', query.country && 'countryCode']),
     };
 
-    // The sort reads the stored `holdingCount` (refreshDirectoryCounts): a
-    // relation-count orderBy, or a `_count` include, GROUP BYs the whole
-    // InvestorHolding table before the LIMIT.
+    // The sort and the card's count both read the stored `holdingCount`
+    // (refreshDirectoryCounts — kept fresh by moderation, merges and the end of
+    // every ingest run). A relation-count orderBy, or a `_count` include,
+    // GROUP BYs the whole InvestorHolding table before the LIMIT, and a live
+    // count of the page joined its ~27k holdings to Company.
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.investor.count({ where }),
       this.prisma.investor.findMany({
@@ -196,35 +204,21 @@ export class InvestorsService {
         orderBy: query.sort === 'name' ? [{ name: 'asc' }] : [{ holdingCount: 'desc' }, { name: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: {
-          holdings: {
-            where: visibleHoldings(access),
-            take: PORTFOLIO_SAMPLE,
-            include: { company: COMPANY_SELECT },
-          },
-        },
       }),
     ]);
-
-    // Counted live for the page's firms only, so a stale sort key never shows
-    // as a wrong number. Over every public holding: a count is public.
-    const ids = rows.map((r) => r.id);
-    const counts = new Map(
-      ids.length === 0
-        ? []
-        : (
-            await this.prisma.investorHolding.groupBy({
-              by: ['investorId'],
-              where: { investorId: { in: ids }, ...PUBLIC_HOLDINGS },
-              _count: { _all: true },
-            })
-          ).map((g) => [g.investorId, g._count._all]),
+    const sample = await this.portfolioSample(
+      rows.map((r) => r.id),
+      access,
     );
 
     return {
       items: rows.map((r) =>
         maskPartnerFields(
-          toInvestorSummary({ ...r, _count: { holdings: counts.get(r.id) ?? 0 } } as InvestorWithHoldings),
+          toInvestorSummary({
+            ...r,
+            holdings: sample.get(r.id) ?? [],
+            _count: { holdings: r.holdingCount },
+          } as unknown as InvestorWithHoldings),
           r.partnerFields,
           access,
           INVESTOR_BLANKS,
@@ -234,6 +228,55 @@ export class InvestorsService {
       page,
       pageSize,
     };
+  }
+
+  /**
+   * The card's portfolio sample — up to PORTFOLIO_SAMPLE visible holdings per
+   * firm — in one query. Prisma does not push a nested `take` into SQL: the
+   * include this replaces loaded every holding of the page's firms (27,521 rows
+   * on page 1) to keep six each.
+   *
+   * Restates `visibleHoldings` inline (keep them in step). Ordered by
+   * (externalSource, id) to walk InvestorHolding_investorId_externalSource_id_idx;
+   * "not PARTNER" is spelled as three ranges so a signed-out read skips the
+   * partner rows (560k of 562k) instead of filtering them. Signed out, a
+   * partner-written logo domain or sector is blanked, as in /search.
+   */
+  private async portfolioSample(ids: string[], access: ViewerAccess): Promise<Map<string, SampleHolding[]>> {
+    if (ids.length === 0) return new Map();
+    const signedOut = !partnerVisible(access);
+    const unmarked = (column: string, expr: Prisma.Sql, blank: Prisma.Sql) =>
+      signedOut ? Prisma.sql`CASE WHEN ${column} = ANY(c."partnerFields") THEN ${blank} ELSE ${expr} END` : expr;
+    const rows = await this.prisma.$queryRaw<SampleRow[]>`
+      SELECT p.id AS "investorId", s.slug, s.name, s.domain, s."primarySector"
+        FROM unnest(${ids}::text[]) AS p(id)
+       CROSS JOIN LATERAL (
+         SELECT c.slug, c.name,
+                ${unmarked('domain', Prisma.sql`c.domain`, Prisma.sql`''`)} AS domain,
+                ${unmarked('primarySector', Prisma.sql`c."primarySector"`, Prisma.sql`NULL`)} AS "primarySector"
+           FROM "InvestorHolding" h
+           JOIN "Company" c ON c.id = h."companyId"
+          WHERE h."investorId" = p.id
+            AND h."moderationStatus" = 'APPROVED'
+            AND c."moderationStatus" = 'APPROVED'
+            AND c."mergedIntoId" IS NULL
+            ${
+              signedOut
+                ? Prisma.sql`AND (h."externalSource" IS NULL OR h."externalSource" < ${PARTNER_SOURCE} OR h."externalSource" > ${PARTNER_SOURCE})
+            AND NOT c."partnerOnly"`
+                : Prisma.empty
+            }
+          ORDER BY h."externalSource", h.id
+          LIMIT ${PORTFOLIO_SAMPLE}
+       ) s`;
+
+    const byFirm = new Map<string, SampleHolding[]>();
+    for (const { investorId, ...company } of rows) {
+      const list = byFirm.get(investorId) ?? [];
+      list.push({ company });
+      byFirm.set(investorId, list);
+    }
+    return byFirm;
   }
 
   /**

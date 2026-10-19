@@ -3,7 +3,7 @@ import { HttpException, NotFoundException } from '@nestjs/common';
 
 import { PERSON_INDEX_MIN_ROLES, SITEMAP_PAGE_SIZE } from '@repo/api';
 
-import { PeopleService } from './people.service';
+import { PEOPLE_TOTAL_TTL_MS, PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
 
@@ -212,6 +212,66 @@ describe('PeopleService', () => {
       const args = findMany.mock.calls[0]![0] as { include: Record<string, unknown> };
       expect(args.include).not.toHaveProperty('_count');
       expect(roleFindMany).not.toHaveBeenCalled();
+    });
+
+    describe('the unfiltered total', () => {
+      const signedIn = { id: 'u-1', role: 'USER' as const };
+
+      beforeEach(() => {
+        count.mockResolvedValue(76_500);
+        findMany.mockResolvedValue([]);
+      });
+
+      it('is counted once and reused, whatever the sort or page', async () => {
+        const first = await service.findAll();
+        const second = await service.findAll({ sort: 'name', page: 4 });
+        expect(count).toHaveBeenCalledTimes(1);
+        expect(findMany).toHaveBeenCalledTimes(2);
+        expect(first.total).toBe(76_500);
+        expect(second.total).toBe(76_500);
+      });
+
+      it('is cached separately for signed-out and signed-in viewers', async () => {
+        await service.findAll();
+        count.mockResolvedValue(570_000);
+        const inside = await service.findAll({}, signedIn);
+        await service.findAll({}, signedIn);
+        const outside = await service.findAll();
+
+        expect(count).toHaveBeenCalledTimes(2);
+        expect(count.mock.calls[0]![0]).toMatchObject({ where: { identifierOnly: false } });
+        expect((count.mock.calls[1]![0] as { where: object }).where).not.toHaveProperty('identifierOnly');
+        expect(inside.total).toBe(570_000);
+        expect(outside.total).toBe(76_500);
+      });
+
+      it('never serves a search or the multi-company filter, before or after a cached call', async () => {
+        await service.findAll({ q: 'smith' });
+        await service.findAll({ multiCompany: true });
+        await service.findAll();
+        count.mockResolvedValue(4_393);
+        const multi = await service.findAll({ multiCompany: true });
+        await service.findAll({ q: 'smith' });
+
+        expect(count).toHaveBeenCalledTimes(5);
+        expect(multi.total).toBe(4_393);
+      });
+
+      it('is counted again once it expires', async () => {
+        const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+        try {
+          await service.findAll();
+          now.mockReturnValue(1_000_000 + PEOPLE_TOTAL_TTL_MS - 1);
+          await service.findAll();
+          expect(count).toHaveBeenCalledTimes(1);
+
+          now.mockReturnValue(1_000_000 + PEOPLE_TOTAL_TTL_MS + 1);
+          await service.findAll();
+          expect(count).toHaveBeenCalledTimes(2);
+        } finally {
+          now.mockRestore();
+        }
+      });
     });
   });
 

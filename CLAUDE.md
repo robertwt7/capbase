@@ -262,8 +262,11 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   Signed out, the directory's status filter (a partner-only column) is a "Sign in to filter by
   status" button and the API ignores `?status=`.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies). The
-  default sort reads the stored `Investor.holdingCount` (see Database); each card's portfolio
-  count is counted live for the page's ids only. `/investors/[slug]` — investor profile: facts, fund assets, funds (linked to their pages),
+  default sort reads the stored `Investor.holdingCount` (see Database), and so does each card's
+  portfolio count (a live count joined ~27k holdings to `Company` per page). The card's
+  portfolio sample is one `LATERAL … LIMIT` query (`portfolioSample`, on the
+  `(investorId, externalSource, id)` index), signed out without partner holdings and with a
+  partner-written company domain/sector blanked. `/investors/[slug]` — investor profile: facts, fund assets, funds (linked to their pages),
   **fund commitments** for a limited partner, portfolio grid (the `INVESTOR_PORTFOLIO_PREVIEW`
   largest by capital raised; count and sectors cover the whole portfolio), the firm's people
   (capped at `INVESTOR_PEOPLE_PREVIEW`, "N of M named"), or an empty state inviting a
@@ -272,10 +275,14 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   Prisma's `_count`, which GROUP BYs the whole child table (~500 ms per profile at this size).
   The same rule holds for **lists**, a relation-count `orderBy` included: sorting `/people` on
   `roles: { _count }` cost 12.6 s a page at 578k roles. Sort on a stored column and count the
-  page's ids.
+  page's ids. A nested `include: { take }` is not a per-parent LIMIT either: Prisma loads every
+  child row of the page's parents and trims in memory (27,521 holdings for 25 firms) — sample
+  with a raw `LATERAL … LIMIT`.
 - `/people` — people directory (URL-driven filters, same pattern as companies): search,
   an "at several companies" toggle (`companyCount > 1`), sort by roles held (the stored
-  `Person.roleCount`) or name; card counts are live for the page's ids. **No role filter** —
+  `Person.roleCount`) or name; card counts are live for the page's ids. The unfiltered total is
+  cached 15 minutes per viewer mode (`PEOPLE_TOTAL_TTL_MS`: counting every person is a seq scan);
+  search and multi-company totals are exact. **No role filter** —
   3,744 distinct free-text role strings is not a vocabulary. `/people/[slug]` — person
   profile: roles grouped by organisation, each with its kind, year range and citation.
 - `/companies/[slug]/history` — public, paginated change timeline for one company
@@ -604,8 +611,9 @@ definition and writes only changed rows (a re-run writes 0). Jobs run the full f
 every `IngestService.run` (cron, monthly, backfills, partner stages — a failure is logged and
 reported, never fails the run) and after `backfill-people` / `purge-sbir-people`; the API runs the
 scoped form (`admin/directory-counts.ts`, never throws) after `AdminService.moderate` (a role's
-person, a holding's firm, a company's people and firms) and every merge/unmerge. Cards never show
-the stored value, so a stale key only misorders. `make backfill-directory-counts` (`-prod`) fills
+person, a holding's firm, a company's people and firms) and every merge/unmerge. People cards
+count live (cheap), so there a stale key only misorders; investor cards show `holdingCount`, so
+there a stale key also shows as a wrong number until the next refresh. `make backfill-directory-counts` (`-prod`) fills
 or re-runs it by hand.
 
 `ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,

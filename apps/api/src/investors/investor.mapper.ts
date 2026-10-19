@@ -68,8 +68,9 @@ export function pickInvestorFields(
 /**
  * Investor plus its portfolio facts.
  *
- * `portfolioCount` comes from the filtered relation count, not from
- * `holdings.length` — the list read only loads a sample of holdings.
+ * `portfolioCount` comes from `_count.holdings` — a live count on the profile,
+ * the stored `holdingCount` on the list — not from `holdings.length`: the list
+ * read only loads a sample of holdings.
  */
 export function toInvestorSummary(row: InvestorWithHoldings): InvestorSummary {
   const companies = row.holdings

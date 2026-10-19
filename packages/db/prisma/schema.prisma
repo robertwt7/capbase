@@ -641,7 +641,10 @@ model InvestorHolding {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
-  @@index([investorId])
+  // The leading investorId serves every per-firm lookup; externalSource, id let
+  // the /investors card sample stop after six rows per firm — an ordered scan
+  // signed in, three index ranges that skip the partner rows signed out.
+  @@index([investorId, externalSource, id])
   @@index([moderationStatus, createdAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }

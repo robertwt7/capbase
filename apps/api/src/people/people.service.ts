@@ -29,6 +29,11 @@ import { toPersonSummary, type PersonWithRoles } from './person.mapper';
 /** How many roles to include on each person's directory card. */
 const ROLE_SAMPLE = 6;
 
+/** How long the unfiltered /people total is reused. Counting every public person is a
+ *  seq scan of the whole table (~190 ms on prod) for a number that moves only when an
+ *  ingest or a decision lands; filtered totals are cheap and always exact. */
+export const PEOPLE_TOTAL_TTL_MS = 15 * 60_000;
+
 const ROLE_INCLUDE = {
   company: { select: { slug: true, name: true, domain: true } },
   investor: { select: { slug: true, name: true } },
@@ -72,6 +77,9 @@ const visibleRoles = (access: ViewerAccess): Prisma.PersonRoleWhereInput =>
 
 @Injectable()
 export class PeopleService {
+  /** The unfiltered total per viewer mode — the WHERE differs only by `identifierOnly`. */
+  private totals = new Map<'partner' | 'public', { total: number; expiresAt: number }>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
@@ -107,23 +115,34 @@ export class PeopleService {
     // The sort reads the stored `roleCount` (refreshDirectoryCounts): a
     // relation-count orderBy, or a `_count` include, GROUP BYs the whole
     // PersonRole table before the LIMIT — 12.6 s a page at 578k roles.
-    const [total, rows] = await this.prisma.$transaction([
-      this.prisma.person.count({ where }),
-      this.prisma.person.findMany({
-        where,
-        orderBy: query.sort === 'name' ? [{ name: 'asc' }] : [{ roleCount: 'desc' }, { name: 'asc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          roles: {
-            where: visibleRoles(access),
-            take: ROLE_SAMPLE,
-            orderBy: { since: 'desc' },
-            include: ROLE_INCLUDE,
-          },
+    const pageQuery = this.prisma.person.findMany({
+      where,
+      orderBy: query.sort === 'name' ? [{ name: 'asc' }] : [{ roleCount: 'desc' }, { name: 'asc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        roles: {
+          where: visibleRoles(access),
+          take: ROLE_SAMPLE,
+          orderBy: { since: 'desc' },
+          include: ROLE_INCLUDE,
         },
-      }),
-    ]);
+      },
+    });
+
+    // Unfiltered, the total comes from the cache (sort and page don't change it).
+    const unfiltered = !query.q && !query.multiCompany;
+    const mode = partnerVisible(access) ? 'partner' : 'public';
+    const cached = unfiltered ? this.totals.get(mode) : undefined;
+    let total: number;
+    let rows: Awaited<typeof pageQuery>;
+    if (cached && cached.expiresAt > Date.now()) {
+      total = cached.total;
+      rows = await pageQuery;
+    } else {
+      [total, rows] = await this.prisma.$transaction([this.prisma.person.count({ where }), pageQuery]);
+      if (unfiltered) this.totals.set(mode, { total, expiresAt: Date.now() + PEOPLE_TOTAL_TTL_MS });
+    }
 
     const counts = await this.countRoles(rows.map((r) => r.id));
     const items = rows.map((r) => {

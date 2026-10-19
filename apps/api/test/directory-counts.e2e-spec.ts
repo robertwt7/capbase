@@ -8,6 +8,7 @@ import { refreshDirectoryCounts } from '@repo/db';
 import { AppModule } from './../src/app.module';
 import { AdminService } from './../src/admin/admin.service';
 import { MergeService } from './../src/admin/merge/merge.service';
+import { InvestorsService } from './../src/investors/investors.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 
 // The stored /people and /investors sort keys (Person.roleCount / companyCount,
@@ -300,5 +301,84 @@ describe('Directory sort counts (e2e)', () => {
     ({ person, firm } = await stored());
     expect(person[ids.p!]).toEqual({ roles: 5, companies: 3 });
     expect(firm[ids.bigFirm!]).toBe(2);
+  });
+
+  // The /investors card sample is one LATERAL … LIMIT query: run its real SQL.
+  it('GET /investors samples six holdings per firm, with partner rows and fields hidden signed out', async () => {
+    const firmId = (
+      await prisma.investor.create({
+        data: { slug: s('sample-firm'), name: `E2E sample-firm ${stamp}`, type: 'Venture', moderationStatus: 'APPROVED' },
+        select: { id: true },
+      })
+    ).id;
+    investorIds.push(firmId);
+    const sampleCompany = async (name: string, data: { domain: string; primarySector: string; partnerFields?: string[] }) => {
+      const row = await prisma.company.create({
+        data: {
+          slug: s(name),
+          name: `E2E ${name} ${stamp}`,
+          oneLiner: '',
+          description: '',
+          hq: '',
+          founded: 0,
+          headcount: 0,
+          status: 'Private',
+          stage: 'Seed',
+          totalRaisedUsd: 0n,
+          moderationStatus: 'APPROVED',
+          ...data,
+        },
+        select: { id: true },
+      });
+      companyIds.push(row.id);
+      return row.id;
+    };
+    const holding = (companyId: string, externalSource: string, n: number) =>
+      prisma.investorHolding.create({
+        data: {
+          investorId: firmId,
+          companyId,
+          name: 'E2E holding',
+          type: 'Venture',
+          firstRound: 'Seed',
+          rounds: 1,
+          moderationStatus: 'APPROVED',
+          externalSource,
+          externalId: `e2e-dc-${stamp}-${n}`,
+        },
+      });
+
+    // Seven WIKIDATA holdings; one SEC_S1 holding on a company whose domain and
+    // sector the partner wrote (sorts before WIKIDATA, so always sampled); one
+    // PARTNER holding (sorts first, so sampled whenever it is visible).
+    for (let n = 0; n < 7; n++) {
+      await holding(await sampleCompany(`sample-${n}`, { domain: `e2e-sample-${n}-${stamp}.test`, primarySector: 'Education' }), 'WIKIDATA', n);
+    }
+    const marked = await sampleCompany('sample-marked', {
+      domain: `e2e-marked-${stamp}.test`,
+      primarySector: 'Climate',
+      partnerFields: ['primarySector', 'domain'],
+    });
+    await holding(marked, 'SEC_S1', 7);
+    await holding(await sampleCompany('sample-partner', { domain: `e2e-partner-${stamp}.test`, primarySector: 'Energy' }), 'PARTNER', 8);
+    await refreshDirectoryCounts(prisma, { investorIds: [firmId] });
+
+    type Card = { slug: string; portfolioCount: number; sectors: string[]; companies: { slug: string; domain: string }[] };
+    const res = await request(app.getHttpServer()).get(`/investors?q=sample-firm ${stamp}`).expect(200);
+    const out = (res.body.items as Card[]).find((i) => i.slug === s('sample-firm'))!;
+    // The LIMIT holds per firm, not per page; the count is public, partner rows included.
+    expect(out.portfolioCount).toBe(9);
+    expect(out.companies).toHaveLength(6);
+    expect(out.companies.map((c) => c.slug)).not.toContain(s('sample-partner'));
+    expect(out.companies.find((c) => c.slug === s('sample-marked'))).toMatchObject({ domain: '' });
+    expect(out.sectors).toEqual(['Education']);
+
+    const signedIn = await app.get(InvestorsService).findAll({ q: `sample-firm ${stamp}` }, { id: adminId!, role: 'ADMIN' });
+    const card = signedIn.items.find((i) => i.slug === s('sample-firm'))!;
+    expect(card.portfolioCount).toBe(9);
+    expect(card.companies).toHaveLength(6);
+    expect(card.companies.map((c) => c.slug)).toContain(s('sample-partner'));
+    expect(card.companies.find((c) => c.slug === s('sample-marked'))).toMatchObject({ domain: `e2e-marked-${stamp}.test` });
+    expect(card.sectors).toEqual(['Climate', 'Education', 'Energy']);
   });
 });
