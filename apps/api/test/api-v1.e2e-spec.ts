@@ -1,15 +1,16 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
-import { API_KEY_LIMITS } from '@repo/api';
+import { API_KEY_LIMITS, MAX_V1_LIST_DEPTH } from '@repo/api';
 import request from 'supertest';
 
+import { ApiKeysService } from './../src/api-keys/api-keys.service';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { setupApiDocs } from './../src/v1/docs';
 
 // The public, key-authenticated API (/v1): key auth, scopes, contributor PENDING vs admin
-// publish, the moderation queue over keys, and the per-key throttle. Requires Postgres running,
+// publish, the moderation queue over keys, and the per-owner throttle. Requires Postgres running,
 // migrated and seeded (the seeded admin and the `helia` demo company).
 describe('Public API /v1 (e2e)', () => {
   let app: INestApplication;
@@ -503,23 +504,84 @@ describe('Public API /v1 (e2e)', () => {
       expect(schema?.required).toEqual(expect.arrayContaining(['name', 'attested']));
     });
 
+    it('documents the depth-cap 400 on every list route', async () => {
+      const spec = (await http().get('/v1/openapi.json').expect(200)).body as {
+        paths: Record<string, { get?: { responses?: Record<string, unknown> } }>;
+      };
+      for (const path of ['/v1/companies', '/v1/investors', '/v1/people', '/v1/funds']) {
+        expect(Object.keys(spec.paths[path]?.get?.responses ?? {})).toContain('400');
+      }
+    });
+
     it('serves Swagger UI', async () => {
       const res = await http().get('/v1/docs/').expect(200);
       expect(res.text).toContain('swagger');
     });
   });
 
+  /** A verified contributor made with Prisma (no /auth call), with `keys` keys of its own, so
+   *  its throttle buckets are untouched by the rest of the suite. Cleaned up in afterAll by the
+   *  suite's email prefix (keys cascade). */
+  async function freshContributor(tag: string, keys: number) {
+    const user = await prisma.user.create({
+      data: {
+        email: `${prefix}-${tag}@test.dev`,
+        name: `V1 ${tag}`,
+        passwordHash: 'unused',
+        role: 'CONTRIBUTOR',
+        emailVerifiedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    const tokens: string[] = [];
+    for (let i = 0; i < keys; i++) {
+      const created = await app
+        .get(ApiKeysService)
+        .create(
+          { id: user.id, role: 'CONTRIBUTOR', emailVerified: true },
+          { name: `${prefix} ${tag} ${i}`, scope: 'contributor' },
+        );
+      tokens.push(created.token);
+    }
+    return tokens;
+  }
+
+  describe('list depth', () => {
+    const lists = ['/v1/companies', '/v1/investors', '/v1/people', '/v1/funds'];
+    const deepest = MAX_V1_LIST_DEPTH / 100;
+    let key: string;
+    beforeAll(async () => {
+      [key = ''] = await freshContributor('depth', 1);
+    });
+
+    it(`serves rows up to ${MAX_V1_LIST_DEPTH} and answers 400 past them`, async () => {
+      for (const path of lists) {
+        await http().get(`${path}?page=${deepest}&pageSize=100`).set(bearer(key)).expect(200);
+        const res = await http()
+          .get(`${path}?page=${deepest + 1}&pageSize=100`)
+          .set(bearer(key))
+          .expect(400);
+        expect(JSON.stringify(res.body.message)).toContain('Lists stop at row');
+      }
+      // The default page size counts too: 401 × 25 is past the cap.
+      await http().get('/v1/companies?page=401').set(bearer(key)).expect(400);
+      await http().get('/v1/companies?page=400').set(bearer(key)).expect(200);
+      // Deep offsets on a full dataset take seconds per read.
+    }, 120_000);
+
+    it("leaves the website's directory uncapped", async () => {
+      await http().get(`/companies?page=${deepest + 1}&pageSize=100`).expect(200);
+    }, 60_000);
+  });
+
   describe('throttle', () => {
-    it(`answers 429 on contributor write ${API_KEY_LIMITS.contributor.write + 1} in a minute`, async () => {
-      const key = (
-        await mintKey(contributorJwt, {
-          name: 'burst',
-          scope: 'contributor',
-        }).expect(201)
-      ).body.token;
+    it(`answers 429 on a contributor's write ${API_KEY_LIMITS.contributor.write + 1} in a minute, across keys`, async () => {
+      const keys = await freshContributor('burst', 2);
       const codes: number[] = [];
       for (let i = 0; i <= API_KEY_LIMITS.contributor.write; i++) {
         // An empty body: the throttle counts before validation, and nothing is written.
+        // Alternating keys: the budget is the owner's, not each key's.
+        const key = keys[i % keys.length] ?? '';
         codes.push((await http().post('/v1/companies').set(bearer(key)).send({})).status);
       }
       expect(codes.slice(0, -1).every((c) => c === 400)).toBe(true);

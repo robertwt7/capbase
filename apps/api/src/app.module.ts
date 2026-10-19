@@ -15,7 +15,7 @@ import { PeopleModule } from './people/people.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReportsModule } from './reports/reports.module';
 import { SearchModule } from './search/search.module';
-import { DEFAULT_LIMIT, THROTTLE_MESSAGE } from './throttle/throttle';
+import { DEFAULT_LIMIT, THROTTLE_MESSAGE, V1_DAILY_THROTTLER } from './throttle/throttle';
 import { UsersModule } from './users/users.module';
 import { V1Module } from './v1/v1.module';
 
@@ -28,8 +28,9 @@ import { HealthController } from './health.controller';
     SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     // In-memory counters: one API process. The guard is ApiThrottlerGuard (AuthModule).
+    // `daily` is the /v1 per-account quota; it skips every request not made with a live key.
     ThrottlerModule.forRoot({
-      throttlers: [{ name: 'default', ...DEFAULT_LIMIT }],
+      throttlers: [{ name: 'default', ...DEFAULT_LIMIT }, V1_DAILY_THROTTLER],
       errorMessage: THROTTLE_MESSAGE,
     }),
     PrismaModule,

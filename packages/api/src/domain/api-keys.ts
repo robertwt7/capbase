@@ -19,11 +19,24 @@ export const API_KEY_NAME_MAX = 80;
 /** Pending cap for submissions made with a key (the website's stays MAX_PENDING_SUBMISSIONS). */
 export const MAX_PENDING_API_SUBMISSIONS = 500;
 
-/** Per-key limits per minute, enforced by the API throttler. */
+/** Per-account limits per minute, enforced by the API throttler: every key one account holds,
+ *  and every /v1 route, share one read bucket and one write bucket. Sized by the scope of the
+ *  key making the request. */
 export const API_KEY_LIMITS = {
   contributor: { read: 120, write: 60 },
   admin: { read: 600, write: 300 },
 } as const;
+
+/** Per-account requests per day across every key and every /v1 route, reads and writes
+ *  together. The per-minute limits shape bursts; this bounds what one account can pull. */
+export const API_KEY_DAILY_LIMITS = {
+  contributor: 10_000,
+  admin: 50_000,
+} as const satisfies Record<ApiKeyScope, number>;
+
+/** The deepest row a /v1 list serves: `page × pageSize` may not exceed it. Lookups and filtered
+ *  lists are unaffected; paging through a whole directory is not what the API is for. */
+export const MAX_V1_LIST_DEPTH = 10_000;
 
 /** The key scopes a role may hold (and mint). USER holds none. */
 export function scopesForRole(role: Role): readonly ApiKeyScope[] {

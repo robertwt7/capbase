@@ -4,8 +4,11 @@ import { JwtService } from '@nestjs/jwt';
 import {
   InjectThrottlerOptions,
   InjectThrottlerStorage,
+  ThrottlerException,
   ThrottlerGuard,
+  type ThrottlerLimitDetail,
   type ThrottlerModuleOptions,
+  type ThrottlerRequest,
   type ThrottlerStorage,
 } from '@nestjs/throttler';
 
@@ -14,12 +17,15 @@ import type { ApiKeyScope } from '@repo/api';
 import { ApiKeysService, bearerApiKey, type KeyedRequest } from '../api-keys/api-keys.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { UsersService } from '../users/users.service';
-import { KEY_SCOPE } from './throttle';
+import { DAILY_QUOTA_MESSAGE, KEY_SCOPE, V1_DAILY_THROTTLER } from './throttle';
 
 const IDENTITY = Symbol('throttleIdentity');
+/** The named throttler being checked, so a block can say which limit it was. */
+const THROTTLER_NAME = Symbol('throttlerName');
 
 interface Identity {
-  /** The bucket: `user:<id>` for a JWT, `key:<id>` for an API key. */
+  /** The bucket: `user:<id>` for a JWT, `owner:<userId>` for an API key (every key of one
+   *  account shares it; a distinct prefix so the owner's own JWT traffic never eats into it). */
   tracker: string;
   admin: boolean;
 }
@@ -30,6 +36,7 @@ interface ThrottledRequest extends KeyedRequest {
   app?: { get(setting: string): unknown };
   [IDENTITY]?: Identity | null;
   [KEY_SCOPE]?: ApiKeyScope;
+  [THROTTLER_NAME]?: string;
 }
 
 /**
@@ -37,9 +44,10 @@ interface ThrottledRequest extends KeyedRequest {
  *
  * - **the user**, when it carries a valid JWT: so people behind one NAT don't share
  *   a bucket, and one account can't spread its requests across many IPs;
- * - **the API key**, when it carries a valid `cbk_…` key (/v1): each key has its own
- *   budget, sized by its scope (`V1ReadThrottle`/`V1WriteThrottle`). A key is **never**
- *   exempt, not even an admin's, and never skipped as an internal read;
+ * - **the API key's owner**, when it carries a valid `cbk_…` key (/v1): every key of one
+ *   account shares its budget, one bucket for all /v1 reads and one for all writes, sized by
+ *   the key's scope (`V1ReadThrottle`/`V1WriteThrottle`), plus a daily quota. A key is
+ *   **never** exempt, not even an admin's, and never skipped as an internal read;
  * - **the client IP** otherwise: `req.ip`, which under `trust proxy` (main.ts) is the
  *   visitor's address the web forwarded in X-Forwarded-For, or the socket address of
  *   a caller that came straight at the API.
@@ -79,6 +87,29 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
     return (await this.identify(req))?.admin === true;
   }
 
+  protected override async handleRequest(props: ThrottlerRequest): Promise<boolean> {
+    const req = props.context.switchToHttp().getRequest<ThrottledRequest>();
+    req[THROTTLER_NAME] = props.throttler.name;
+    return super.handleRequest(props);
+  }
+
+  /**
+   * The daily quota answers with its own message and a plain `Retry-After` (the library only
+   * sets `Retry-After-daily` for a named throttler, and /developers promises `Retry-After`).
+   */
+  protected override async throwThrottlingException(
+    context: ExecutionContext,
+    detail: ThrottlerLimitDetail,
+  ): Promise<void> {
+    const http = context.switchToHttp();
+    if (http.getRequest<ThrottledRequest>()[THROTTLER_NAME] === V1_DAILY_THROTTLER.name) {
+      const res = http.getResponse<{ header(name: string, value: number): void }>();
+      res.header('Retry-After', detail.timeToBlockExpire);
+      throw new ThrottlerException(DAILY_QUOTA_MESSAGE);
+    }
+    return super.throwThrottlingException(context, detail);
+  }
+
   protected override async getTracker(req: Record<string, unknown>): Promise<string> {
     const identity = await this.identify(req as unknown as ThrottledRequest);
     if (identity) return identity.tracker;
@@ -95,9 +126,9 @@ export class ApiThrottlerGuard extends ThrottlerGuard {
     if (bearerApiKey(req)) {
       try {
         // Shared with ApiKeyGuard, which answers the 401/403 this swallows.
-        const { key } = await this.apiKeys.authenticateRequest(req);
+        const { key, user } = await this.apiKeys.authenticateRequest(req);
         req[KEY_SCOPE] = key.scope;
-        identity = { tracker: `key:${key.id}`, admin: false };
+        identity = { tracker: `owner:${user.id}`, admin: false };
       } catch {
         identity = null;
       }

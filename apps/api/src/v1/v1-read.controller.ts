@@ -1,5 +1,6 @@
 import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiMovedPermanentlyResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -35,6 +36,7 @@ import { SearchService } from '../search/search.service';
 import { V1ReadThrottle } from '../throttle/throttle';
 import { UsersService } from '../users/users.service';
 import { V1ListCompaniesDto } from './dto/v1-list-companies.dto';
+import { assertListDepth, LIST_DEPTH_MESSAGE } from './list-depth';
 
 /**
  * Public API reads. The same services as the website's routes, so visibility (APPROVED, not
@@ -111,11 +113,13 @@ export class V1ReadController {
       },
     },
   })
+  @ApiBadRequestResponse({ description: LIST_DEPTH_MESSAGE })
   @Get('companies')
   listCompanies(
     @Query() query: V1ListCompaniesDto,
     @CurrentUser() user: RequestUser,
   ): Promise<Paginated<Company>> {
+    assertListDepth(query);
     return this.companies.findAllApproved(query, user);
   }
 
@@ -143,11 +147,13 @@ export class V1ReadController {
   @ApiOkResponse({
     description: '`{ items: InvestorSummary[], total, page, pageSize }`.',
   })
+  @ApiBadRequestResponse({ description: LIST_DEPTH_MESSAGE })
   @Get('investors')
   listInvestors(
     @Query() query: ListInvestorsDto,
     @CurrentUser() user: RequestUser,
   ): Promise<Paginated<InvestorSummary>> {
+    assertListDepth(query);
     return this.investors.findAll(query, user);
   }
 
@@ -173,11 +179,13 @@ export class V1ReadController {
   @ApiOkResponse({
     description: '`{ items: PersonSummary[], total, page, pageSize }`.',
   })
+  @ApiBadRequestResponse({ description: LIST_DEPTH_MESSAGE })
   @Get('people')
   listPeople(
     @Query() query: ListPeopleDto,
     @CurrentUser() user: RequestUser,
   ): Promise<Paginated<PersonSummary>> {
+    assertListDepth(query);
     return this.people.findAll(query, user);
   }
 
@@ -203,11 +211,13 @@ export class V1ReadController {
   @ApiOkResponse({
     description: '`{ items: FundSummary[], total, page, pageSize }`.',
   })
+  @ApiBadRequestResponse({ description: LIST_DEPTH_MESSAGE })
   @Get('funds')
   listFunds(
     @Query() query: ListFundsDto,
     @CurrentUser() user: RequestUser,
   ): Promise<Paginated<FundSummary>> {
+    assertListDepth(query);
     return this.funds.findAll(query, user);
   }
 

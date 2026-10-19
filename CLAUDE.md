@@ -560,9 +560,20 @@ roles or suppression over `/v1`. `GET /v1/companies?domain=` is an exact host ma
 (`normalizeDomain` in `@repo/api`; contributed domains are stored normalised; indexed) for
 de-duplication. Keys are managed with JWT routes `GET|POST /auth/me/api-keys`, `DELETE
 /auth/me/api-keys/:id` (`MAX_ACTIVE_API_KEYS` 5); `AdminUsersService.update` revokes keys in the
-role/ban transaction (`revokeForRole`). The throttler keys a key on `key:<id>` (never
-admin-exempt, never skipped as an internal read) and `V1ReadThrottle`/`V1WriteThrottle` size it
-by scope from `API_KEY_LIMITS`; the guard and throttler share one key lookup per request.
+role/ban transaction (`revokeForRole`). **Extraction limits** (per account, never per key): the
+throttler keys a key on `owner:<userId>` (never admin-exempt, never skipped as an internal read;
+not `user:` so the owner's own JWT traffic never eats into it), and `V1ReadThrottle`/
+`V1WriteThrottle` pass a route-independent `generateKey`, so every `/v1` read route shares one
+bucket (`v1-read`) and every write route another (`v1-write`), sized by the requesting key's
+scope from `API_KEY_LIMITS`. A second named throttler, `daily` (`V1_DAILY_THROTTLER`, registered
+in `AppModule`'s `forRoot`), counts every live-key request against `API_KEY_DAILY_LIMITS`
+(contributor 10k, admin 50k) in a **sliding** 24 h window (`blockDuration: 0` — the library
+default would lock the account out for a day); its `skipIf` passes anything without a resolved
+key scope, so website, JWT and dead-key traffic never hold a daily window. Its 429 carries
+`DAILY_QUOTA_MESSAGE` and a plain `Retry-After` (`ApiThrottlerGuard.throwThrottlingException`).
+The four `/v1` lists also stop at row `MAX_V1_LIST_DEPTH` (10k, `page × pageSize`, 400 past it —
+`src/v1/list-depth.ts`); the website's directory routes share the DTOs and stay uncapped. The
+guard and throttler share one key lookup per request.
 **OpenAPI**: `setupApiDocs` (`src/v1/docs.ts`, called in `main.ts`) serves Swagger UI at
 `/v1/docs` and the document at `/v1/openapi.json`, public, `include: [V1Module]` only. Bodies and
 query params come from the DTO classes through the `@nestjs/swagger` CLI plugin (`nest-cli.json`;

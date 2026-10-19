@@ -7,16 +7,19 @@ import { Test } from '@nestjs/testing';
 import { SkipThrottle, Throttle, ThrottlerModule } from '@nestjs/throttler';
 import request from 'supertest';
 
-import { API_KEY_LIMITS, type ApiKeyScope } from '@repo/api';
+import { API_KEY_DAILY_LIMITS, API_KEY_LIMITS, type ApiKeyScope } from '@repo/api';
 
 import { ApiKeysService, type KeyedRequest } from '../api-keys/api-keys.service';
 import { UsersService } from '../users/users.service';
 import { ApiThrottlerGuard } from './api-throttler.guard';
 import {
+  DAILY_QUOTA_MESSAGE,
   DEFAULT_TRUST_PROXY,
   parseTrustProxy,
   THROTTLE_MESSAGE,
+  V1_DAILY_THROTTLER,
   V1ReadThrottle,
+  V1WriteThrottle,
 } from './throttle';
 
 @Controller('t')
@@ -39,6 +42,18 @@ class TestController {
     return { ok: true };
   }
 
+  @V1ReadThrottle()
+  @Get('v1b')
+  v1b() {
+    return { ok: true };
+  }
+
+  @V1WriteThrottle()
+  @Post('v1w')
+  v1w() {
+    return { ok: true };
+  }
+
   @SkipThrottle()
   @Get('health')
   health() {
@@ -48,30 +63,37 @@ class TestController {
 
 type Row = { role: 'USER' | 'ADMIN'; bannedAt: Date | null; tokenVersion: number };
 
-/** Test keys: `cbk_<name>` → its id and scope. Anything else starting `cbk_` is dead. */
-const KEYS: Record<string, { id: string; scope: ApiKeyScope }> = {
-  cbk_contrib1: { id: 'kc1', scope: 'contributor' },
-  cbk_contrib2: { id: 'kc2', scope: 'contributor' },
-  cbk_admin: { id: 'ka', scope: 'admin' },
+/** Test keys: `cbk_<name>` → its id, scope and owner. Anything else starting `cbk_` is dead. */
+const KEYS: Record<string, { id: string; scope: ApiKeyScope; owner: string }> = {
+  cbk_contrib1: { id: 'kc1', scope: 'contributor', owner: 'u1' },
+  cbk_contrib1b: { id: 'kc1b', scope: 'contributor', owner: 'u1' },
+  cbk_contrib2: { id: 'kc2', scope: 'contributor', owner: 'u2' },
+  cbk_admin: { id: 'ka', scope: 'admin', owner: 'u3' },
 };
 const fakeApiKeys = {
   authenticateRequest: jest.fn(async (req: KeyedRequest) => {
     const token = String(req.headers.authorization).slice(7);
     const key = KEYS[token];
     if (!key) throw new Error('dead key');
-    return { key: { ...key, prefix: token }, user: {} };
+    return { key: { id: key.id, scope: key.scope, prefix: token }, user: { id: key.owner } };
   }),
 };
 
-/** A Nest app with only the throttler in front of three test routes. `trustProxy`
- *  decides whether supertest's loopback socket counts as the web container. */
-async function makeApp(trustProxy: string, users: Record<string, Row> = {}) {
+/** A Nest app with only the throttler in front of the test routes. `trustProxy`
+ *  decides whether supertest's loopback socket counts as the web container; `dailyLimit`
+ *  shrinks the daily quota (the real one is too many requests for a unit test). */
+async function makeApp(trustProxy: string, users: Record<string, Row> = {}, dailyLimit?: number) {
   const findById = jest.fn(async (id: string) => (users[id] ? { id, ...users[id] } : null));
   const moduleRef = await Test.createTestingModule({
     imports: [
       JwtModule.register({ secret: 'test-secret' }),
       ThrottlerModule.forRoot({
-        throttlers: [{ name: 'default', ttl: 60_000, limit: 100 }],
+        throttlers: [
+          { name: 'default', ttl: 60_000, limit: 100 },
+          dailyLimit === undefined
+            ? V1_DAILY_THROTTLER
+            : { ...V1_DAILY_THROTTLER, limit: dailyLimit },
+        ],
         errorMessage: THROTTLE_MESSAGE,
       }),
     ],
@@ -203,17 +225,51 @@ describe('ApiThrottlerGuard with API keys', () => {
   const read = (http: Awaited<ReturnType<typeof makeApp>>['http'], key: string) => () =>
     http().get('/t/v1').set('authorization', `Bearer ${key}`);
 
-  it('gives each key its own bucket, sized by scope; an admin key is not exempt', async () => {
+  it('shares one read bucket across every key of one owner', async () => {
     const { http } = await start();
     const limit = API_KEY_LIMITS.contributor.read;
-    const codes = await statuses(limit + 1, read(http, 'cbk_contrib1'));
-    expect(codes.slice(0, limit).every((c) => c === 200)).toBe(true);
-    expect(codes[limit]).toBe(429);
-    // Same IP, another key: a fresh bucket.
+    const codes = await statuses(limit, read(http, 'cbk_contrib1'));
+    expect(codes.every((c) => c === 200)).toBe(true);
+    // The owner's other key draws on the same budget.
+    expect(await statuses(1, read(http, 'cbk_contrib1b'))).toEqual([429]);
+    // Same IP, another owner: a fresh bucket.
     expect(await statuses(1, read(http, 'cbk_contrib2'))).toEqual([200]);
     // An admin key gets the larger budget, but a budget all the same.
     const admin = await statuses(limit + 1, read(http, 'cbk_admin'));
     expect(admin.every((c) => c === 200)).toBe(true);
+  });
+
+  it('shares one read bucket across every /v1 read route', async () => {
+    const { http } = await start();
+    const limit = API_KEY_LIMITS.contributor.read;
+    const half = Math.floor(limit / 2);
+    const first = await statuses(half, read(http, 'cbk_contrib1'));
+    const second = await statuses(limit - half, () =>
+      http().get('/t/v1b').set('authorization', 'Bearer cbk_contrib1'),
+    );
+    expect([...first, ...second].every((c) => c === 200)).toBe(true);
+    expect(await statuses(1, read(http, 'cbk_contrib1'))).toEqual([429]);
+    const res = await http().get('/t/v1b').set('authorization', 'Bearer cbk_contrib1');
+    expect(res.status).toBe(429);
+  });
+
+  it('keeps writes in a bucket of their own', async () => {
+    const { http } = await start();
+    const write = () => http().post('/t/v1w').set('authorization', 'Bearer cbk_contrib1');
+    const writes = API_KEY_LIMITS.contributor.write;
+    expect((await statuses(writes, write)).every((c) => c === 201)).toBe(true);
+    expect(await statuses(1, write)).toEqual([429]);
+    // Reads are untouched by the exhausted write bucket.
+    expect(await statuses(1, read(http, 'cbk_contrib1b'))).toEqual([200]);
+  });
+
+  it('sends the remaining budget, counted across routes', async () => {
+    const { http } = await start();
+    const limit = API_KEY_LIMITS.contributor.read;
+    await http().get('/t/v1').set('authorization', 'Bearer cbk_contrib2');
+    const res = await http().get('/t/v1b').set('authorization', 'Bearer cbk_contrib2');
+    expect(res.headers['x-ratelimit-limit']).toBe(String(limit));
+    expect(res.headers['x-ratelimit-remaining']).toBe(String(limit - 2));
   });
 
   it('caps an admin key at its own limit', async () => {
@@ -231,6 +287,82 @@ describe('ApiThrottlerGuard with API keys', () => {
     expect(codes[limit]).toBe(429);
     // Another dead key from the same address shares that IP bucket.
     expect(await statuses(1, read(http, 'cbk_dead2'))).toEqual([429]);
+  });
+});
+
+describe('ApiThrottlerGuard daily quota', () => {
+  let close: (() => Promise<void>) | undefined;
+  afterEach(async () => {
+    await close?.();
+    close = undefined;
+  });
+  const start = async (dailyLimit: number, trustProxy = DEFAULT_TRUST_PROXY) => {
+    const ctx = await makeApp(trustProxy, {}, dailyLimit);
+    close = () => ctx.app.close();
+    return ctx;
+  };
+  const as = (key: string) => `Bearer ${key}`;
+
+  it('counts every key and route of one owner, then answers 429 with Retry-After', async () => {
+    const { http } = await start(3);
+    const ok = [
+      (await http().get('/t/v1').set('authorization', as('cbk_contrib1'))).status,
+      (await http().get('/t/v1b').set('authorization', as('cbk_contrib1b'))).status,
+      (await http().post('/t/v1w').set('authorization', as('cbk_contrib1'))).status,
+    ];
+    expect(ok).toEqual([200, 200, 201]);
+    const res = await http().get('/t/v1').set('authorization', as('cbk_contrib1b'));
+    expect(res.status).toBe(429);
+    expect(res.body).toMatchObject({ message: DAILY_QUOTA_MESSAGE });
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+    // Another owner has a quota of their own.
+    const other = await http().get('/t/v1').set('authorization', as('cbk_contrib2'));
+    expect(other.status).toBe(200);
+  });
+
+  it('sends the daily budget in -daily headers', async () => {
+    const { http } = await start(50);
+    await http().get('/t/v1').set('authorization', as('cbk_contrib2'));
+    const res = await http().post('/t/v1w').set('authorization', as('cbk_contrib2'));
+    expect(res.headers['x-ratelimit-limit-daily']).toBe('50');
+    expect(res.headers['x-ratelimit-remaining-daily']).toBe('48');
+  });
+
+  it('never counts a request made without a live key', async () => {
+    const { http, token } = await start(3, '10.0.0.0/8');
+    // By IP, by JWT and by dead key: all past the daily limit, none blocked by it.
+    const ip = await statuses(5, () => http().get('/t/v1'));
+    const jwt = await statuses(5, () => http().get('/t/v1').set('authorization', token('alice')));
+    const dead = await statuses(5, () =>
+      http().get('/t/v1b').set('authorization', as('cbk_dead')),
+    );
+    expect([...ip, ...jwt, ...dead].every((c) => c === 200)).toBe(true);
+    const res = await http().get('/t/v1').set('authorization', token('alice'));
+    expect(res.headers['x-ratelimit-limit-daily']).toBeUndefined();
+  });
+
+  it('does not count a request the per-minute limit already refused', async () => {
+    const writes = API_KEY_LIMITS.contributor.write;
+    const { http } = await start(writes + 10);
+    const write = () => http().post('/t/v1w').set('authorization', as('cbk_contrib1'));
+    const codes = await statuses(writes + 3, write);
+    expect(codes.slice(writes)).toEqual([429, 429, 429]);
+    // `writes` counted, plus this read: the three per-minute 429s never reached the quota.
+    const res = await http().get('/t/v1').set('authorization', as('cbk_contrib1'));
+    expect(res.status).toBe(200);
+    expect(res.headers['x-ratelimit-remaining-daily']).toBe('9');
+  });
+
+  it('sizes the quota by scope', async () => {
+    // No override: the real limits, read off the key's scope.
+    const { app, http } = await makeApp(DEFAULT_TRUST_PROXY);
+    close = () => app.close();
+    const contributor = await http().get('/t/v1').set('authorization', as('cbk_contrib1'));
+    const admin = await http().get('/t/v1').set('authorization', as('cbk_admin'));
+    expect(contributor.headers['x-ratelimit-limit-daily']).toBe(
+      String(API_KEY_DAILY_LIMITS.contributor),
+    );
+    expect(admin.headers['x-ratelimit-limit-daily']).toBe(String(API_KEY_DAILY_LIMITS.admin));
   });
 });
 

@@ -2,12 +2,15 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
+  API_KEY_DAILY_LIMITS,
   API_KEY_LIMITS,
   API_KEY_PREFIX,
   EMAIL_UNVERIFIED,
   MAX_ACTIVE_API_KEYS,
   MAX_API_KEY_CIDRS,
+  MAX_PAGE_SIZE,
   MAX_PENDING_API_SUBMISSIONS,
+  MAX_V1_LIST_DEPTH,
 } from '@repo/api';
 
 import { Button, buttonVariants, PageContainer, SectionHeader } from '@/components/ui';
@@ -75,6 +78,7 @@ function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
 export default function DevelopersPage() {
   const docs = `${SITE_URL}/v1/docs`;
   const limits = API_KEY_LIMITS;
+  const daily = API_KEY_DAILY_LIMITS;
 
   return (
     <PageContainer className="pt-14 pb-20">
@@ -150,23 +154,48 @@ export default function DevelopersPage() {
         <section>
           <h2 className={H2}>Rate limits</h2>
           <p className={P}>
-            Limits are per key, per minute. Every address also has its own limit at the edge, so one
-            busy script doesn&apos;t slow anyone else&apos;s.
+            Limits are per account: every key you hold, and every route, share one budget — one
+            for reads, one for writes, and a daily total for both. Every address also has its own
+            limit at the edge, so one busy script doesn&apos;t slow anyone else&apos;s.
           </p>
           <Table
-            head={['Scope', 'Reads / min', 'Writes / min']}
+            head={['Scope', 'Reads / min', 'Writes / min', 'Requests / day']}
             rows={[
               [
                 'contributor',
                 formatCount(limits.contributor.read),
                 formatCount(limits.contributor.write),
+                formatCount(daily.contributor),
               ],
-              ['admin', formatCount(limits.admin.read), formatCount(limits.admin.write)],
+              [
+                'admin',
+                formatCount(limits.admin.read),
+                formatCount(limits.admin.write),
+                formatCount(daily.admin),
+              ],
             ]}
           />
           <p className={P}>
-            Over a limit you get <C>429</C> with a <C>Retry-After</C> header (seconds). Wait that
-            long, then carry on; there is no penalty beyond the wait.
+            The daily total is a rolling 24 hours: each request stops counting a day after you made
+            it, so a spent quota frees up gradually rather than at midnight. Every response carries
+            the per-minute budget in <C>X-RateLimit-Limit</C> / <C>X-RateLimit-Remaining</C> and
+            the daily one in <C>X-RateLimit-Limit-daily</C> /{' '}
+            <C>X-RateLimit-Remaining-daily</C>.
+          </p>
+          <p className={P}>
+            Over either limit you get <C>429</C> with a <C>Retry-After</C> header (seconds). Wait
+            that long, then carry on; there is no penalty beyond the wait.
+          </p>
+        </section>
+
+        <section>
+          <h2 className={H2}>Lists</h2>
+          <p className={P}>
+            <C>/v1/companies</C>, <C>/v1/investors</C>, <C>/v1/people</C> and <C>/v1/funds</C>{' '}
+            take <C>page</C> and <C>pageSize</C> (up to {formatCount(MAX_PAGE_SIZE)} rows a page),
+            and stop at row {formatCount(MAX_V1_LIST_DEPTH)}: a page past it (<C>page × pageSize</C>)
+            is a <C>400</C>. The API is for finding and adding specific records, not for copying a
+            directory — use <C>q</C>, a filter, or <C>domain</C> to find what you need.
           </p>
         </section>
 
@@ -242,7 +271,7 @@ export default function DevelopersPage() {
             rows={[
               [
                 '400',
-                'The body or query failed validation, including a missing attestation or an edit that changes nothing.',
+                'The body or query failed validation, including a missing attestation, an edit that changes nothing, or a list page past the depth limit.',
               ],
               [
                 '401',
@@ -267,7 +296,8 @@ export default function DevelopersPage() {
               [
                 '429',
                 <>
-                  Over a rate limit or the pending cap. Honour <C>Retry-After</C>.
+                  Over a rate limit, the daily quota or the pending cap. Honour{' '}
+                  <C>Retry-After</C>.
                 </>,
               ],
             ]}
