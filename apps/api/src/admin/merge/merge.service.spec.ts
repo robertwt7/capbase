@@ -241,11 +241,17 @@ function fixture() {
     mergeRecord: table([]),
   };
 
+  // The directory count refresh each merge/unmerge runs after its commit.
+  const refreshed: { sql: string; values: unknown[] }[] = [];
   const prisma = {
     ...db,
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+    $executeRaw: async (q: { sql: string; values: unknown[] }) => {
+      refreshed.push(q);
+      return 0;
+    },
   };
-  return { db, service: new MergeService(prisma as unknown as PrismaService) };
+  return { db, refreshed, service: new MergeService(prisma as unknown as PrismaService) };
 }
 
 /** Every owning-FK value in the database, so a round trip can be asserted as a
@@ -648,5 +654,65 @@ describe('MergeService.listCandidates (paging)', () => {
     const res = await makeService().listCandidates('PENDING', undefined, 9);
     expect(res.items).toEqual([]);
     expect(res.total).toBe(80);
+  });
+});
+
+describe('MergeService directory counts', () => {
+  /** The id arrays a refresh statement was scoped to, by the table it updates. */
+  const scoped = (refreshed: { sql: string; values: unknown[] }[]) =>
+    refreshed.map((q) => ({
+      table: q.sql.includes('UPDATE "Person"') ? 'Person' : 'Investor',
+      ids: q.values.filter(Array.isArray),
+    }));
+
+  it('refreshes the people and firms on both companies after a merge and after an unmerge', async () => {
+    const { refreshed, service } = fixture();
+    const { mergeRecordId } = await service.mergeCandidate('cand-1', 'c-keep', 'admin-1');
+    // People statement then investor statement, each: [direct ids] + [companyIds].
+    expect(scoped(refreshed)).toEqual([
+      { table: 'Person', ids: [[], ['c-keep', 'c-lose']] },
+      { table: 'Investor', ids: [[], ['c-keep', 'c-lose']] },
+    ]);
+
+    refreshed.length = 0;
+    await service.unmerge(mergeRecordId, 'admin-1');
+    expect(scoped(refreshed)).toEqual([
+      { table: 'Person', ids: [[], ['c-keep', 'c-lose']] },
+      { table: 'Investor', ids: [[], ['c-keep', 'c-lose']] },
+    ]);
+  });
+
+  it('refreshes only the two people after a person merge', async () => {
+    const { refreshed, service } = fixture();
+    await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+    expect(scoped(refreshed)).toEqual([{ table: 'Person', ids: [['h-keep', 'h-lose'], []] }]);
+  });
+
+  it('refreshes only the two firms after an investor merge and its unmerge', async () => {
+    const { refreshed, service } = fixture();
+    const { mergeRecordId } = await service.merge('investor', 'i-keep', 'i-lose', 'admin-1');
+    await service.unmerge(mergeRecordId, 'admin-1');
+    expect(scoped(refreshed)).toEqual([
+      { table: 'Investor', ids: [['i-keep', 'i-lose'], []] },
+      { table: 'Investor', ids: [['i-keep', 'i-lose'], []] },
+    ]);
+  });
+
+  it('never refreshes for a merge that was refused', async () => {
+    const { refreshed, service } = fixture();
+    await expect(service.merge('company', 'c-keep', 'c-keep', 'admin-1')).rejects.toThrow();
+    expect(refreshed).toEqual([]);
+  });
+
+  it('still returns the merge when the refresh fails', async () => {
+    // A stale list order heals on the next ingest; a merge reported as failed
+    // after it committed would be a lie.
+    const { db, service } = fixture();
+    (service as unknown as { prisma: { $executeRaw: () => Promise<never> } }).prisma.$executeRaw = async () => {
+      throw new Error('db down');
+    };
+    const res = await service.merge('person', 'h-keep', 'h-lose', 'admin-1');
+    expect(res).toMatchObject({ survivorId: 'h-keep', losingId: 'h-lose' });
+    expect(db.mergeRecord.rows).toHaveLength(1);
   });
 });

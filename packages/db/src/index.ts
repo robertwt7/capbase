@@ -18,3 +18,4 @@ export * from './generated/prisma/client';
 
 // Prisma-typed helpers shared by every app that writes through the client.
 export { toJsonValue, type JsonColumnValue } from './json';
+export { refreshDirectoryCounts, type DirectoryCountScope } from './directory-counts';

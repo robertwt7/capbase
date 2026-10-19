@@ -449,6 +449,11 @@ model Investor {
   /// Commitments this firm made to funds as a limited partner.
   commitments    FundCommitment[]
 
+  /// Public holdings (approved, on a public company) — the /investors sort key.
+  /// Maintained by refreshDirectoryCounts (@repo/db); cards count live, so this
+  /// only orders the list.
+  holdingCount Int @default(0)
+
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
   @@index([partnerOnly])
@@ -459,6 +464,7 @@ model Investor {
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Investor_name_trgm_idx")
   @@index([domain])
+  @@index([holdingCount(sort: Desc), name])
 }
 
 /// One private fund managed by an Investor. Unlike Investor.fundCount — a
@@ -734,6 +740,13 @@ model Person {
   /// viewers exactly as it hides a partner-only company, firm or fund.
   identifierOnly Boolean @default(false)
 
+  /// Public roles (PUBLIC_ROLES) — the /people sort key. Maintained by
+  /// refreshDirectoryCounts (@repo/db); cards count live, so this only orders
+  /// the list.
+  roleCount    Int @default(0)
+  /// Distinct public companies across those roles — the "several companies" filter.
+  companyCount Int @default(0)
+
   moderationStatus ReviewStatus @default(PENDING)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
@@ -744,6 +757,8 @@ model Person {
   @@index([moderationStatus, name])
   /// Trigram GIN index: directory search is `ILIKE '%q%'`, which no btree can serve.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Person_name_trgm_idx")
+  @@index([roleCount(sort: Desc), name])
+  @@index([companyCount])
 }
 
 /// Professional contact details for a person at one organisation, licensed

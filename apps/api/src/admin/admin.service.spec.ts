@@ -63,6 +63,8 @@ function makePrisma(
   };
   const prisma = {
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    // The directory count refresh; a proposal never runs it.
+    $executeRaw: jest.fn(async () => 0),
     changeProposal: {
       update: jest.fn(async () => ({})),
       // The pre-decision read the contributor email is built from.
@@ -115,6 +117,8 @@ function makeRowPrisma(
   };
   const prisma = {
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    // The directory count refresh that runs after the decision commits.
+    $executeRaw: jest.fn<(q: { sql: string; values: unknown[] }) => Promise<number>>(async () => 0),
     company: { findUnique },
     fundingRound: { findUnique },
     personRole: { findUnique },
@@ -937,5 +941,77 @@ describe('AdminService.moderate (investor proposal)', () => {
       DEFAULT_REJECTION_REASON,
       '/developers',
     );
+  });
+});
+
+describe('AdminService.moderate directory counts', () => {
+  /** The id arrays each refresh statement was scoped to, by the table it updates. */
+  const scoped = (calls: [{ sql: string; values: unknown[] }][]) =>
+    calls.map(([q]) => ({
+      table: q.sql.includes('UPDATE "Person"') ? 'Person' : 'Investor',
+      ids: q.values.filter(Array.isArray),
+    }));
+
+  it("refreshes the role's person before and after, so a re-pointed role leaves its old person too", async () => {
+    const { prisma } = makeRowPrisma({ id: 'x1', companyId: 'c1', personId: 'h-old', name: 'Jane Smith' }, {
+      id: 'h-known',
+      suppressedAt: null,
+      mergedIntoId: null,
+    });
+    // The count-scope reads (select: personId) see the role before, then after.
+    const seen = ['h-old', 'h-known'];
+    prisma.personRole.findUnique.mockImplementation(async (...args: unknown[]) => {
+      const select = (args[0] as { select?: { personId?: boolean } }).select;
+      return select?.personId ? { personId: seen.shift() } : null;
+    });
+
+    await newService(prisma).moderate('person', 'x1', 'APPROVED', 'admin1');
+
+    expect(scoped(prisma.$executeRaw.mock.calls)).toEqual([{ table: 'Person', ids: [['h-old', 'h-known'], []] }]);
+  });
+
+  it("refreshes a holding's firm on approval and on rejection", async () => {
+    const { prisma } = makeRowPrisma({ id: 'h1', companyId: 'c1', investorId: 'i1' });
+    prisma.investorHolding.findUnique.mockImplementation(async (...args: unknown[]) =>
+      (args[0] as { select?: { investorId?: boolean } }).select?.investorId ? { investorId: 'i1' } : null,
+    );
+
+    await newService(prisma).moderate('investor', 'h1', 'REJECTED', 'admin1');
+
+    expect(scoped(prisma.$executeRaw.mock.calls)).toEqual([{ table: 'Investor', ids: [['i1'], []] }]);
+  });
+
+  it("refreshes a company's people and firms: its status gates every role and holding on it", async () => {
+    const { prisma } = makeRowPrisma({ id: 'c1' });
+
+    await newService(prisma).moderate('company', 'c1', 'APPROVED', 'admin1');
+
+    expect(scoped(prisma.$executeRaw.mock.calls)).toEqual([
+      { table: 'Person', ids: [[], ['c1']] },
+      { table: 'Investor', ids: [[], ['c1']] },
+    ]);
+  });
+
+  it.each(['round', 'acquisition', 'exit', 'diversity'] as const)('runs no refresh for a %s', async (type) => {
+    const { prisma } = makeRowPrisma({ id: 'x1', companyId: 'c1' });
+    await newService(prisma).moderate(type, 'x1', 'REJECTED', 'admin1');
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('runs no refresh for a proposal', async () => {
+    const { prisma } = makePrisma({ name: 'Helia Labs' });
+    await newService(prisma).moderate('proposal', 'p1', 'APPROVED', 'admin1');
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('still reports the decision when the refresh fails', async () => {
+    const { prisma } = makeRowPrisma({ id: 'c1' });
+    prisma.$executeRaw.mockRejectedValue(new Error('db down'));
+
+    await expect(newService(prisma).moderate('company', 'c1', 'APPROVED', 'admin1')).resolves.toEqual({
+      id: 'c1',
+      type: 'company',
+      moderationStatus: 'APPROVED',
+    });
   });
 });

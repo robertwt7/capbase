@@ -552,6 +552,35 @@ describe('IngestService.run', () => {
     expect(result).toEqual({ processed: 0, upserted: 0, investors: 0, funds: 0 });
     expect(prisma.company.create).not.toHaveBeenCalled();
   });
+
+  /** The full directory-count statements (a prebuilt Prisma.Sql, unscoped). */
+  const countRefreshes = (prisma: ReturnType<typeof mockPrisma>) =>
+    prisma.$executeRaw.mock.calls
+      .map((c) => c[0] as { sql?: string; values?: unknown[] })
+      .filter((q) => q.sql?.includes('"roleCount"') || q.sql?.includes('"holdingCount"'));
+
+  it('ends every run with a full directory count refresh', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [record()]).run(RUN);
+
+    const refreshes = countRefreshes(prisma);
+    expect(refreshes.map((q) => (q.sql!.includes('UPDATE "Person"') ? 'Person' : 'Investor'))).toEqual([
+      'Person',
+      'Investor',
+    ]);
+    // Unscoped: no target id lists.
+    expect(refreshes.every((q) => q.values!.length === 0)).toBe(true);
+  });
+
+  it('does not fail the run when the count refresh fails', async () => {
+    // The ingested rows are already written; the next run heals the order.
+    const prisma = mockPrisma();
+    prisma.$executeRaw.mockImplementation(async (...args: unknown[]) => {
+      if ((args[0] as { sql?: string }).sql?.includes('"roleCount"')) throw new Error('db down');
+      return 0;
+    });
+    await expect(serviceWith(prisma, [record()]).run(RUN)).resolves.toMatchObject({ upserted: 1 });
+  });
 });
 
 describe('IngestService match-&-enrich', () => {
@@ -2664,7 +2693,10 @@ describe('IngestService partner provenance', () => {
     await serviceWith(prisma, [
       record({ rounds: [{ externalId: 'R1', name: 'Seed', date: '2022-01-10', amountUsd: 1 }] }),
     ]).run(RUN);
-    const sql = prisma.$executeRaw.mock.calls.map((c) => (c[0] as unknown as string[]).join('?'));
+    // A tagged template's strings, or a prebuilt Prisma.Sql (the directory count refresh).
+    const sql = prisma.$executeRaw.mock.calls.map((c) =>
+      Array.isArray(c[0]) ? (c[0] as string[]).join('?') : (c[0] as unknown as { sql: string }).sql,
+    );
     expect(sql.some((q) => q.includes('"partnerFields" &&'))).toBe(true);
   });
 });

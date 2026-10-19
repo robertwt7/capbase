@@ -97,17 +97,21 @@ export class PeopleService {
       ...PUBLIC_PERSON,
       ...(partnerVisible(access) ? {} : { identifierOnly: false }),
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
-      ...(query.multiCompany && { id: { in: await this.multiCompanyIds() } }),
+      // Roles at MORE THAN ONE public company, on the stored count. In the
+      // WHERE, not a post-filter of the page: a `roles: { some: … }` filter can
+      // only ask "has a company role", which reported 75,926 people against a
+      // true 4,393, and post-filtering leaves `total` a lie and the pages empty.
+      ...(query.multiCompany && { companyCount: { gt: 1 } }),
     };
 
+    // The sort reads the stored `roleCount` (refreshDirectoryCounts): a
+    // relation-count orderBy, or a `_count` include, GROUP BYs the whole
+    // PersonRole table before the LIMIT — 12.6 s a page at 578k roles.
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.person.count({ where }),
       this.prisma.person.findMany({
         where,
-        orderBy:
-          query.sort === 'name'
-            ? [{ name: 'asc' }]
-            : [{ roles: { _count: 'desc' } }, { name: 'asc' }],
+        orderBy: query.sort === 'name' ? [{ name: 'asc' }] : [{ roleCount: 'desc' }, { name: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
@@ -117,72 +121,48 @@ export class PeopleService {
             orderBy: { since: 'desc' },
             include: ROLE_INCLUDE,
           },
-          // Over every role: a count is public.
-          _count: { select: { roles: { where: PUBLIC_ROLES } } },
         },
       }),
     ]);
 
-    const companyCounts = await this.countCompanies(rows.map((r) => r.id));
-    const items = rows.map((r) => ({
-      ...toPersonSummary(r as unknown as PersonWithRoles),
-      companyCount: companyCounts.get(r.id) ?? 0,
-    }));
+    const counts = await this.countRoles(rows.map((r) => r.id));
+    const items = rows.map((r) => {
+      const c = counts.get(r.id) ?? { roles: 0, companies: 0 };
+      return {
+        ...toPersonSummary({ ...r, _count: { roles: c.roles } } as unknown as PersonWithRoles),
+        companyCount: c.companies,
+      };
+    });
 
     return { items, total, page, pageSize };
   }
 
   /**
-   * Ids of everyone holding roles at MORE THAN ONE public company.
-   *
-   * Raw SQL because no Prisma relation filter can express "count(distinct
-   * companyId) > 1". A `roles: { some: … }` filter can only ask "has a company
-   * role", which nearly everyone satisfies — it reported 75,926 people where
-   * the true answer is 4,393, and post-filtering the page fixed the rows while
-   * leaving `total` a lie and paging through mostly-empty pages.
-   *
-   * The id set is the whole qualifying population, not one page. That is the
-   * cost of an exact count here; it is a few thousand cuids today and grows
-   * with serial founders rather than with the corpus, so it stays small
-   * relative to the 76k people it filters.
-   */
-  private async multiCompanyIds(): Promise<string[]> {
-    const rows = await this.prisma.$queryRaw<{ personId: string }[]>`
-      SELECT r."personId"
-        FROM "PersonRole" r
-        JOIN "Company" c
-          ON c.id = r."companyId"
-         AND c."moderationStatus" = 'APPROVED'
-         AND c."mergedIntoId" IS NULL
-       WHERE r."moderationStatus" = 'APPROVED'
-         AND r."personId" IS NOT NULL
-       GROUP BY r."personId"
-      HAVING count(DISTINCT r."companyId") > 1
-    `;
-    return rows.map((r) => r.personId);
-  }
-
-  /**
-   * Distinct public companies per person, for the page being returned.
+   * Public roles and distinct public companies per person, for the page being
+   * returned — counted live, so a stale sort key never shows as a wrong number.
    *
    * One extra query rather than counting the role SAMPLE: a person at 75
    * companies would otherwise show 6, because that is how many roles the card
    * loads. A lower bound rendered as a count is a wrong number, not a small one.
-   * Bounded by the page, so it stays one query however large the corpus grows.
+   * Bounded by the page's roles, so it stays one query however large the
+   * corpus grows. Over every public role: a count is public.
    */
-  private async countCompanies(personIds: string[]): Promise<Map<string, number>> {
-    const counts = new Map<string, number>();
-    if (personIds.length === 0) return counts;
+  private async countRoles(personIds: string[]): Promise<Map<string, { roles: number; companies: number }>> {
+    const counts = new Map<string, { roles: number; companies: Set<string> }>();
+    if (personIds.length === 0) return new Map();
 
-    const pairs = await this.prisma.personRole.findMany({
-      where: { personId: { in: personIds }, companyId: { not: null }, ...PUBLIC_ROLES },
+    const rows = await this.prisma.personRole.findMany({
+      where: { personId: { in: personIds }, ...PUBLIC_ROLES },
       select: { personId: true, companyId: true },
-      distinct: ['personId', 'companyId'],
     });
-    for (const p of pairs) {
-      if (p.personId) counts.set(p.personId, (counts.get(p.personId) ?? 0) + 1);
+    for (const r of rows) {
+      if (!r.personId) continue;
+      const c = counts.get(r.personId) ?? { roles: 0, companies: new Set<string>() };
+      c.roles += 1;
+      if (r.companyId) c.companies.add(r.companyId);
+      counts.set(r.personId, c);
     }
-    return counts;
+    return new Map([...counts].map(([id, c]) => [id, { roles: c.roles, companies: c.companies.size }]));
   }
 
   /**
@@ -193,10 +173,10 @@ export class PeopleService {
    */
   async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<PersonDetailResponse> {
     const access = await this.users.accessFor(viewer);
-    // No `_count` here: Prisma compiles a filtered relation count into a
-    // GROUP BY over the whole PersonRole table (~83k rows, ~300ms idle and
-    // seconds under crawler load) before joining the one person. Every public
-    // role is loaded instead — the counts and `indexable` need all of them.
+    // No `_count` here, as in the list: Prisma compiles a filtered relation
+    // count into a GROUP BY over the whole PersonRole table before joining the
+    // one person. Every public role is loaded instead — the counts and
+    // `indexable` need all of them.
     const found = await this.prisma.person.findFirst({
       where: { slug, ...PUBLIC_PERSON },
       include: {

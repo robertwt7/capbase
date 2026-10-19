@@ -69,6 +69,7 @@ describe('InvestorsService', () => {
   let transaction: jest.Mock;
   let citationFindMany: jest.Mock;
   let identifierFindMany: jest.Mock;
+  let holdingGroupBy: jest.Mock;
   let relationCounts: Record<'holdings' | 'funds' | 'people' | 'commitments', jest.Mock>;
 
   beforeEach(() => {
@@ -77,6 +78,8 @@ describe('InvestorsService', () => {
     findFirst = jest.fn();
     citationFindMany = jest.fn(async () => []);
     identifierFindMany = jest.fn(async () => []);
+    // The list's per-page portfolio counts.
+    holdingGroupBy = jest.fn(async () => []);
     // $transaction resolves the array of queries it is handed.
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     // The detail read counts each relation with its own query; these read the
@@ -98,7 +101,7 @@ describe('InvestorsService', () => {
     const prisma = {
       // findUnique backs the miss path: is this slug a tombstone, or nothing?
       investor: { findMany, count, findFirst, findUnique: jest.fn(async () => null) },
-      investorHolding: { count: relationCounts.holdings },
+      investorHolding: { count: relationCounts.holdings, groupBy: holdingGroupBy },
       fund: { count: relationCounts.funds },
       personRole: { count: relationCounts.people },
       fundCommitment: { count: relationCounts.commitments },
@@ -119,9 +122,9 @@ describe('InvestorsService', () => {
             { company: company('sable-labs', 'Sable Labs', 'Artificial intelligence') },
             { company: company('helia', 'Helia', 'Fintech') },
           ],
-          _count: { holdings: 2 },
         }),
       ]);
+      holdingGroupBy.mockResolvedValue([{ investorId: 'i-1', _count: { _all: 2 } }]);
 
       const { items, total } = await service.findAll();
       const [investor] = items;
@@ -135,16 +138,18 @@ describe('InvestorsService', () => {
       expect(investor!.sectors).toEqual(['Artificial intelligence', 'Fintech']);
     });
 
-    it('takes portfolioCount from the filtered relation count, not the sample', async () => {
+    it('takes portfolioCount from the per-page count query, not the sample or the stored key', async () => {
       count.mockResolvedValue(1);
       findMany.mockResolvedValue([
         investorRow({
           // The list read only loads a sample of holdings…
           holdings: [{ company: company('helia', 'Helia', 'Fintech') }],
-          // …so the real total must come from _count.
-          _count: { holdings: 28 },
+          // …and a stale stored sort key must never show as the card's number…
+          holdingCount: 5,
         }),
       ]);
+      // …so the real total comes from the page's own count.
+      holdingGroupBy.mockResolvedValue([{ investorId: 'i-1', _count: { _all: 28 } }]);
 
       const { items } = await service.findAll();
       expect(items[0]!.portfolioCount).toBe(28);
@@ -169,13 +174,13 @@ describe('InvestorsService', () => {
       });
     });
 
-    it('orders by portfolio size by default and by name when asked', async () => {
+    it('orders by the stored portfolio size by default and by name when asked', async () => {
       count.mockResolvedValue(0);
       findMany.mockResolvedValue([]);
 
       await service.findAll();
       expect(findMany.mock.calls[0]![0]).toMatchObject({
-        orderBy: [{ holdings: { _count: 'desc' } }, { name: 'asc' }],
+        orderBy: [{ holdingCount: 'desc' }, { name: 'asc' }],
       });
 
       await service.findAll({ sort: 'name' });
@@ -207,18 +212,31 @@ describe('InvestorsService', () => {
       expect(findMany.mock.calls[0]![0]).toMatchObject({ where: { countryCode: 'GB' } });
     });
 
-    it('counts only approved holdings on approved companies', async () => {
+    it('counts the page only, over approved holdings on approved companies', async () => {
+      count.mockResolvedValue(2);
+      findMany.mockResolvedValue([investorRow({ id: 'i-1' }), investorRow({ id: 'i-2', slug: 'b' })]);
+      await service.findAll();
+
+      expect(holdingGroupBy.mock.calls[0]![0]).toEqual({
+        by: ['investorId'],
+        where: {
+          investorId: { in: ['i-1', 'i-2'] },
+          moderationStatus: 'APPROVED',
+          company: { moderationStatus: 'APPROVED', mergedIntoId: null },
+        },
+        _count: { _all: true },
+      });
+    });
+
+    it('asks for no relation count on the page query', async () => {
+      // A filtered `_count` (or a relation-count orderBy) GROUP BYs the whole
+      // InvestorHolding table before the LIMIT.
       count.mockResolvedValue(0);
       findMany.mockResolvedValue([]);
       await service.findAll();
-
-      const args = findMany.mock.calls[0]![0] as {
-        include: { _count: { select: { holdings: { where: unknown } } } };
-      };
-      expect(args.include._count.select.holdings.where).toEqual({
-        moderationStatus: 'APPROVED',
-        company: { moderationStatus: 'APPROVED', mergedIntoId: null },
-      });
+      const args = findMany.mock.calls[0]![0] as { include: Record<string, unknown> };
+      expect(args.include).not.toHaveProperty('_count');
+      expect(holdingGroupBy).not.toHaveBeenCalled();
     });
   });
 

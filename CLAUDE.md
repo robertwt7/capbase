@@ -261,16 +261,21 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   only when there were terms to hide, so a fund with none shows no Terms section (no false lock).
   Signed out, the directory's status filter (a partner-only column) is a "Sign in to filter by
   status" button and the API ignores `?status=`.
-- `/investors` — investor directory (URL-driven filters, same pattern as companies);
-  `/investors/[slug]` — investor profile: facts, fund assets, funds (linked to their pages),
+- `/investors` — investor directory (URL-driven filters, same pattern as companies). The
+  default sort reads the stored `Investor.holdingCount` (see Database); each card's portfolio
+  count is counted live for the page's ids only. `/investors/[slug]` — investor profile: facts, fund assets, funds (linked to their pages),
   **fund commitments** for a limited partner, portfolio grid (the `INVESTOR_PORTFOLIO_PREVIEW`
   largest by capital raised; count and sectors cover the whole portfolio), the firm's people
   (capped at `INVESTOR_PEOPLE_PREVIEW`, "N of M named"), or an empty state inviting a
   contribution. Every section is also capped by the gate (`gateLimit`; LP commitments are
   `members`) with a `LockedSection` against the public count. The detail read counts each relation with its own indexed `count()` — never
   Prisma's `_count`, which GROUP BYs the whole child table (~500 ms per profile at this size).
+  The same rule holds for **lists**, a relation-count `orderBy` included: sorting `/people` on
+  `roles: { _count }` cost 12.6 s a page at 578k roles. Sort on a stored column and count the
+  page's ids.
 - `/people` — people directory (URL-driven filters, same pattern as companies): search,
-  an "at several companies" toggle, sort by roles held or name. **No role filter** —
+  an "at several companies" toggle (`companyCount > 1`), sort by roles held (the stored
+  `Person.roleCount`) or name; card counts are live for the page's ids. **No role filter** —
   3,744 distinct free-text role strings is not a vocabulary. `/people/[slug]` — person
   profile: roles grouped by organisation, each with its kind, year range and citation.
 - `/companies/[slug]/history` — public, paginated change timeline for one company
@@ -589,6 +594,19 @@ Company/FundingRound rows — and the ingest-only `Fund` — also have
 partner). People use `Person.identifierOnly`, the same signal (the partner is the only
 identifier-only source). `RoundInvestor.externalSource` says which source named a firm on a round.
 Ingest maintains them (Jobs → PARTNER); `make backfill-partner-provenance` reconstructs them.
+
+**Directory sort counts**: `Person.roleCount` / `Person.companyCount` and
+`Investor.holdingCount` (indexed) are the `/people` and `/investors` sort keys and the "at
+several companies" filter — the public count (`PUBLIC_ROLES` / `PUBLIC_HOLDINGS`, partner rows
+included), stored because a relation-count sort GROUP BYs the whole child table per page.
+`refreshDirectoryCounts(db, scope?)` (`@repo/db` `directory-counts.ts`) is the one set-based
+definition and writes only changed rows (a re-run writes 0). Jobs run the full form at the end of
+every `IngestService.run` (cron, monthly, backfills, partner stages — a failure is logged and
+reported, never fails the run) and after `backfill-people` / `purge-sbir-people`; the API runs the
+scoped form (`admin/directory-counts.ts`, never throws) after `AdminService.moderate` (a role's
+person, a holding's firm, a company's people and firms) and every merge/unmerge. Cards never show
+the stored value, so a stale key only misorders. `make backfill-directory-counts` (`-prod`) fills
+or re-runs it by hand.
 
 `ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,
 `allowedCidrs`, `lastUsedAt` debounced to once a minute, `revokedAt`); `InvestorChangeProposal`

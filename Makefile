@@ -274,6 +274,11 @@ backfill-fund-slugs: ## Give every fund without one a /funds/<slug> page address
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill-fund-slugs.js
 
+.PHONY: backfill-directory-counts
+backfill-directory-counts: ## Recompute the /people and /investors sort counts (no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-directory-counts.js
+
 # Reconstructs partner provenance for data loaded before ingest recorded it.
 # Needs partner_stage loaded; run it BEFORE any further partner stage and before
 # partner-stage-drop. Idempotent (a second run changes 0 rows).
@@ -317,6 +322,10 @@ backfill-partner-provenance-prod: ## [VPS] Mark partner-only rows and partner-wr
 .PHONY: backfill-fund-slugs-prod
 backfill-fund-slugs-prod: ## [VPS] Give every fund a page slug inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-fund-slugs.js
+
+.PHONY: backfill-directory-counts-prod
+backfill-directory-counts-prod: ## [VPS] Recompute the directory sort counts inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-directory-counts.js
 
 .PHONY: merge-candidates-prod
 merge-candidates-prod: ## [VPS] Propose duplicate pairs inside the deployed jobs container

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { refreshDirectoryCounts } from '@repo/db';
 
 import { AppModule } from './app.module';
 import {
@@ -148,6 +149,10 @@ async function main() {
         `${plan.suppressed} suppressed, ` +
         `${pairs.length} variant candidates${skippedNote}`,
     );
+
+    // Attaching roles moves every /people sort key it touched.
+    const counts = await refreshDirectoryCounts(prisma);
+    logger.log(`Directory counts: ${counts.people} people, ${counts.investors} investors updated`);
   } finally {
     await app.close();
   }

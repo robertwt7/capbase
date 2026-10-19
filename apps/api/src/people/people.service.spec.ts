@@ -61,9 +61,9 @@ describe('PeopleService', () => {
     // findUnique backs the miss path: is this slug a tombstone, or nothing?
     findUnique = jest.fn(async () => null);
     citationFindMany = jest.fn(async () => []);
-    // The distinct (personId, companyId) pairs behind companyCount.
+    // The page's public (personId, companyId) roles behind roleCount and companyCount.
     roleFindMany = jest.fn(async () => []);
-    // The exact "roles at 2+ public companies" id set.
+    // The sitemap's indexable-person SQL.
     queryRaw = jest.fn(async () => []);
     identifierFindMany = jest.fn(async () => []);
     const prisma = {
@@ -86,7 +86,6 @@ describe('PeopleService', () => {
             role({ id: 'pr-1', company: { slug: 'acme', name: 'Acme', domain: 'acme.com' } }),
             role({ id: 'pr-2', company: { slug: 'helia', name: 'Helia', domain: 'helia.com' } }),
           ],
-          _count: { roles: 2 },
         }),
       ]);
 
@@ -102,22 +101,24 @@ describe('PeopleService', () => {
       expect(items[0]!.roles[0]).toMatchObject({ kind: 'Executive officer', title: 'CEO' });
     });
 
-    it('takes roleCount from the filtered relation count, not the sample', async () => {
+    it('takes roleCount from the per-page count query, not the sample or the stored key', async () => {
       count.mockResolvedValue(1);
-      findMany.mockResolvedValue([personRow({ roles: [role()], _count: { roles: 75 } })]);
+      // A stale stored sort key must never show as the card's number.
+      findMany.mockResolvedValue([personRow({ roles: [role()], roleCount: 3, _count: undefined })]);
+      roleFindMany.mockResolvedValue(Array.from({ length: 75 }, () => ({ personId: 'h-1', companyId: null })));
 
       const { items } = await service.findAll();
       expect(items[0]!.roleCount).toBe(75);
       expect(items[0]!.roles).toHaveLength(1);
     });
 
-    it('orders by role count by default and by name when asked', async () => {
+    it('orders by the stored role count by default and by name when asked', async () => {
       count.mockResolvedValue(0);
       findMany.mockResolvedValue([]);
 
       await service.findAll();
       expect(findMany.mock.calls[0]![0]).toMatchObject({
-        orderBy: [{ roles: { _count: 'desc' } }, { name: 'asc' }],
+        orderBy: [{ roleCount: 'desc' }, { name: 'asc' }],
       });
 
       await service.findAll({ sort: 'name' });
@@ -143,12 +144,11 @@ describe('PeopleService', () => {
       expect(result).toMatchObject({ page: 3, pageSize: 10, total: 0 });
     });
 
-    it('multiCompany narrows the query itself, so total is not a lie', async () => {
+    it('multiCompany narrows the query itself on the stored count, so total is not a lie', async () => {
       // A `roles: { some: … }` filter can only ask "has a company role", which
       // nearly everyone satisfies: it reported 75,926 people against a true
       // 4,393. Post-filtering the page would fix the rows and leave the count
-      // and the pagination wrong, so the id set goes into the WHERE.
-      queryRaw.mockResolvedValue([{ personId: 'h-two' }]);
+      // and the pagination wrong, so the filter goes into the WHERE.
       count.mockResolvedValue(1);
       findMany.mockResolvedValue([personRow({ id: 'h-two', slug: 'serial-founder' })]);
 
@@ -156,49 +156,62 @@ describe('PeopleService', () => {
 
       expect(total).toBe(1);
       expect(items.map((p) => p.slug)).toEqual(['serial-founder']);
-      expect(findMany.mock.calls[0]![0]).toMatchObject({
-        where: { id: { in: ['h-two'] } },
-      });
+      expect(findMany.mock.calls[0]![0]).toMatchObject({ where: { companyCount: { gt: 1 } } });
       // Both halves of the page query see the same filter.
-      expect(count.mock.calls[0]![0]).toMatchObject({ where: { id: { in: ['h-two'] } } });
+      expect(count.mock.calls[0]![0]).toMatchObject({ where: { companyCount: { gt: 1 } } });
+      // No whole-table aggregate for the id set any more.
+      expect(queryRaw).not.toHaveBeenCalled();
     });
 
-    it('does not run the multi-company query when the filter is off', async () => {
+    it('leaves companyCount out of the WHERE when the filter is off', async () => {
       count.mockResolvedValue(0);
       findMany.mockResolvedValue([]);
       await service.findAll();
-      expect(queryRaw).not.toHaveBeenCalled();
+      const args = findMany.mock.calls[0]![0] as { where: Record<string, unknown> };
+      expect(args.where).not.toHaveProperty('companyCount');
     });
 
     it('counts companies exactly, not from the role sample', async () => {
       // A person at 75 companies must not show 6 because that is how many roles
-      // the card loads.
+      // the card loads. A firm role counts as a role, not as a company.
       count.mockResolvedValue(1);
-      findMany.mockResolvedValue([personRow({ roles: [role()], _count: { roles: 75 } })]);
-      roleFindMany.mockResolvedValue(
-        Array.from({ length: 75 }, (_, i) => ({ personId: 'h-1', companyId: `c-${i}` })),
-      );
+      findMany.mockResolvedValue([personRow({ roles: [role()] })]);
+      roleFindMany.mockResolvedValue([
+        ...Array.from({ length: 75 }, (_, i) => ({ personId: 'h-1', companyId: `c-${i}` })),
+        // Two roles at one company are one company.
+        { personId: 'h-1', companyId: 'c-0' },
+        { personId: 'h-1', companyId: null },
+      ]);
 
       const { items } = await service.findAll();
-      expect(items[0]!.companyCount).toBe(75);
-      expect(roleFindMany.mock.calls[0]![0]).toMatchObject({
-        distinct: ['personId', 'companyId'],
+      expect(items[0]).toMatchObject({ roleCount: 77, companyCount: 75 });
+    });
+
+    it('counts the page only, over approved roles on public companies, keeping firm roles', async () => {
+      count.mockResolvedValue(2);
+      findMany.mockResolvedValue([personRow({ id: 'h-1' }), personRow({ id: 'h-2', slug: 'b' })]);
+      await service.findAll();
+
+      expect(roleFindMany.mock.calls[0]![0]).toEqual({
+        where: {
+          personId: { in: ['h-1', 'h-2'] },
+          moderationStatus: 'APPROVED',
+          // A firm-officer role has no company, so the OR is what keeps it visible.
+          OR: [{ company: { moderationStatus: 'APPROVED', mergedIntoId: null } }, { companyId: null }],
+        },
+        select: { personId: true, companyId: true },
       });
     });
 
-    it('counts only approved roles on public companies, and keeps firm roles', async () => {
+    it('asks for no relation count on the page query', async () => {
+      // A filtered `_count` (or a relation-count orderBy) GROUP BYs the whole
+      // PersonRole table before the LIMIT: 12.6 s a page at 578k roles.
       count.mockResolvedValue(0);
       findMany.mockResolvedValue([]);
       await service.findAll();
-
-      const args = findMany.mock.calls[0]![0] as {
-        include: { _count: { select: { roles: { where: unknown } } } };
-      };
-      expect(args.include._count.select.roles.where).toEqual({
-        moderationStatus: 'APPROVED',
-        // A firm-officer role has no company, so the OR is what keeps it visible.
-        OR: [{ company: { moderationStatus: 'APPROVED', mergedIntoId: null } }, { companyId: null }],
-      });
+      const args = findMany.mock.calls[0]![0] as { include: Record<string, unknown> };
+      expect(args.include).not.toHaveProperty('_count');
+      expect(roleFindMany).not.toHaveBeenCalled();
     });
   });
 

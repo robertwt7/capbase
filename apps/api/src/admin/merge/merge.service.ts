@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   MERGE_PAGE_SIZE,
   MERGE_SIGNALS,
@@ -10,11 +10,12 @@ import {
   type MergeSignal,
   type MergeStatus,
 } from '@repo/api';
-import type { MergeCandidate, Prisma } from '@repo/db';
+import type { DirectoryCountScope, MergeCandidate, Prisma } from '@repo/db';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { toEntityIdentifiers } from '../../provenance/identifier.mapper';
 import { toJsonValue } from '../../provenance/revision.util';
+import { refreshCountsSafely } from '../directory-counts';
 
 /**
  * What one merge moved, complete enough to reverse it.
@@ -49,6 +50,21 @@ interface MovedRecord {
   /** Deleted on the (scheme, value, entityType) unique key — usually the very
    *  identifier that proposed the pair. */
   deletedIdentifiers: { scheme: string; value: string; source: string; createdAt: string }[];
+}
+
+/**
+ * The directory sort keys (refreshDirectoryCounts) a merge or unmerge of this
+ * pair moves. Roles and holdings sit on the survivor after a merge and back on
+ * the loser after an unmerge; naming both covers either direction, and for a
+ * company the expansion reaches every person and firm attached to either.
+ */
+function countScope(entityType: IdentifiableType, survivorId: string, losingId: string): DirectoryCountScope {
+  const ids = [survivorId, losingId];
+  return entityType === 'company'
+    ? { companyIds: ids }
+    : entityType === 'person'
+      ? { personIds: ids }
+      : { investorIds: ids };
 }
 
 function emptyMoved(): MovedRecord {
@@ -104,6 +120,8 @@ const PERSON_CHILDREN = [
 
 @Injectable()
 export class MergeService {
+  private readonly logger = new Logger(MergeService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   // --- Queue ---------------------------------------------------------------
@@ -377,7 +395,7 @@ export class MergeService {
   ): Promise<{ mergeRecordId: string; survivorId: string; losingId: string }> {
     if (survivorId === losingId) throw new BadRequestException('A row cannot be merged into itself');
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const moved =
         entityType === 'company'
           ? await this.mergeCompany(tx, survivorId, losingId, adminUserId)
@@ -406,6 +424,8 @@ export class MergeService {
 
       return { mergeRecordId: record.id, survivorId, losingId };
     });
+    await refreshCountsSafely(this.prisma, countScope(entityType, survivorId, losingId), this.logger);
+    return result;
   }
 
   private async mergeCompany(
@@ -702,7 +722,7 @@ export class MergeService {
     recordId: string,
     adminUserId: string,
   ): Promise<{ mergeRecordId: string; survivorId: string; losingId: string }> {
-    return this.prisma.$transaction(async (tx) => {
+    const { result, entityType } = await this.prisma.$transaction(async (tx) => {
       const record = await tx.mergeRecord.findUnique({ where: { id: recordId } });
       if (!record) throw new NotFoundException(`Merge record "${recordId}" not found`);
       if (record.unmergedAt) throw new BadRequestException('This merge has already been reversed');
@@ -730,8 +750,10 @@ export class MergeService {
         });
       }
 
-      return { mergeRecordId: recordId, survivorId, losingId };
+      return { result: { mergeRecordId: recordId, survivorId, losingId }, entityType };
     });
+    await refreshCountsSafely(this.prisma, countScope(entityType, result.survivorId, result.losingId), this.logger);
+    return result;
   }
 
   private async unmergeCompany(

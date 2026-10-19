@@ -12,7 +12,7 @@ import {
   type ReviewableType,
   type ReviewStatus,
 } from '@repo/api';
-import type { Company as DbCompany, Prisma } from '@repo/db';
+import type { Company as DbCompany, DirectoryCountScope, Prisma } from '@repo/db';
 
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -28,6 +28,7 @@ import {
 } from '../companies/company.mapper';
 import { pickInvestorFields } from '../investors/investor.mapper';
 import { createRevision, toJsonValue, type RevisableType } from '../provenance/revision.util';
+import { refreshCountsSafely } from './directory-counts';
 import {
   DEFAULT_REJECTION_REASON,
   loadSubmissionNotice,
@@ -254,6 +255,19 @@ function kebab(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || 'person';
+}
+
+/** Two count scopes as one; null when neither names anything. */
+function mergeScopes(
+  a: DirectoryCountScope | null,
+  b: DirectoryCountScope | null,
+): DirectoryCountScope | null {
+  if (!a && !b) return null;
+  return {
+    personIds: [...(a?.personIds ?? []), ...(b?.personIds ?? [])],
+    investorIds: [...(a?.investorIds ?? []), ...(b?.investorIds ?? [])],
+    companyIds: [...(a?.companyIds ?? []), ...(b?.companyIds ?? [])],
+  };
 }
 
 /** The filter one table gets for a queue page: its status, plus "older than
@@ -538,10 +552,14 @@ export class AdminService {
     note?: string | null,
   ) {
     let notice: SubmissionNotice | null;
+    let countsBefore: DirectoryCountScope | null;
     try {
       // Read before deciding: the email describes the row, and the prior status
       // is what tells a real decision from a repeat click.
       notice = await loadSubmissionNotice(this.prisma, type, id);
+      // Before as well as after: approving a role can re-point it at another
+      // Person (resolvePerson), whose count it then leaves.
+      countsBefore = await this.countScope(type, id);
       if (type === 'proposal') {
         if (status === 'APPROVED') {
           await this.applyProposal(id, adminUserId);
@@ -566,10 +584,34 @@ export class AdminService {
     } catch {
       throw new NotFoundException(`${type} "${id}" not found`);
     }
+    // After the commit, and awaited, so the admin's next directory page is
+    // already in order. Both directions: an approved row can be re-rejected.
+    const counts = mergeScopes(countsBefore, await this.countScope(type, id));
+    if (counts) await refreshCountsSafely(this.prisma, counts, this.logger);
     // Only once the decision has committed — and never awaited, so mail being
     // slow or down can't hold up, fail or roll back the moderation.
     if (shouldNotify(notice, status)) this.notifySubmitter(notice, status, note);
     return { id, type, moderationStatus: status };
+  }
+
+  /** The directory sort keys (refreshDirectoryCounts) a decision on this row can
+   *  move: a role's person, a holding's firm, and a company's people and firms
+   *  (its status gates every role and holding on it). Nothing else counts. */
+  private async countScope(type: ReviewableType, id: string): Promise<DirectoryCountScope | null> {
+    switch (type) {
+      case 'person': {
+        const row = await this.prisma.personRole.findUnique({ where: { id }, select: { personId: true } });
+        return row?.personId ? { personIds: [row.personId] } : null;
+      }
+      case 'investor': {
+        const row = await this.prisma.investorHolding.findUnique({ where: { id }, select: { investorId: true } });
+        return row?.investorId ? { investorIds: [row.investorId] } : null;
+      }
+      case 'company':
+        return { companyIds: [id] };
+      default:
+        return null;
+    }
   }
 
   /** Email the contributor about a decision. Never throws; failures are logged

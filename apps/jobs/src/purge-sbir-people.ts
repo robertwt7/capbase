@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { refreshDirectoryCounts } from '@repo/db';
 
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -65,6 +66,10 @@ async function main() {
     }
 
     logger.log(`Purge done: ${people} SBIR person rows and ${citations} citations deleted`);
+
+    // The deleted roles no longer count towards anyone's /people sort key.
+    const counts = await refreshDirectoryCounts(prisma);
+    logger.log(`Directory counts: ${counts.people} people, ${counts.investors} investors updated`);
   } finally {
     await app.close();
   }

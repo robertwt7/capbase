@@ -1,12 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/nestjs';
 import {
   normalizeIdentifier,
   normalizePersonName,
   type IdentifiableType,
   type InvestorType,
 } from '@repo/api';
-import { Prisma, toJsonValue } from '@repo/db';
+import { Prisma, refreshDirectoryCounts, toJsonValue } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -437,7 +438,24 @@ export class IngestService {
           `${st.contacts} private contact rows written`,
       );
     }
+    await this.refreshCounts();
     return { processed, upserted, investors, funds };
+  }
+
+  /**
+   * Recompute the /people and /investors sort keys after a run, in full: a run
+   * can add, re-approve or re-point roles and holdings anywhere. Never fails the
+   * run — the ingested rows are already written, and the next run heals a stale
+   * order — so a failure is logged and reported instead.
+   */
+  private async refreshCounts(): Promise<void> {
+    try {
+      const { people, investors } = await refreshDirectoryCounts(this.prisma);
+      this.logger.log(`Directory counts: ${people} people, ${investors} investors updated`);
+    } catch (err) {
+      this.logger.error(`Directory count refresh failed: ${String(err)}`);
+      Sentry.captureException(err, { tags: { ingest: 'directory-counts' } });
+    }
   }
 
   /**

@@ -186,14 +186,14 @@ export class InvestorsService {
       AND: unmaskedFilters(access, [query.type && 'type', query.country && 'countryCode']),
     };
 
+    // The sort reads the stored `holdingCount` (refreshDirectoryCounts): a
+    // relation-count orderBy, or a `_count` include, GROUP BYs the whole
+    // InvestorHolding table before the LIMIT.
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.investor.count({ where }),
       this.prisma.investor.findMany({
         where,
-        orderBy:
-          query.sort === 'name'
-            ? [{ name: 'asc' }]
-            : [{ holdings: { _count: 'desc' } }, { name: 'asc' }],
+        orderBy: query.sort === 'name' ? [{ name: 'asc' }] : [{ holdingCount: 'desc' }, { name: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
@@ -202,15 +202,33 @@ export class InvestorsService {
             take: PORTFOLIO_SAMPLE,
             include: { company: COMPANY_SELECT },
           },
-          // Over every holding: a count is public.
-          _count: { select: { holdings: { where: PUBLIC_HOLDINGS } } },
         },
       }),
     ]);
 
+    // Counted live for the page's firms only, so a stale sort key never shows
+    // as a wrong number. Over every public holding: a count is public.
+    const ids = rows.map((r) => r.id);
+    const counts = new Map(
+      ids.length === 0
+        ? []
+        : (
+            await this.prisma.investorHolding.groupBy({
+              by: ['investorId'],
+              where: { investorId: { in: ids }, ...PUBLIC_HOLDINGS },
+              _count: { _all: true },
+            })
+          ).map((g) => [g.investorId, g._count._all]),
+    );
+
     return {
       items: rows.map((r) =>
-        maskPartnerFields(toInvestorSummary(r as InvestorWithHoldings), r.partnerFields, access, INVESTOR_BLANKS),
+        maskPartnerFields(
+          toInvestorSummary({ ...r, _count: { holdings: counts.get(r.id) ?? 0 } } as InvestorWithHoldings),
+          r.partnerFields,
+          access,
+          INVESTOR_BLANKS,
+        ),
       ),
       total,
       page,
