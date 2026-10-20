@@ -767,6 +767,69 @@ describe('IngestService match-&-enrich', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  describe('a Bootstrapped row', () => {
+    const round = (overrides: Partial<NonNullable<NormalizedRecord['rounds']>[number]> = {}) => ({
+      externalId: 'R1',
+      name: 'Series A',
+      date: '2024-03-01',
+      amountUsd: 7_500_000,
+      ...overrides,
+    });
+
+    async function enrichedData(
+      rowStage: string,
+      rounds: NormalizedRecord['rounds'],
+    ): Promise<Record<string, unknown>> {
+      const prisma = mockPrisma([companyRow({ stage: rowStage, totalRaisedUsd: 0n })]);
+      await serviceWith(prisma, [record({ rounds })]).run(RUN);
+      expect(prisma.company.create).not.toHaveBeenCalled();
+      const call = prisma.company.update.mock.calls.find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'c-sec',
+      );
+      // The record always fills `founded`, so the enrich update must have happened.
+      expect(call).toBeDefined();
+      return (call![0] as { data: Record<string, unknown> }).data;
+    }
+
+    it("takes the record's stage when the record shows an equity raise", async () => {
+      const prisma = mockPrisma([companyRow({ stage: 'Bootstrapped', totalRaisedUsd: 0n })]);
+      await serviceWith(prisma, [record({ rounds: [round()] })]).run(RUN);
+
+      const { data } = prisma.company.update.mock.calls[0]![0] as { data: Record<string, unknown> };
+      expect(data.stage).toBe('Series A');
+      expect(revisionsFrom(prisma)).toContainEqual(
+        expect.objectContaining({
+          companyId: 'c-sec',
+          field: 'stage',
+          before: 'Bootstrapped',
+          after: 'Series A',
+          actor: 'INGEST',
+          actorSource: 'STUB',
+        }),
+      );
+    });
+
+    it('keeps Bootstrapped when the only round is a grant', async () => {
+      expect(await enrichedData('Bootstrapped', [round({ kind: 'Grant' })])).not.toHaveProperty('stage');
+    });
+
+    it('keeps Bootstrapped when the only round is debt', async () => {
+      expect(await enrichedData('Bootstrapped', [round({ kind: 'Debt' })])).not.toHaveProperty('stage');
+    });
+
+    it('keeps Bootstrapped when the equity round has no amount', async () => {
+      expect(await enrichedData('Bootstrapped', [round({ amountUsd: 0 })])).not.toHaveProperty('stage');
+    });
+
+    it('keeps Bootstrapped when the record has no rounds', async () => {
+      expect(await enrichedData('Bootstrapped', undefined)).not.toHaveProperty('stage');
+    });
+
+    it('leaves any other stage alone, equity raise or not', async () => {
+      expect(await enrichedData('Seed', [round()])).not.toHaveProperty('stage');
+    });
+  });
+
   it('records the own-key update, but only for fields that actually move', async () => {
     // hq/industry/stage are unchanged; only the raise total and name differ.
     const prisma = mockPrisma([companyRow({ externalSource: 'STUB', externalId: 'X1' })]);

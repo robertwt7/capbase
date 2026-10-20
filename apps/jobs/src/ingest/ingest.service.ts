@@ -2020,7 +2020,8 @@ export class IngestService {
 
   /** Fill blank fields on a matched row; replace copy only when it is the
    *  generic SEC placeholder. Never touches name, stage, status, raised
-   *  totals, or the row's own provenance keys. */
+   *  totals, or the row's own provenance keys — except that a `Bootstrapped`
+   *  stage gives way to the record's when the record shows an equity raise. */
   private async enrich(companyId: string, r: NormalizedRecord): Promise<void> {
     const row = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!row) return;
@@ -2040,6 +2041,15 @@ export class IngestService {
     if (c.oneLiner && row.oneLiner.startsWith(SEC_ONE_LINER_PREFIX)) data.oneLiner = c.oneLiner;
     if (c.description && row.description.includes(SEC_DESCRIPTION_MARKER)) {
       data.description = c.description;
+    }
+    // `Bootstrapped` is a human claim of no outside funding; an equity raise in a
+    // filing contradicts it, so the source's stage replaces it. Grants and debt don't.
+    if (
+      row.stage === 'Bootstrapped' &&
+      c.stage !== 'Bootstrapped' &&
+      r.rounds?.some((rd) => (rd.kind ?? 'Equity') === 'Equity' && rd.amountUsd > 0)
+    ) {
+      data.stage = c.stage;
     }
 
     // `row` is the pre-update state, so writeCompany needs no second read.

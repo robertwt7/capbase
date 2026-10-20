@@ -295,7 +295,9 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             action="Add a funding round"
             href={`/companies/${company.slug}/contribute?type=round`}
           >
-            No rounds recorded yet for {company.name}.
+            {company.stage === 'Bootstrapped'
+              ? `Bootstrapped — no outside funding recorded for ${company.name}.`
+              : `No rounds recorded yet for ${company.name}.`}
           </Empty>
         ) : null}
         <LockedSection

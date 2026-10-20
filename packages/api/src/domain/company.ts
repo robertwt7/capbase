@@ -5,6 +5,7 @@
 import type { EntityIdentifierRef } from './identifiers';
 
 export type Stage =
+  | 'Bootstrapped' // no outside funding; human-written only — no source can state it
   | 'Seed'
   | 'Series A'
   | 'Series B'
@@ -17,6 +18,7 @@ export type Stage =
   | 'Acquired';
 
 export const STAGES: readonly Stage[] = [
+  'Bootstrapped',
   'Seed',
   'Series A',
   'Series B',

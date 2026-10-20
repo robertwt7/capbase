@@ -782,7 +782,10 @@ set, never inferred from a fund's name. **`PersonRole.kind`** (`RoleKind`/`ROLE_
 Form D's `relationship` enum and Wikidata's property identity (P112 founder, P169 CEO).
 Null for Form C, whose signature-block roles are free prose, and for SBIR, where
 `Principal investigator` is a role on a grant rather than at the company. Never inferred by
-reading a title string. Besides
+reading a title string. `Stage`/`STAGES` opens with
+**`Bootstrapped`** (no outside funding): human-written only — no source can state that a company is
+unfunded, so no source emits it, and the profile's empty Funding rounds block says so instead of
+"No rounds recorded yet". Besides
 `Stage`/`CompanyStatus`/`InvestorType`/`ExitType`/`FundStrategy`, there is a
 **`Sector`/`SECTORS`** vocabulary (14 canonical sectors: the original `Artificial intelligence`/
 `Fintech`/`Healthcare`/`Climate`/`Enterprise SaaS` plus `Technology`, `Financial services`,
@@ -993,7 +996,9 @@ upsert keyed on `(externalSource, externalId)` and are **auto-APPROVED** (truste
 sources). `IngestService` also **matches & enriches**: a
 record whose company matches an existing row by domain or normalized name fills
 that row's blank fields instead of creating a duplicate (never overwriting
-name/stage/status or human-written copy). The same match-and-enrich runs for
+name/stage/status or human-written copy — with one exception: a `Bootstrapped` row takes the
+record's stage when the record carries an `Equity` round with a positive amount, since a filed
+raise contradicts the claim; grants and debt never promote). The same match-and-enrich runs for
 investor firms, keyed on domain then `normalizeInvestorName` (which strips legal
 suffixes only — "Greylock Partners" and "Greylock Capital Management" are
 different firms). Both name keys fold accents first ("Société Générale" → `societe generale`).
