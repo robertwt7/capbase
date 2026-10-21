@@ -395,7 +395,7 @@ Two different secrets, often confused:
 | `POSTGRES_PASSWORD` | the Postgres role — **also embedded in `DATABASE_URL`** | `infra/env/all.env` |
 | `ADMIN_PASSWORD` | the `/admin` moderation login | `infra/env/all.env`, hashed into the DB |
 
-`make deploy-secrets` generates both (plus `JWT_SECRET`) from a URL-safe alphabet
+`make deploy-secrets` generates both (plus `JWT_SECRET` and `MFA_ENCRYPTION_KEY`) from a URL-safe alphabet
 — `@ : / ? #` in a password would corrupt `DATABASE_URL` — and refuses to re-run
 over a provisioned file unless you pass `FORCE=yes`.
 
@@ -407,6 +407,44 @@ password once.
 
 Rotating `POSTGRES_PASSWORD` on a live database is *not* automated — generation
 happens at provision time only.
+
+## Two-factor authentication
+
+Accounts can add an authenticator app (TOTP), passkeys and one-time recovery codes at
+`/profile/settings` → Security. `MFA_REQUIRED_ROLES` makes it mandatory: a role listed there
+with no second factor gets no session (an existing one is signed out on its next request), is
+sent to `/login/setup-2fa` after the password, and its `/v1` keys answer
+`403 { code: "MFA_REQUIRED" }` until it enrolls (the keys are suspended, not revoked).
+
+| Env | Meaning |
+| --- | --- |
+| `MFA_ENCRYPTION_KEY` | Required. 32 bytes, base64 (`openssl rand -base64 32`; `make deploy-secrets` fills it). Encrypts every authenticator-app secret at rest. |
+| `MFA_REQUIRED_ROLES` | Comma list of roles. **Unset = `ADMIN,CONTRIBUTOR`** (the compose default); empty = off. |
+| `WEBAUTHN_RP_ID` | Optional passkey relying-party id; defaults to `SITE_URL`'s host. Passkeys are bound to it — changing domain orphans them. |
+
+**Back up `MFA_ENCRYPTION_KEY` with the other secrets.** Losing or changing it makes every
+stored authenticator secret unreadable: those users fall back to a recovery code or an admin
+"Reset 2FA" (`/admin/users`). Passkeys and recovery codes don't use it. There is no rotation
+tooling; rotating means resetting every authenticator-app user.
+
+**Recovery.** A password reset by email never turns 2FA off. A user who lost every device signs
+in with a recovery code, or an admin presses **Reset 2FA**, which removes every factor, signs
+the account out everywhere and emails them.
+
+### Rollout (first deploy with 2FA)
+
+1. Add `MFA_ENCRYPTION_KEY=$(openssl rand -base64 32)` and an empty `MFA_REQUIRED_ROLES=` to
+   `infra/env/all.env` by hand (`deploy-secrets` refuses to touch a provisioned file), then
+   `make deploy-all`. The migration is additive; nothing changes for anyone yet.
+2. Every ADMIN and CONTRIBUTOR enrolls at `/profile/settings`. Check who hasn't:
+   `SELECT email, role FROM "User" WHERE role IN ('ADMIN','CONTRIBUTOR') AND "mfaEnabledAt" IS NULL;`
+3. Tell contributors with active `/v1` keys that the keys will answer `403 MFA_REQUIRED` until
+   they enroll.
+4. Delete the `MFA_REQUIRED_ROLES=` line (or set it to `ADMIN,CONTRIBUTOR`) and redeploy.
+
+Rollback: set `MFA_REQUIRED_ROLES=` and redeploy; enrolled users keep their factors. Rolling
+back to a pre-2FA image (`deploy-rollback SHA=…`) is safe — the new columns and tables are
+ignored.
 
 ## nginx
 

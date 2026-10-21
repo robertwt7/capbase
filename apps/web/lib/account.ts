@@ -3,7 +3,14 @@ import type {
   AuthUser,
   ChangePasswordInput,
   ForgotPasswordInput,
+  MfaStatus,
+  PasskeyOptions,
+  PasskeyRegisterInput,
+  PasswordConfirmInput,
+  RecoveryCodes,
   ResetPasswordInput,
+  TotpConfirmInput,
+  TotpSetup,
   UpdateProfileInput,
   VerifyEmailInput,
 } from '@repo/api';
@@ -73,5 +80,69 @@ export async function resendVerification() {
     method: 'POST',
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
+  });
+}
+
+// --- Two-factor authentication & passkeys --------------------------------------------------
+// Every change re-checks the password on the API; 401 means it was wrong.
+
+async function authed<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await getToken();
+  return apiFetch<T>(path, {
+    ...init,
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** The signed-in user's factors, passkeys and remaining recovery codes. */
+export function getMfaStatus() {
+  return authed<MfaStatus>('/auth/me/mfa');
+}
+
+/** Start an authenticator-app enrollment: a secret, its otpauth URI and a challenge. */
+export function beginTotp(input: PasswordConfirmInput) {
+  return authed<TotpSetup>('/auth/me/mfa/totp', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** Confirm the app with a code. Answers recovery codes when the account had none. */
+export function confirmTotp(input: TotpConfirmInput) {
+  return authed<RecoveryCodes>('/auth/me/mfa/totp/confirm', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function disableTotp(input: PasswordConfirmInput) {
+  return authed<MfaStatus>('/auth/me/mfa/totp/disable', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+/** Replace every recovery code; the new ones are in the response and nowhere else. */
+export function regenerateRecoveryCodes(input: PasswordConfirmInput) {
+  return authed<RecoveryCodes>('/auth/me/mfa/recovery-codes', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+/** Registration options for a new passkey, after the password. */
+export function passkeyRegistrationOptions(input: PasswordConfirmInput) {
+  return authed<PasskeyOptions>('/auth/me/passkeys/options', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function registerPasskey(input: PasskeyRegisterInput) {
+  return authed<RecoveryCodes>('/auth/me/passkeys', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function removePasskey(id: string, input: PasswordConfirmInput) {
+  return authed<MfaStatus>(`/auth/me/passkeys/${encodeURIComponent(id)}/remove`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }

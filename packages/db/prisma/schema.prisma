@@ -57,6 +57,62 @@ model EmailVerificationToken {
   @@index([userId])
 }
 
+/// A registered passkey. `credentialId` is the authenticator's id (base64url).
+model WebAuthnCredential {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String    @unique
+  publicKey    Bytes
+  /// Signature counter. Many passkeys always report 0; only a decrease is treated as cloning.
+  counter      BigInt    @default(0)
+  transports   String[]
+  /// 'singleDevice' | 'multiDevice' (synced passkey), from the registration response.
+  deviceType   String
+  backedUp     Boolean
+  name         String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
+}
+
+/// One single-use recovery code; only its sha256 is stored.
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, codeHash])
+}
+
+/// Short-lived state between auth steps: a password-proven login awaiting its second factor,
+/// a forced enrollment, a pending TOTP secret, or a WebAuthn challenge. Only sha256(token) is
+/// stored; single-use (consumedAt) and attempt-capped.
+model AuthChallenge {
+  id                String    @id @default(cuid())
+  tokenHash         String    @unique
+  /// AuthChallengePurpose (@repo/api): LOGIN_MFA | MFA_SETUP | TOTP_ENROLL | PASSKEY_REGISTER | PASSKEY_LOGIN
+  purpose           String
+  /// Null only for a passwordless PASSKEY_LOGIN, where the user is unknown until the assertion.
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The WebAuthn challenge (base64url) once options have been issued for this step.
+  webauthnChallenge String?
+  /// Encrypted pending TOTP secret during enrollment (same format as User.totpSecret).
+  pendingSecret     String?
+  attempts          Int       @default(0)
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
 model SeedHistory {
   name      String   @id
   appliedAt DateTime @default(now())
@@ -77,9 +133,22 @@ model User {
   /// Set when the user spends an email-verification link; cleared when they change their
   /// email. Contributions require it (admins exempt). Existing users were backfilled to createdAt.
   emailVerifiedAt DateTime?
+  /// Set while the user has at least one second factor (TOTP or a passkey); cleared when the
+  /// last one goes. Denormalised so JwtStrategy can enforce MFA_REQUIRED_ROLES from the row it
+  /// already reads.
+  mfaEnabledAt  DateTime?
+  /// AES-256-GCM ciphertext (`v1.<iv>.<tag>.<ct>`, base64url) of the base32 TOTP secret, under
+  /// MFA_ENCRYPTION_KEY. Null = no authenticator app.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+  /// The last accepted TOTP time step; a code at or below it is a replay.
+  totpLastStep  Int?
 
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+  webauthnCredentials     WebAuthnCredential[]
+  recoveryCodes           RecoveryCode[]
+  authChallenges          AuthChallenge[]
 
   companies      Company[]
   rounds         FundingRound[]

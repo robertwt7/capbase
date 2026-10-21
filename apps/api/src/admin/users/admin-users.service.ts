@@ -9,6 +9,8 @@ import {
 import { Prisma } from '@repo/db';
 
 import { ApiKeysService } from '../../api-keys/api-keys.service';
+import { SecurityEvent } from '../../auth/mfa/mfa.service';
+import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const userSelect = {
@@ -18,6 +20,7 @@ const userSelect = {
   role: true,
   bannedAt: true,
   createdAt: true,
+  mfaEnabledAt: true,
 } as const;
 
 /** Every table a contributor writes to, i.e. what a moderator reviews. */
@@ -35,12 +38,13 @@ const CONTRIBUTION_TABLES = [
 
 type UserRow = Prisma.UserGetPayload<{ select: typeof userSelect }>;
 
-/** The user-moderation half of the admin portal: list, ban, change role. */
+/** The user-moderation half of the admin portal: list, ban, change role, reset 2FA. */
 @Injectable()
 export class AdminUsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly apiKeys: ApiKeysService,
+    private readonly mail: MailService,
   ) {}
 
   async list(query: AdminUserListQuery = {}): Promise<Paginated<AdminUser>> {
@@ -119,6 +123,42 @@ export class AdminUsersService {
     return this.toAdminUser(row, pending.get(id) ?? 0);
   }
 
+  /**
+   * The recovery path for a lost device: remove every second factor (authenticator app,
+   * passkeys, recovery codes, in-flight challenges) and sign the user out everywhere, then email
+   * them. A USER can then sign in with just the password; a role that requires 2FA is sent to
+   * forced setup. API keys are kept — enforcement suspends them until the owner re-enrolls.
+   * An admin can't reset their own (use the settings page, which asks for the password).
+   */
+  async resetMfa(id: string, actorId: string): Promise<AdminUser> {
+    if (id === actorId) {
+      throw new BadRequestException("You can't reset your own two-factor authentication here");
+    }
+    const existing = await this.prisma.user.findUnique({ where: { id }, select: userSelect });
+    if (!existing) throw new NotFoundException('User not found');
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.webAuthnCredential.deleteMany({ where: { userId: id } });
+      await tx.recoveryCode.deleteMany({ where: { userId: id } });
+      await tx.authChallenge.deleteMany({ where: { userId: id } });
+      return tx.user.update({
+        where: { id },
+        data: {
+          totpSecret: null,
+          totpEnabledAt: null,
+          totpLastStep: null,
+          mfaEnabledAt: null,
+          tokenVersion: { increment: 1 },
+        },
+        select: userSelect,
+      });
+    });
+    // After the commit and un-awaited, like every other email: it never fails the reset.
+    void this.mail.sendSecurityNotice(row.email, row.name, SecurityEvent.adminReset);
+    const pending = await this.pendingCounts([id]);
+    return this.toAdminUser(row, pending.get(id) ?? 0);
+  }
+
   private async rejectPending(tx: Prisma.TransactionClient, userId: string): Promise<void> {
     const where = { submittedById: userId, moderationStatus: 'PENDING' as const };
     const data = { moderationStatus: 'REJECTED' as const };
@@ -160,6 +200,7 @@ export class AdminUsersService {
       bannedAt: row.bannedAt ? row.bannedAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
       pendingCount,
+      mfaEnabled: row.mfaEnabledAt !== null,
     };
   }
 }

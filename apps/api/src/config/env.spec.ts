@@ -20,7 +20,12 @@ describe('validateEnv', () => {
   });
 
   it('accepts a strong secret in production', () => {
-    const env = { ...base, NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(48) };
+    const env = {
+      ...base,
+      NODE_ENV: 'production',
+      JWT_SECRET: 'x'.repeat(48),
+      MFA_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+    };
     expect(validateEnv(env)).toBe(env);
   });
 
@@ -56,5 +61,37 @@ describe('validateEnv', () => {
     for (const bad of ['true', '1', 'everyone']) {
       expect(() => validateEnv({ ...base, TRUST_PROXY: bad })).toThrow(/TRUST_PROXY/);
     }
+  });
+
+  describe('MFA', () => {
+    const key = Buffer.alloc(32, 7).toString('base64');
+    const prod = { ...base, NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(48) };
+
+    it('requires MFA_ENCRYPTION_KEY in production only', () => {
+      expect(() => validateEnv(prod)).toThrow(/MFA_ENCRYPTION_KEY is required/);
+      expect(validateEnv({ ...prod, MFA_ENCRYPTION_KEY: key })).toBeTruthy();
+      expect(validateEnv(base)).toBe(base);
+    });
+
+    it('rejects a key that is not 32 bytes', () => {
+      const short = Buffer.alloc(16).toString('base64');
+      expect(() => validateEnv({ ...prod, MFA_ENCRYPTION_KEY: short })).toThrow(/exactly 32 bytes/);
+      expect(() => validateEnv({ ...base, MFA_ENCRYPTION_KEY: 'nope' })).toThrow(/exactly 32 bytes/);
+    });
+
+    it('accepts a role list, an empty list, and rejects an unknown role', () => {
+      expect(validateEnv({ ...base, MFA_REQUIRED_ROLES: 'ADMIN, CONTRIBUTOR' })).toBeTruthy();
+      expect(validateEnv({ ...base, MFA_REQUIRED_ROLES: '' })).toBeTruthy();
+      expect(() => validateEnv({ ...base, MFA_REQUIRED_ROLES: 'ADMIN,MODERATOR' })).toThrow(
+        /MFA_REQUIRED_ROLES/,
+      );
+    });
+
+    it('rejects a WEBAUTHN_RP_ID with a scheme', () => {
+      expect(validateEnv({ ...base, WEBAUTHN_RP_ID: 'capbase.fyi' })).toBeTruthy();
+      expect(() => validateEnv({ ...base, WEBAUTHN_RP_ID: 'https://capbase.fyi' })).toThrow(
+        /WEBAUTHN_RP_ID/,
+      );
+    });
   });
 });

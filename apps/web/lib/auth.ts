@@ -15,6 +15,25 @@ export const TOKEN_COOKIE_OPTIONS = {
   maxAge: 60 * 60 * 24 * 7,
 } as const;
 
+/**
+ * The in-progress sign-in step (an API challenge token) between the password and the second
+ * factor, or during forced 2FA setup. httpOnly, so client JS never holds it; strict, since only
+ * this site's own fetches send it; it outlives the API's 5-minute challenge only to cover forced
+ * setup (15). The API is what expires it.
+ */
+export const MFA_COOKIE = 'capbase_mfa';
+/** The passwordless passkey challenge, kept apart so the email-field autofill ceremony a login
+ *  page starts on load can't clobber (or be clobbered by) a password sign-in's step. */
+export const PASSKEY_COOKIE = 'capbase_passkey';
+
+export const MFA_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'strict',
+  secure: process.env.NODE_ENV === 'production',
+  path: '/',
+  maxAge: 60 * 15,
+} as const;
+
 /** Read the session JWT from the httpOnly cookie (set by the login route handler). */
 export async function getToken(): Promise<string | undefined> {
   const store = await cookies();

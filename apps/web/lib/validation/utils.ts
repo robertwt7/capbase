@@ -39,3 +39,8 @@ export function applyServerErrors<T extends FieldValues>(
 export type ActionResult =
   | { ok: true }
   | { ok: false; formError?: string; fieldErrors?: Record<string, string> };
+
+/** An ActionResult whose success carries data back to the client (a secret shown once). */
+export type ActionResultWith<T> =
+  | ({ ok: true } & T)
+  | { ok: false; formError?: string; fieldErrors?: Record<string, string> };

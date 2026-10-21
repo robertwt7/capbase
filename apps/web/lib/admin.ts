@@ -138,6 +138,16 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Ad
   });
 }
 
+/** Remove every second factor and sign the account out everywhere; the API emails the user. */
+export async function resetUserMfa(id: string): Promise<AdminUser> {
+  const token = await getToken();
+  return apiFetch<AdminUser>(`/admin/users/${id}/reset-mfa`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
 // --- Reports ----------------------------------------------------------------
 
 /** The "Report an issue" queue for one status (admin-only, always fresh). */

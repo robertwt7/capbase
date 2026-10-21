@@ -43,6 +43,11 @@ services:
       # chars. This default is for THIS local stack only — prod uses deploy-secrets.
       JWT_SECRET: ${JWT_SECRET:-local-docker-stack-jwt-secret-not-for-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      # Production also requires a 32-byte key for authenticator-app secrets; this default
+      # is for THIS local stack only. 2FA enforcement is off here unless you set the roles
+      # (ADMIN,CONTRIBUTOR rehearses production).
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-bG9jYWwtZG9ja2VyLXN0YWNrLW1mYS1rZXktMzJieXQ=}
+      MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}
       SITE_URL: ${SITE_URL:-http://localhost:3001}

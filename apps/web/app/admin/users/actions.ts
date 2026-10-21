@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import type { Role } from '@repo/api';
 
-import { updateUser } from '../../../lib/admin';
+import { resetUserMfa, updateUser } from '../../../lib/admin';
 
 // Server actions for the user list, bound per row — the same plain-form
 // pattern as the moderation and merge queues.
@@ -17,5 +17,11 @@ export async function setBannedAction(id: string, banned: boolean): Promise<void
 
 export async function setRoleAction(id: string, role: Role): Promise<void> {
   await updateUser(id, { role });
+  revalidatePath('/admin/users');
+}
+
+/** Clear every second factor (for a lost device); signs the user out everywhere. */
+export async function resetMfaAction(id: string): Promise<void> {
+  await resetUserMfa(id);
   revalidatePath('/admin/users');
 }

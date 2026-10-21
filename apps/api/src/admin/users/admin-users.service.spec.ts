@@ -1,7 +1,12 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
+import { ConfigService } from '@nestjs/config';
+
 import { ApiKeysService } from '../../api-keys/api-keys.service';
+import { SecurityEvent } from '../../auth/mfa/mfa.service';
+import { MfaPolicy } from '../../auth/mfa/policy';
+import type { MailService } from '../../mail/mail.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { AdminUsersService } from './admin-users.service';
 
@@ -24,6 +29,7 @@ const baseUser = {
   role: 'USER' as 'USER' | 'CONTRIBUTOR' | 'ADMIN',
   bannedAt: null as Date | null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
+  mfaEnabledAt: null as Date | null,
 };
 
 function prismaFor(existing: typeof baseUser | null) {
@@ -36,6 +42,9 @@ function prismaFor(existing: typeof baseUser | null) {
       })),
     },
     apiKey: { updateMany: jest.fn(async () => ({ count: 0 })) },
+    webAuthnCredential: { deleteMany: jest.fn(async () => ({ count: 2 })) },
+    recoveryCode: { deleteMany: jest.fn(async () => ({ count: 10 })) },
+    authChallenge: { deleteMany: jest.fn(async () => ({ count: 1 })) },
   };
   for (const m of CONTRIBUTABLE) tx[m] = { updateMany: jest.fn(async () => ({ count: 0 })) };
   const prisma = {
@@ -46,8 +55,13 @@ function prismaFor(existing: typeof baseUser | null) {
   return { prisma: prisma as unknown as PrismaService, tx };
 }
 
+const mail = { sendSecurityNotice: jest.fn(async () => undefined) };
 const serviceFor = (prisma: PrismaService) =>
-  new AdminUsersService(prisma, new ApiKeysService(prisma));
+  new AdminUsersService(
+    prisma,
+    new ApiKeysService(prisma, new MfaPolicy(new ConfigService({}))),
+    mail as unknown as MailService,
+  );
 
 type Mocked = { updateMany: jest.Mock };
 const keyRevocations = (tx: Record<string, unknown>) =>
@@ -144,5 +158,37 @@ describe('AdminUsersService.update', () => {
     await expect(
       serviceFor(prisma).update('nope', { banned: true }, 'admin'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('AdminUsersService.resetMfa', () => {
+  it('refuses to reset your own account', async () => {
+    const { prisma, tx } = prismaFor(baseUser);
+    await expect(serviceFor(prisma).resetMfa('u1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    expect((tx as UserTx).user.update).not.toHaveBeenCalled();
+  });
+
+  it('clears every factor, revokes sessions and emails the user', async () => {
+    const { prisma, tx } = prismaFor({ ...baseUser, mfaEnabledAt: new Date() });
+    const result = await serviceFor(prisma).resetMfa('u1', 'admin');
+    const t = tx as unknown as Record<string, { deleteMany: jest.Mock }>;
+    for (const m of ['webAuthnCredential', 'recoveryCode', 'authChallenge']) {
+      expect(t[m]!.deleteMany).toHaveBeenCalledWith({ where: { userId: 'u1' } });
+    }
+    const { data } = (tx as UserTx).user.update.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(data).toEqual({
+      totpSecret: null,
+      totpEnabledAt: null,
+      totpLastStep: null,
+      mfaEnabledAt: null,
+      tokenVersion: { increment: 1 },
+    });
+    expect(result.mfaEnabled).toBe(false);
+    expect(mail.sendSecurityNotice).toHaveBeenCalledWith('u@test.dev', 'U', SecurityEvent.adminReset);
+  });
+
+  it('404s an unknown user', async () => {
+    const { prisma } = prismaFor(null);
+    await expect(serviceFor(prisma).resetMfa('nope', 'admin')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

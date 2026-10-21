@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 import {
   BadRequestException,
@@ -11,21 +11,30 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import type { AuthResponse, AuthUser, Role } from '@repo/api';
+import type {
+  AuthResponse,
+  AuthUser,
+  LoginResponse,
+  SetupCompleteResponse,
+  SetupPasskeyOptions,
+  TotpSetup,
+  WebAuthnOptionsJSON,
+} from '@repo/api';
 
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import type { JwtPayload } from './jwt.strategy';
 import { LoginDto } from './dto/login.dto';
+import { MfaVerifyDto, PasskeyLoginDto, SetupPasskeyDto } from './dto/mfa.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { hashToken } from './mfa/hash';
+import { BAD_CODE_MESSAGE, MfaService, type MfaUser } from './mfa/mfa.service';
+import { PASSKEY_FAILED_MESSAGE, PasskeyService } from './mfa/passkey.service';
+import { MfaPolicy } from './mfa/policy';
 
-type UserRecord = {
-  id: string;
-  email: string;
-  name: string;
-  role: Role;
+type UserRecord = MfaUser & {
   passwordHash: string;
   tokenVersion: number;
   bannedAt: Date | null;
@@ -41,17 +50,16 @@ const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
  *  the resend button is a server action, which lands in the `writes` zone. */
 const VERIFY_COOLDOWN_MS = 60 * 1000;
 
-const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
-
 /** The client-facing view of a user row. */
 export const toAuthUser = (
-  user: Pick<UserRecord, 'id' | 'email' | 'name' | 'role' | 'emailVerifiedAt'>,
+  user: Pick<UserRecord, 'id' | 'email' | 'name' | 'role' | 'emailVerifiedAt' | 'mfaEnabledAt'>,
 ): AuthUser => ({
   id: user.id,
   email: user.email,
   name: user.name,
   role: user.role,
   emailVerified: user.emailVerifiedAt !== null,
+  mfaEnabled: user.mfaEnabledAt !== null,
 });
 
 @Injectable()
@@ -60,6 +68,9 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly jwt: JwtService,
     private readonly mail: MailService,
+    private readonly mfa: MfaService,
+    private readonly policy: MfaPolicy,
+    private readonly passkeys: PasskeyService,
   ) {}
 
   async register(dto: RegisterDto, siteUrl: string): Promise<AuthResponse> {
@@ -79,7 +90,12 @@ export class AuthService {
     return this.buildResponse(user);
   }
 
-  async login(dto: LoginDto): Promise<AuthResponse> {
+  /**
+   * The password step. Without a factor this is the whole sign-in; with one it answers a
+   * LOGIN_MFA challenge and no token; for a role that requires 2FA but has none, an MFA_SETUP
+   * challenge — no session until a factor is enrolled.
+   */
+  async login(dto: LoginDto): Promise<LoginResponse> {
     const user = await this.users.findByEmail(dto.email);
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials');
@@ -88,8 +104,121 @@ export class AuthService {
     if (user.bannedAt) {
       throw new ForbiddenException('This account has been suspended');
     }
-    return this.buildResponse(user);
+    if (user.mfaEnabledAt) {
+      await this.mfa.assertNotLocked(user.id);
+      const challenge = await this.mfa.createChallenge('LOGIN_MFA', user.id);
+      return { status: 'mfa', challenge, methods: await this.mfa.methodsFor(user) };
+    }
+    if (this.policy.requires(user.role)) {
+      return { status: 'mfa_setup', challenge: await this.mfa.createChallenge('MFA_SETUP', user.id) };
+    }
+    return { status: 'ok', ...this.buildResponse(user) };
   }
+
+  /** Finish a password sign-in with a second factor. 401 for a wrong code or a dead challenge. */
+  async completeMfa(dto: MfaVerifyDto): Promise<LoginResponse> {
+    const challenge = await this.mfa.loadChallenge(dto.challenge, 'LOGIN_MFA');
+    const user = challenge.userId ? await this.users.findById(challenge.userId) : null;
+    if (!user) throw new UnauthorizedException();
+    if (user.bannedAt) {
+      await this.mfa.consumeChallenge(challenge.id);
+      throw new ForbiddenException('This account has been suspended');
+    }
+    await this.mfa.assertNotLocked(user.id);
+
+    const ok =
+      dto.method === 'passkey'
+        ? await this.passkeys.verifySecondFactor(challenge, dto.response)
+        : await this.mfa.verifyCode(user, dto.method, dto.code ?? '');
+    if (!ok) {
+      await this.mfa.recordFailure(challenge);
+      throw new UnauthorizedException(BAD_CODE_MESSAGE);
+    }
+    await this.mfa.consumeChallenge(challenge.id);
+    return { status: 'ok', ...this.buildResponse(user) };
+  }
+
+  /** Passkey options for the second step of a password sign-in. */
+  passkeySecondFactorOptions(token: string): Promise<WebAuthnOptionsJSON> {
+    return this.passkeys.secondFactorOptions(token);
+  }
+
+  /** Passwordless: a passkey with user verification signs straight in. */
+  async passkeyLogin(dto: PasskeyLoginDto): Promise<LoginResponse> {
+    const userId = await this.passkeys.passwordlessLogin(dto.challenge, dto.response);
+    const user = await this.users.findById(userId);
+    if (!user) throw new UnauthorizedException(PASSKEY_FAILED_MESSAGE);
+    if (user.bannedAt) throw new ForbiddenException('This account has been suspended');
+    return { status: 'ok', ...this.buildResponse(user) };
+  }
+
+  /** Forced setup with a passkey, step one: registration options for the MFA_SETUP user. */
+  async setupPasskeyOptions(token: string): Promise<SetupPasskeyOptions> {
+    const user = await this.setupUser(token);
+    const { challenge, options } = await this.passkeys.registrationOptions(user);
+    return { registerChallenge: challenge, options };
+  }
+
+  /** Forced setup with a passkey, step two: register it and issue the session. */
+  async setupPasskey(dto: SetupPasskeyDto): Promise<SetupCompleteResponse> {
+    const user = await this.setupUser(dto.challenge);
+    const recoveryCodes = await this.passkeys.register(
+      user.id,
+      dto.registerChallenge,
+      dto.response,
+      dto.name,
+    );
+    return this.finishSetup(dto.challenge, user.id, recoveryCodes);
+  }
+
+  /** Forced setup, step one: start an authenticator-app enrollment for the MFA_SETUP user. */
+  async setupTotp(token: string): Promise<TotpSetup> {
+    const user = await this.setupUser(token);
+    return this.mfa.beginTotp(user);
+  }
+
+  /** Forced setup, step two: confirm the app, spend the setup challenge, issue the session. */
+  async confirmSetupTotp(
+    token: string,
+    totpChallenge: string,
+    code: string,
+  ): Promise<SetupCompleteResponse> {
+    const user = await this.setupUser(token);
+    const recoveryCodes = await this.mfa.confirmTotp(user.id, totpChallenge, code);
+    return this.finishSetup(token, user.id, recoveryCodes);
+  }
+
+  /** The user an MFA_SETUP challenge belongs to; 401/403 if it is dead or they are banned. */
+  async setupUser(token: string): Promise<UserRecord> {
+    const challenge = await this.mfa.loadChallenge(token, 'MFA_SETUP');
+    const user = challenge.userId ? await this.users.findById(challenge.userId) : null;
+    if (!user) throw new UnauthorizedException();
+    if (user.bannedAt) throw new ForbiddenException('This account has been suspended');
+    return user;
+  }
+
+  /** Spend the MFA_SETUP challenge once a factor is enrolled, and sign the user in. */
+  async finishSetup(
+    token: string,
+    userId: string,
+    recoveryCodes: string[],
+  ): Promise<SetupCompleteResponse> {
+    const challenge = await this.mfa.loadChallenge(token, 'MFA_SETUP');
+    await this.mfa.consumeChallenge(challenge.id);
+    const user = await this.users.findById(userId);
+    if (!user) throw new UnauthorizedException();
+    return { status: 'ok', ...this.buildResponse(user), recoveryCodes };
+  }
+
+  /** Step-up for a security change: the signed-in user's current password. */
+  async confirmPassword(userId: string, password: string): Promise<UserRecord> {
+    const user = await this.users.findById(userId);
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      throw new UnauthorizedException('Password is incorrect');
+    }
+    return user;
+  }
+
 
   /**
    * Update the signed-in user's name/email. Email stays unique. A new address

@@ -11,6 +11,7 @@ import {
   MAX_PAGE_SIZE,
   MAX_PENDING_API_SUBMISSIONS,
   MAX_V1_LIST_DEPTH,
+  MFA_REQUIRED,
 } from '@repo/api';
 
 import { Button, buttonVariants, PageContainer, SectionHeader } from '@/components/ui';
@@ -280,8 +281,10 @@ export default function DevelopersPage() {
               [
                 '403',
                 <>
-                  The address is outside the key&apos;s allowlist, the route needs an admin key, or
-                  your email is unverified (<C>code: &quot;{EMAIL_UNVERIFIED}&quot;</C>).
+                  The address is outside the key&apos;s allowlist, the route needs an admin key,
+                  your email is unverified (<C>code: &quot;{EMAIL_UNVERIFIED}&quot;</C>), or your
+                  account has no two-factor authentication (<C>code: &quot;{MFA_REQUIRED}&quot;</C>
+                  — turn it on in your account settings and the key works again).
                 </>,
               ],
               ['404', 'No public company, investor or person has that slug.'],

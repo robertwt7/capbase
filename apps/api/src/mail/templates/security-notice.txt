@@ -1,0 +1,15 @@
+Hi {{{NAME}}},
+
+This is a record of a change to how you sign in to Capbase:
+
+  {{{EVENT}}}
+  {{{WHEN}}}
+
+Review your security settings:
+
+{{{SETTINGS_URL}}}
+
+If this was you, there is nothing to do. If it wasn't, change your password
+straight away and reply to this email.
+
+— The Capbase team

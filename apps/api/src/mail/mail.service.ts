@@ -99,6 +99,22 @@ export class MailService {
     });
   }
 
+  /** A sign-in security setting changed (2FA, passkeys, recovery codes) or 2FA attempts
+   *  failed. `event` is one sentence. Never throws. */
+  sendSecurityNotice(to: string, name: string, event: string): Promise<void> {
+    const when = new Date().toLocaleString('en-GB', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'UTC',
+    });
+    return this.deliver('security-notice', to, {
+      NAME: name,
+      EVENT: event,
+      WHEN: `${when} UTC`,
+      SETTINGS_URL: `${this.siteUrl}/profile/settings`,
+    });
+  }
+
   /** Render and send one template. Never throws — mail failure must not fail the request. */
   private async deliver<T extends TemplateName>(
     name: T,

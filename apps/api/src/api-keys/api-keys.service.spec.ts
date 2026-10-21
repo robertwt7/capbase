@@ -8,10 +8,16 @@ import {
   HttpException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { EMAIL_UNVERIFIED, MAX_ACTIVE_API_KEYS, type Role } from '@repo/api';
+import { ConfigService } from '@nestjs/config';
+import { EMAIL_UNVERIFIED, MAX_ACTIVE_API_KEYS, MFA_REQUIRED, type Role } from '@repo/api';
 
+import { MfaPolicy } from '../auth/mfa/policy';
 import type { PrismaService } from '../prisma/prisma.service';
 import { ApiKeysService, ipAllowed, parseCidr } from './api-keys.service';
+
+/** 2FA enforcement off, as outside production by default. */
+const noMfa = new MfaPolicy(new ConfigService({}));
+const mfaOn = new MfaPolicy(new ConfigService({ MFA_REQUIRED_ROLES: 'ADMIN,CONTRIBUTOR' }));
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
@@ -21,6 +27,7 @@ type Owner = {
   role: Role;
   bannedAt: Date | null;
   emailVerifiedAt: Date | null;
+  mfaEnabledAt: Date | null;
 };
 
 const owner = (over: Partial<Owner> = {}): Owner => ({
@@ -29,6 +36,7 @@ const owner = (over: Partial<Owner> = {}): Owner => ({
   role: 'CONTRIBUTOR',
   bannedAt: null,
   emailVerifiedAt: new Date('2026-01-01T00:00:00Z'),
+  mfaEnabledAt: null,
   ...over,
 });
 
@@ -40,9 +48,10 @@ function keyed(
     revokedAt?: Date | null;
     allowedCidrs?: string[];
     lastUsedAt?: Date | null;
+    policy?: MfaPolicy;
   } = {},
 ) {
-  const minted = new ApiKeysService({} as PrismaService).mint();
+  const minted = new ApiKeysService({} as PrismaService, noMfa).mint();
   const row = {
     id: 'k1',
     prefix: minted.prefix,
@@ -61,7 +70,7 @@ function keyed(
     apiKey: { findUnique, updateMany },
   } as unknown as PrismaService;
   return {
-    service: new ApiKeysService(prisma),
+    service: new ApiKeysService(prisma, opts.policy ?? noMfa),
     token: minted.token,
     findUnique,
     updateMany,
@@ -78,7 +87,7 @@ function creator(active = 0) {
   }));
   const count = jest.fn(async () => active);
   const prisma = { apiKey: { create, count } } as unknown as PrismaService;
-  return { service: new ApiKeysService(prisma), create };
+  return { service: new ApiKeysService(prisma, noMfa), create };
 }
 
 const contributor = {
@@ -98,7 +107,7 @@ async function rejection(p: Promise<unknown>): Promise<HttpException> {
 
 describe('ApiKeysService.mint', () => {
   it('produces cbk_<8 base62>_<43 base64url>, with the prefix as its head', () => {
-    const { prefix, token, hash } = new ApiKeysService({} as PrismaService).mint();
+    const { prefix, token, hash } = new ApiKeysService({} as PrismaService, noMfa).mint();
     expect(token).toMatch(/^cbk_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{43}$/);
     expect(token.startsWith(`${prefix}_`)).toBe(true);
     expect(prefix).toHaveLength(12);
@@ -239,6 +248,19 @@ describe('ApiKeysService.authenticate', () => {
     await expect(admin.service.authenticate(admin.token, '203.0.113.1')).resolves.toBeDefined();
   });
 
+  it('answers 403 MFA_REQUIRED while a required role has no factor, without revoking', async () => {
+    const without = keyed({ policy: mfaOn });
+    const err = await rejection(without.service.authenticate(without.token, '203.0.113.1'));
+    expect(err.getStatus()).toBe(403);
+    expect(err.getResponse()).toMatchObject({ code: MFA_REQUIRED });
+
+    const enrolled = keyed({ policy: mfaOn, user: { mfaEnabledAt: new Date() } });
+    await expect(enrolled.service.authenticate(enrolled.token, '203.0.113.1')).resolves.toBeDefined();
+    // Enforcement off: the same un-enrolled owner is fine.
+    const off = keyed();
+    await expect(off.service.authenticate(off.token, '203.0.113.1')).resolves.toBeDefined();
+  });
+
   it('enforces the allowlist, including an IPv4-mapped socket address', async () => {
     const { service, token } = keyed({ allowedCidrs: ['203.0.113.0/24'] });
     await expect(service.authenticate(token, '203.0.113.9')).resolves.toBeDefined();
@@ -295,9 +317,10 @@ describe('CIDR helpers', () => {
 describe('ApiKeysService.revoke', () => {
   it("404s a key that isn't the caller's", async () => {
     const updateMany = jest.fn(async () => ({ count: 0 }));
-    const service = new ApiKeysService({
-      apiKey: { updateMany },
-    } as unknown as PrismaService);
+    const service = new ApiKeysService(
+      { apiKey: { updateMany } } as unknown as PrismaService,
+      noMfa,
+    );
     const err = await rejection(service.revoke('u1', 'someone-elses'));
     expect(err.getStatus()).toBe(404);
     expect(updateMany).toHaveBeenCalledWith({

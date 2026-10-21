@@ -26,6 +26,10 @@ export const TEMPLATES = {
     subject: 'Capbase moderation queue reached its alert threshold',
     vars: ['NAME', 'TOTAL', 'THRESHOLD', 'BREAKDOWN', 'OLDEST', 'LINK'],
   },
+  'security-notice': {
+    subject: 'Security change on your Capbase account',
+    vars: ['NAME', 'EVENT', 'WHEN', 'SETTINGS_URL'],
+  },
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;

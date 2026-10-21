@@ -1,47 +1,44 @@
 import { NextResponse } from 'next/server';
-import type { AuthResponse } from '@repo/api';
+import type { AuthResponse, LoginResponse } from '@repo/api';
 
-import { API_URL } from '../../../../lib/api';
-import { TOKEN_COOKIE } from '../../../../lib/auth';
-import { forwardedForHeaders } from '../../../../lib/client-ip';
+import { MFA_COOKIE } from '../../../../lib/auth';
+import { badRequest, finishLogin, postToApi, readBody, withChallenge } from '../../../../lib/auth-proxy';
 import { RATE_LIMITED_MESSAGE } from '../../../../lib/rate-limit';
 
-// Proxies /auth/login on the API and stores the JWT in an httpOnly cookie so
-// server components can read the session. Unlike the admin route, any role is
-// allowed through — this is the public sign-in.
+// Proxies /auth/login on the API. A sign-in without a second factor sets the httpOnly session
+// cookie here; otherwise the step's challenge goes into the httpOnly MFA cookie and the client
+// is told which step comes next (`mfa` or `mfa_setup`) — never the token. Unlike the admin
+// route, any role is allowed through: this is the public sign-in.
 export async function POST(req: Request) {
-  let body: { email?: string; password?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ message: 'Invalid request body' }, { status: 400 });
-  }
+  const body = await readBody(req);
+  if (!body) return badRequest();
 
-  const res = await fetch(`${API_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(await forwardedForHeaders()) },
-    body: JSON.stringify({ email: body.email, password: body.password }),
-    cache: 'no-store',
-  });
+  const { res, data } = await postToApi('/auth/login', { email: body.email, password: body.password });
 
   if (res.status === 403) {
     return NextResponse.json({ message: 'This account has been suspended.' }, { status: 403 });
   }
   if (res.status === 429) {
-    return NextResponse.json({ message: RATE_LIMITED_MESSAGE }, { status: 429 });
+    const message = typeof data.message === 'string' && /two-factor/i.test(data.message);
+    return NextResponse.json(
+      { message: message ? data.message : RATE_LIMITED_MESSAGE },
+      { status: 429 },
+    );
   }
   if (!res.ok) {
     return NextResponse.json({ message: 'Invalid email or password' }, { status: 401 });
   }
 
-  const auth = (await res.json()) as AuthResponse;
-  const response = NextResponse.json({ user: auth.user });
-  response.cookies.set(TOKEN_COOKIE, auth.accessToken, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7,
-  });
-  return response;
+  const login = data as unknown as LoginResponse;
+  if (login.status === 'mfa') {
+    return withChallenge(
+      NextResponse.json({ status: 'mfa', methods: login.methods }),
+      MFA_COOKIE,
+      login.challenge,
+    );
+  }
+  if (login.status === 'mfa_setup') {
+    return withChallenge(NextResponse.json({ status: 'mfa_setup' }), MFA_COOKIE, login.challenge);
+  }
+  return finishLogin(login as AuthResponse);
 }

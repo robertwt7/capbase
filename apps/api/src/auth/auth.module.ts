@@ -11,12 +11,16 @@ import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { MfaService } from './mfa/mfa.service';
+import { PasskeyService } from './mfa/passkey.service';
+import { MfaPolicyModule } from './mfa/policy';
 
 @Module({
   imports: [
     UsersModule,
     ApiKeysModule,
     MailModule,
+    MfaPolicyModule,
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -34,6 +38,8 @@ import { JwtStrategy } from './jwt.strategy';
   controllers: [AuthController],
   providers: [
     AuthService,
+    MfaService,
+    PasskeyService,
     JwtStrategy,
     // Global, but provided here because it decodes the JWT to key on the user.
     { provide: APP_GUARD, useClass: ApiThrottlerGuard },

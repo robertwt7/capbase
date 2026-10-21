@@ -108,7 +108,9 @@ DELETE FROM "MergeCandidate" m WHERE NOT CASE m."entityType"
                      AND EXISTS (SELECT 1 FROM "Person"   x WHERE x.id = m."rightId")
     ELSE TRUE END;
 
--- 5. The accounts themselves.
+-- 5. The accounts themselves (their passkeys and recovery codes cascade). Sign-in challenges
+--    live five minutes and some have no user, so none is worth shipping.
+DELETE FROM "AuthChallenge";
 DELETE FROM "User" WHERE id IN (SELECT id FROM junk_user);
 
 -- Safety net: refuse to ship if anything demo-shaped survived.

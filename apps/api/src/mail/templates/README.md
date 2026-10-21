@@ -14,6 +14,7 @@ templates and nothing to copy into the Resend dashboard.
 | `submission-rejected` | a moderator turns one down (`REASON` = note or stock line)  | `NAME`, `SUMMARY`, `REASON`, `LINK`                         |
 | `queue-digest`        | daily, to each admin, when the moderation queue isn't empty | `NAME`, `TOTAL`, `BREAKDOWN`, `OLDEST`, `LINK`              |
 | `queue-alert`         | to each admin, when PENDING reaches `QUEUE_ALERT_THRESHOLD` | `NAME`, `TOTAL`, `THRESHOLD`, `BREAKDOWN`, `OLDEST`, `LINK` |
+| `security-notice`     | a 2FA / passkey / recovery-code change, or repeated failures | `NAME`, `EVENT`, `WHEN`, `SETTINGS_URL`                    |
 
 Subjects live in the `TEMPLATES` registry in `../templates.ts`, not in the files.
 

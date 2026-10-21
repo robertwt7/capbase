@@ -6,6 +6,7 @@
 # Generates:
 #   POSTGRES_PASSWORD  — also rewritten inside DATABASE_URL, so the two can't drift
 #   JWT_SECRET         — openssl rand -hex 32
+#   MFA_ENCRYPTION_KEY — openssl rand -base64 32 (encrypts authenticator-app secrets)
 #   ADMIN_PASSWORD     — the /admin login (NOT the same thing as POSTGRES_PASSWORD)
 #
 # Usage: make deploy-secrets [ENVF=infra/env/all.env] [FORCE=yes]
@@ -44,11 +45,18 @@ fi
 
 PG_PW="$(randpw 32)"
 JWT="$(openssl rand -hex 32)"
+MFA_KEY="$(openssl rand -base64 32)"
 ADMIN_PW="$(randpw 24)"
 
 # `|` delimiter is safe: the generated alphabet never contains it.
 sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${PG_PW}|" "$ENVF"
 sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${JWT}|" "$ENVF"
+# base64 may contain `/` and `+` but never `|`. An env file from before 2FA has no line: append.
+if grep -q '^MFA_ENCRYPTION_KEY=' "$ENVF"; then
+  sed -i "s|^MFA_ENCRYPTION_KEY=.*|MFA_ENCRYPTION_KEY=${MFA_KEY}|" "$ENVF"
+else
+  printf 'MFA_ENCRYPTION_KEY=%s\n' "$MFA_KEY" >> "$ENVF"
+fi
 sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PW}|" "$ENVF"
 
 # Rebuild DATABASE_URL from the parts so its password can never drift from
@@ -65,6 +73,7 @@ cat <<EOF
 
     POSTGRES_PASSWORD  generated (32 chars) — also synced into DATABASE_URL
     JWT_SECRET         generated (64 hex chars)
+    MFA_ENCRYPTION_KEY generated (32 bytes, base64) — back it up with the others
     ADMIN_PASSWORD     ${ADMIN_PW}
 
     ⚠️  SAVE THE ADMIN PASSWORD NOW — printed once. It is the /admin login,

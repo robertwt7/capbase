@@ -151,6 +151,12 @@ export class AdminController {
     return this.users.update(id, dto, user.id);
   }
 
+  /** Clear every second factor and sign the account out everywhere; emails the user. */
+  @Post('users/:id/reset-mfa')
+  resetUserMfa(@Param('id') id: string, @CurrentUser() user: RequestUser): Promise<AdminUser> {
+    return this.users.resetMfa(id, user.id);
+  }
+
   // --- Privacy -------------------------------------------------------------
 
   /**

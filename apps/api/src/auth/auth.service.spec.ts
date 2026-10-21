@@ -12,16 +12,23 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
+import type { MfaService } from './mfa/mfa.service';
+import type { PasskeyService } from './mfa/passkey.service';
+import type { MfaPolicy } from './mfa/policy';
 
 type UserRow = {
   id: string;
   email: string;
   name: string;
-  role: 'USER' | 'ADMIN';
+  role: 'USER' | 'CONTRIBUTOR' | 'ADMIN';
   passwordHash: string;
   tokenVersion: number;
   bannedAt: Date | null;
   emailVerifiedAt: Date | null;
+  mfaEnabledAt: Date | null;
+  totpSecret: string | null;
+  totpEnabledAt: Date | null;
+  totpLastStep: number | null;
 };
 
 const me: UserRow = {
@@ -33,6 +40,10 @@ const me: UserRow = {
   tokenVersion: 0,
   bannedAt: null,
   emailVerifiedAt: new Date('2026-01-01T00:00:00Z'),
+  mfaEnabledAt: null,
+  totpSecret: null,
+  totpEnabledAt: null,
+  totpLastStep: null,
 };
 
 type Consumed = { email: string; name: string; newlyVerified: boolean } | null;
@@ -46,6 +57,8 @@ function usersWith(overrides: {
   consumed?: boolean;
   lastVerificationAt?: Date | null;
   verified?: Consumed;
+  /** Roles MFA_REQUIRED_ROLES names. */
+  requiredRoles?: string[];
 }) {
   const users = {
     findByEmail: jest.fn(async () => overrides.byEmail ?? null),
@@ -108,13 +121,24 @@ function usersWith(overrides: {
       async () => undefined,
     ),
   };
+  const mfa = {
+    assertNotLocked: jest.fn(async () => undefined),
+    createChallenge: jest.fn(async () => 'c'.repeat(43)),
+    methodsFor: jest.fn(async () => ['totp', 'recovery']),
+  };
+  const required = new Set(overrides.requiredRoles ?? []);
+  const policy = { requires: (role: string) => required.has(role) };
   return {
     users,
     mail,
+    mfa,
     service: new AuthService(
       users as unknown as UsersService,
       jwt,
       mail as unknown as MailService,
+      mfa as unknown as MfaService,
+      policy as unknown as MfaPolicy,
+      {} as PasskeyService,
     ),
   };
 }
@@ -261,6 +285,7 @@ describe('AuthService.updateProfile', () => {
       name: 'Renamed',
       role: 'USER',
       emailVerified: true,
+      mfaEnabled: false,
     });
     expect(users.update).toHaveBeenCalledWith('u1', { name: 'Renamed', email: 'me@example.com' });
     expect(users.createVerificationToken).not.toHaveBeenCalled();
@@ -285,6 +310,7 @@ describe('AuthService.updateProfile', () => {
       name: 'New',
       role: 'USER',
       emailVerified: false,
+      mfaEnabled: false,
     });
     const [, email] = users.createVerificationToken.mock.calls[0]!;
     expect(email).toBe('new@example.com');
@@ -349,6 +375,48 @@ describe('AuthService.login', () => {
     await expect(
       service.login({ email: 'me@example.com', password: 'correct-horse' }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('signs a user without a factor straight in', async () => {
+    const passwordHash = await bcrypt.hash('correct-horse', 10);
+    const { mfa, service } = usersWith({ byEmail: { ...me, passwordHash } });
+    const res = await service.login({ email: 'me@example.com', password: 'correct-horse' });
+    expect(res).toMatchObject({ status: 'ok', accessToken: 'token', user: { mfaEnabled: false } });
+    expect(mfa.createChallenge).not.toHaveBeenCalled();
+  });
+
+  it('asks a user with a factor for it, and sends no token', async () => {
+    const passwordHash = await bcrypt.hash('correct-horse', 10);
+    const { mfa, service } = usersWith({
+      byEmail: { ...me, passwordHash, mfaEnabledAt: new Date() },
+    });
+    const res = await service.login({ email: 'me@example.com', password: 'correct-horse' });
+    expect(res).toEqual({ status: 'mfa', challenge: 'c'.repeat(43), methods: ['totp', 'recovery'] });
+    expect(res).not.toHaveProperty('accessToken');
+    expect(mfa.assertNotLocked).toHaveBeenCalledWith('u1');
+    expect(mfa.createChallenge).toHaveBeenCalledWith('LOGIN_MFA', 'u1');
+  });
+
+  it('refuses a banned account with a factor before issuing any challenge', async () => {
+    const passwordHash = await bcrypt.hash('correct-horse', 10);
+    const { mfa, service } = usersWith({
+      byEmail: { ...me, passwordHash, mfaEnabledAt: new Date(), bannedAt: new Date() },
+    });
+    await expect(
+      service.login({ email: 'me@example.com', password: 'correct-horse' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mfa.createChallenge).not.toHaveBeenCalled();
+  });
+
+  it('sends a required role without a factor to setup, with no token', async () => {
+    const passwordHash = await bcrypt.hash('correct-horse', 10);
+    const { mfa, service } = usersWith({
+      byEmail: { ...me, role: 'CONTRIBUTOR', passwordHash },
+      requiredRoles: ['ADMIN', 'CONTRIBUTOR'],
+    });
+    const res = await service.login({ email: 'me@example.com', password: 'correct-horse' });
+    expect(res).toEqual({ status: 'mfa_setup', challenge: 'c'.repeat(43) });
+    expect(mfa.createChallenge).toHaveBeenCalledWith('MFA_SETUP', 'u1');
   });
 
   it('does not reveal a ban to a wrong-password guess', async () => {

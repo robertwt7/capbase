@@ -41,6 +41,12 @@ const SAMPLES: { [T in TemplateName]: TemplateVars<T> } = {
     OLDEST: '19 hours',
     LINK: `${SITE_URL}/admin`,
   },
+  'security-notice': {
+    NAME,
+    EVENT: 'A recovery code was used to sign in. You have 9 left.',
+    WHEN: '21 Oct 2026, 09:44 UTC',
+    SETTINGS_URL: `${SITE_URL}/profile/settings`,
+  },
 };
 
 const outDir = resolve(__dirname, '../../.mail-preview');

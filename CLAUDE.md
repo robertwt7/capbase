@@ -129,6 +129,19 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   ↑/↓/Enter/Escape drive it and `/` focuses it from outside a text field. With nothing
   highlighted — or without JS — Enter still submits the plain form to `/companies?q=`.
 
+- **Two-factor UI**: **`QrCode`** (`components/QrCode.tsx`) draws an otpauth URI as SVG rects in
+  `fill-current text-ink` on `bg-surface` — never `toDataURL` (bakes in black on white).
+  **`RecoveryCodesPanel`** is the one-time reveal (mono grid, Copy all, Download .txt).
+  `components/auth/`: **`SecondFactorStep`** (the post-password step: "Use your passkey", a 6-digit
+  code that auto-submits, "Use a recovery code instead"; `admin` makes completion refuse a
+  non-admin) and **`TotpEnrollStep`** (QR + grouped key + code; settings and forced setup).
+  `lib/webauthn.ts` maps browser ceremony errors (a cancel is quiet, never a red error).
+  The sign-in step's API challenge lives in the httpOnly, `sameSite: strict` **`capbase_mfa`**
+  cookie, the passwordless one in **`capbase_passkey`** (separate, so the email-field autofill a
+  login page starts on load can't clobber a password sign-in's step); client JS never holds
+  either. The route handlers share `lib/auth-proxy.ts` (`postToApi`, `failure` → `{ message,
+  expired? }`, `finishLogin` sets the session and drops both step cookies).
+
 **Landmarks:** the root layout owns the skip link and the single `<main id="content">`.
 Pages render plain containers (`<div>` / `PageContainer`) — never their own `<main>`.
 
@@ -295,6 +308,20 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 - `/admin/users` — account list: search, ban/unban (a ban revokes sessions and rejects
   the user's pending queue), and one "Make user / contributor / admin" button per other role
   (a downgrade revokes the API keys the new role no longer permits; a ban revokes all).
+  A mono `2FA` badge (`No 2FA`, dashed, for an un-enrolled admin/contributor) and, when enrolled,
+  a monochrome **Reset 2FA** button (`resetMfaAction` → `POST /admin/users/:id/reset-mfa`).
+- `/profile/settings` → **Security** (`SecuritySection.tsx`): Passkeys (list, "Synced"/"This
+  device", add via `startRegistration`, remove), Authenticator app (set up / remove), Recovery
+  codes ("N of 10 remaining", regenerate). Every change is an inline password step (no modal)
+  → a server action in `settings/actions.ts` → `lib/account.ts` → API; 401 maps to the password
+  field. Removing a required role's last factor is disabled in the UI and refused by the API.
+- `/login` — password form plus "Sign in with a passkey" and passkey **autofill** on the email
+  field (`autoComplete="username webauthn"`, conditional mediation started on mount and aborted
+  on unmount). The login route answers `{ status: 'ok' | 'mfa' | 'mfa_setup' }`; `mfa` swaps the
+  form for `SecondFactorStep`, `mfa_setup` goes to **`/login/setup-2fa?next=`** (forced setup:
+  "Add a passkey" or an authenticator app, then the recovery codes, then `next`; redirects to
+  `/login` without the `capbase_mfa` cookie; `noindex`, under the robots-disallowed `/login`).
+  `/admin/login` runs the same step with `admin`.
 - `/profile/api-keys` — self-serve API keys for the public API (`/v1`, see Backend). A `USER`
   sees an `EmptyState` saying admins grant access; an unverified contributor sees
   `VerifyEmailBanner` and no form; a verified `CONTRIBUTOR`/`ADMIN` sees their active keys
@@ -434,6 +461,38 @@ lands in nginx's `writes` zone). Changing the email clears verification and mail
 address; each `EmailVerificationToken` is bound to the address it was sent to, so an old
 link can't verify a new one. `AuthUser.emailVerified` / `RequestUser.emailVerified` carry
 the flag (`JwtStrategy` reads it from the row, like role).
+
+**Two-factor & passkeys (`src/auth/mfa/`).** Login is a small state machine on the API carried
+by `AuthChallenge` rows (opaque 32-byte token, only its sha256 stored, single-use via a
+conditional `consumedAt` update, `MFA_MAX_ATTEMPTS` 5; 5 min, forced setup 15). `POST
+/auth/login` returns the **`LoginResponse` union**: `ok` (the session, as before — still 201),
+`mfa` (a `LOGIN_MFA` challenge + `methods`, **no token**) or `mfa_setup` (a required role with no
+factor: an `MFA_SETUP` challenge, no session until a factor is enrolled via
+`/auth/login/setup/{totp,passkey}…`). `POST /auth/login/mfa` finishes with `totp` | `recovery` |
+`passkey`. `MfaService` owns challenges, TOTP (hand-rolled RFC 6238 in `totp.ts`, ±1 step,
+`User.totpLastStep` rejects a replay with a conditional update; the secret is AES-256-GCM sealed
+under `MFA_ENCRYPTION_KEY` by `secret-box.ts`, HKDF from `JWT_SECRET` outside production),
+recovery codes (`RECOVERY_CODE_COUNT` 10, sha256 of the normalised code, spent by conditional
+`updateMany`), the account lockout (`MFA_ACCOUNT_FAILURE_LIMIT` 10 failures across `LOGIN_MFA`
+challenges in `MFA_LOCKOUT_MINUTES` 15 → 429 + one `security-notice` email) and the shared
+bookkeeping (`factorAdded` sets `mfaEnabledAt` and issues codes if none; `factorRemoved` clears
+both when the last factor goes). `PasskeyService` wraps `@simplewebauthn/server` (v13, CJS):
+rp id = `WEBAUTHN_RP_ID` or `SITE_URL`'s host, origin = `SITE_URL`'s; discoverable credentials;
+passwordless sign-in (`/auth/passkey/options|login`) requires user verification and bypasses
+`LOGIN_MFA`/`MFA_SETUP`; every passwordless failure is the same generic 401; a counter that fails
+to advance is rejected. Signed-in management is `/auth/me/mfa…` and `/auth/me/passkeys…`, each
+change password-confirmed (`AuthService.confirmPassword`) and emailed (`security-notice`).
+**`MfaPolicy`** (`policy.ts`, its own `MfaPolicyModule` because `AuthModule` imports
+`ApiKeysModule`) reads `MFA_REQUIRED_ROLES` once: **unset → `ADMIN,CONTRIBUTOR` in production,
+none elsewhere; set (even empty) → exactly that** — so local dev and every e2e suite sign in with
+a password as before. Enforcement is two checks off the row already read: `JwtStrategy` rejects
+`policy.unmet(user)` (an existing session dies, a promotion is caught at once) and
+`ApiKeysService.authenticate` answers `403 { code: 'MFA_REQUIRED' }` (keys suspended, not
+revoked). A required role can't remove its last factor (400). **A password reset never disables
+2FA**; the recovery path is a recovery code or the admin `POST /admin/users/:id/reset-mfa`
+(`AdminUsersService.resetMfa`: not yourself; deletes passkeys, codes and challenges, nulls TOTP
+and `mfaEnabledAt`, bumps `tokenVersion`, emails). `test/mfa.e2e-spec.ts` overrides `MfaPolicy`
+to run the enforced flow.
 
 Abuse controls: every contribution route uses the `@Contribution()` decorator
 (`JwtAuthGuard` + `VerifiedEmailGuard` + `PendingCapGuard` + `TurnstileGuard`, cheapest
@@ -626,6 +685,13 @@ person, a holding's firm, a company's people and firms) and every merge/unmerge.
 count live (cheap), so there a stale key only misorders; investor cards show `holdingCount`, so
 there a stale key also shows as a wrong number until the next refresh. `make backfill-directory-counts` (`-prod`) fills
 or re-runs it by hand.
+
+**Two-factor tables** (migration `mfa_passkeys`, additive): `User.mfaEnabledAt` (denormalised
+"has a factor", so `JwtStrategy` enforces from the row it already reads), `totpSecret` (sealed),
+`totpEnabledAt`, `totpLastStep`; `WebAuthnCredential` (passkeys: `credentialId` unique,
+`publicKey`, `counter` BigInt, `transports`, `deviceType`, `backedUp`, `name`, `lastUsedAt`);
+`RecoveryCode` (sha256 only, `usedAt`); `AuthChallenge` (the sign-in steps; pruned an hour after
+expiry on each insert; `prod-cleanup.sql` drops them all from a dump).
 
 `ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,
 `allowedCidrs`, `lastUsedAt` debounced to once a minute, `revokedAt`); `InvestorChangeProposal`

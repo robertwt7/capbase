@@ -4,7 +4,7 @@ import { Badge, Button, Input, PageContainer, Pagination } from '../../../compon
 import { getUsers } from '../../../lib/admin';
 import { requireAdmin } from '../../../lib/auth';
 import { formatCount, formatDate } from '../../../lib/format';
-import { setBannedAction, setRoleAction } from './actions';
+import { resetMfaAction, setBannedAction, setRoleAction } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +39,10 @@ export default async function AdminUsers({
           everything it still has pending. Lifting a ban restores access but not
           the rejected submissions. Contributors can mint API keys for the public
           API; demoting or banning someone revokes the keys their new role no
-          longer allows.
+          longer allows. Resetting 2FA removes an account’s authenticator app,
+          passkeys and recovery codes and signs it out everywhere — for someone
+          who lost their device. Contributors and admins must set it up again
+          before they can sign in.
         </p>
       </header>
 
@@ -139,6 +142,15 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
               {ROLE_LABEL[user.role]}
             </Badge>
           ) : null}
+          {user.mfaEnabled ? (
+            <Badge variant="box" mono>
+              2FA
+            </Badge>
+          ) : user.role !== 'USER' ? (
+            <Badge variant="box" mono className="border-dashed text-graphite-500">
+              No 2FA
+            </Badge>
+          ) : null}
           {banned ? (
             <Badge
               variant="pill"
@@ -170,6 +182,19 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
                 </Button>
               </form>
             ))}
+            {user.mfaEnabled ? (
+              <form action={resetMfaAction.bind(null, user.id)}>
+                <Button
+                  variant="outline"
+                  shape="box"
+                  size="sm"
+                  type="submit"
+                  title="Removes every second factor and signs the account out everywhere"
+                >
+                  Reset 2FA
+                </Button>
+              </form>
+            ) : null}
             <form action={setBannedAction.bind(null, user.id, !banned)}>
               <Button variant="outline" shape="box" size="sm" type="submit">
                 {banned ? 'Lift ban' : 'Ban'}

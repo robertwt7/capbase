@@ -28,6 +28,14 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your env file}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      # Encrypts authenticator-app secrets at rest (openssl rand -base64 32). Keep it with the
+      # other secrets: losing it makes every enrolled authenticator app unreadable.
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?set MFA_ENCRYPTION_KEY in your env file}
+      # Roles that must use 2FA. No colon on purpose: unset = the API's production default
+      # (ADMIN,CONTRIBUTOR); set to empty = enforcement off (the first deploy, see infra/README).
+      MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES-ADMIN,CONTRIBUTOR}
+      # Passkey relying-party id; empty = SITE_URL's hostname.
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-Capbase <onboarding@resend.dev>}
       # Public origin for links in emails (password reset).

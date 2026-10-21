@@ -1,6 +1,8 @@
 import { CronTime } from 'cron';
 
 import { DEFAULT_QUEUE_DIGEST_CRON } from '../admin/queue-alerts.service';
+import { parseMfaRoles } from '../auth/mfa/policy';
+import { MFA_KEY_BYTES } from '../auth/mfa/secret-box';
 import { parseTrustProxy } from '../throttle/throttle';
 
 /**
@@ -23,6 +25,27 @@ export function validateEnv(env: Record<string, unknown>): Record<string, unknow
     errors.push('JWT_SECRET must be at least 32 characters in production');
   } else if (isProd && secret === 'change-me-in-production') {
     errors.push('JWT_SECRET is still the .env.example placeholder');
+  }
+
+  // Encrypts every authenticator-app secret at rest. Outside production it falls back to a key
+  // derived from JWT_SECRET (auth/mfa/secret-box.ts), so dev and CI need nothing new.
+  const mfaKey = str('MFA_ENCRYPTION_KEY');
+  if (mfaKey && Buffer.from(mfaKey, 'base64').length !== MFA_KEY_BYTES) {
+    errors.push(`MFA_ENCRYPTION_KEY must be base64 for exactly ${MFA_KEY_BYTES} bytes (openssl rand -base64 32)`);
+  } else if (isProd && !mfaKey) {
+    errors.push('MFA_ENCRYPTION_KEY is required in production (openssl rand -base64 32)');
+  }
+
+  const mfaRoles = str('MFA_REQUIRED_ROLES');
+  if (mfaRoles && parseMfaRoles(mfaRoles) === null) {
+    errors.push(
+      `MFA_REQUIRED_ROLES must be a comma list of USER, CONTRIBUTOR, ADMIN (or empty), got "${mfaRoles}"`,
+    );
+  }
+
+  const rpId = str('WEBAUTHN_RP_ID');
+  if (rpId && !/^[a-z0-9.-]+$/i.test(rpId)) {
+    errors.push(`WEBAUTHN_RP_ID must be a bare hostname (no scheme or port), got "${rpId}"`);
   }
 
   const dsn = str('SENTRY_DSN');

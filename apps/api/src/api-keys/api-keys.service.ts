@@ -14,6 +14,7 @@ import {
   API_KEY_SCOPES,
   EMAIL_UNVERIFIED,
   MAX_ACTIVE_API_KEYS,
+  MFA_REQUIRED,
   scopesForRole,
   type ApiKeyScope,
   type ApiKeySummary,
@@ -24,6 +25,7 @@ import {
 import type { Prisma } from '@repo/db';
 
 import type { RequestUser } from '../auth/decorators/current-user.decorator';
+import { MfaPolicy } from '../auth/mfa/policy';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The principal a valid key resolves to: its owner, plus the key's own ceiling. */
@@ -119,7 +121,10 @@ type KeyRow = Prisma.ApiKeyGetPayload<{ select: typeof keySelect }>;
  */
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly policy: MfaPolicy,
+  ) {}
 
   /** A fresh token, its lookup prefix and the hash that is all the database keeps. */
   mint(): { prefix: string; token: string; hash: string } {
@@ -243,8 +248,9 @@ export class ApiKeysService {
 
   /**
    * 401 for a dead key (malformed, unknown, wrong secret, revoked, banned owner, or an owner whose
-   * role no longer permits the key's scope); 403 for an unverified non-admin owner
-   * (`EMAIL_UNVERIFIED`, the body VerifiedEmailGuard sends) or an address outside the allowlist.
+   * role no longer permits the key's scope); 403 for an owner whose role requires 2FA and who has
+   * none (`MFA_REQUIRED`), an unverified non-admin owner (`EMAIL_UNVERIFIED`, the body
+   * VerifiedEmailGuard sends) or an address outside the allowlist.
    */
   async authenticate(token: string, ip: string): Promise<AuthenticatedKey> {
     const prefix = TOKEN_PATTERN.exec(token)?.[1];
@@ -259,6 +265,7 @@ export class ApiKeysService {
             role: true,
             bannedAt: true,
             emailVerifiedAt: true,
+            mfaEnabledAt: true,
           },
         },
       },
@@ -276,6 +283,15 @@ export class ApiKeysService {
       throw new UnauthorizedException('Invalid API key');
     }
     const { user } = row;
+    // Not revoked: the key works again as soon as its owner enrolls a factor.
+    if (this.policy.unmet(user)) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        code: MFA_REQUIRED,
+        message: "The key's owner must turn on two-factor authentication. See /developers.",
+      });
+    }
     if (user.role !== 'ADMIN' && !user.emailVerifiedAt) {
       throw new ForbiddenException({
         statusCode: 403,
