@@ -8,6 +8,19 @@ TypeScript end to end.
 > Figures in the seed dataset are illustrative demo data, not verified financials.
 > Ingested SEC Form D records are real public filings.
 
+Live at **[capbase.fyi](https://capbase.fyi)**.
+
+## Screenshots
+
+![Capbase home page](apps/web/public/screenshots/home.png)
+
+| | |
+|---|---|
+| ![Company profile](apps/web/public/screenshots/company-profile.png) | ![Company directory filtered to fintech](apps/web/public/screenshots/companies.png) |
+| **Company profile** — facts with sources, identifiers, funding | **Companies** — filter by sector, stage, status and country |
+| ![Fund directory](apps/web/public/screenshots/funds.png) | ![Popular companies with the contributor unlock panel](apps/web/public/screenshots/contributor-access.png) |
+| **Funds** — ~94k private funds by size, strategy and manager | **Contribute to unlock** — one approved contribution opens every profile for 30 days |
+
 ## What's inside
 
 ```
