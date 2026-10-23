@@ -26,6 +26,7 @@ import { canonical } from '@/lib/metadata';
 import { companyBreadcrumbJsonLd, companyJsonLd } from '@/lib/schema';
 import { getSavedStatus } from '@/lib/watchlist';
 
+import { MoreActionsMenu } from '../MoreActionsMenu';
 import { ProposeChangeMenu } from '../ProposeChangeMenu';
 
 const panel = 'grid gap-px overflow-hidden rounded-[10px] border border-line bg-line';
@@ -126,20 +127,23 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
       <JsonLd data={companyJsonLd(company)} />
       <JsonLd data={companyBreadcrumbJsonLd(company)} />
 
-      <div className="flex items-center justify-between gap-4">
+      {/* On a phone the actions drop under the back link and fill the row:
+          Compare and History fold into one menu, the primary action stretches. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <Link
           href="/"
           className="font-mono text-[13px] text-graphite-500 transition-colors hover:text-ink"
         >
           ← All companies
         </Link>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 max-[600px]:w-full">
           {signedIn && <SaveCompanyButton slug={company.slug} saved={saved} />}
           <Button
             variant="outline"
             shape="pill"
             size="sm"
             href={`/compare?companies=${company.slug}`}
+            className="max-[600px]:hidden"
           >
             Compare
           </Button>
@@ -148,18 +152,20 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             shape="pill"
             size="sm"
             href={`/companies/${company.slug}/history`}
+            className="max-[600px]:hidden"
           >
             History
           </Button>
-          <ProposeChangeMenu slug={company.slug} />
+          <MoreActionsMenu slug={company.slug} className="w-9 px-0 min-[601px]:hidden" />
+          <ProposeChangeMenu slug={company.slug} className="max-[600px]:flex-1" />
         </div>
       </div>
 
       <header className="grid grid-cols-[auto_1fr_auto] items-start gap-7 border-b border-ink pt-7 pb-9 max-[860px]:grid-cols-[auto_1fr] max-[600px]:grid-cols-1">
         <CompanyLogo name={company.name} domain={company.domain} size={72} />
         <div className="min-w-0">
-          <div className="flex items-center gap-3.5">
-            <h1 className="font-display text-[clamp(1.875rem,4vw,2.75rem)] leading-none font-extrabold tracking-[-0.035em] text-ink">
+          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
+            <h1 className="min-w-0 font-display text-[clamp(1.875rem,4vw,2.75rem)] leading-none font-extrabold tracking-[-0.035em] text-ink [overflow-wrap:anywhere]">
               {company.name}
             </h1>
             {!masked('status') && (
@@ -201,7 +207,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               nothing when we hold none. */}
           <Identifiers identifiers={company.identifiers} className="mt-5" />
         </div>
-        <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-[repeat(2,auto)]">
+        <dl className="grid grid-cols-[repeat(2,auto)] gap-x-8 gap-y-4 max-[860px]:col-span-full max-[860px]:grid-cols-[repeat(4,auto)] max-[860px]:justify-start max-[600px]:grid-cols-2">
           <Fact
             label="Founded"
             value={m('founded', foundedYear(company.founded) ?? '—')}
@@ -567,7 +573,7 @@ function Fact({
   return (
     <div className="flex flex-col gap-1">
       <dt className="text-[11px] tracking-[0.04em] text-graphite-500 uppercase">{label}</dt>
-      <dd className="font-mono text-sm text-ink">
+      <dd className="font-mono text-sm text-ink [overflow-wrap:anywhere]">
         {value}
         {cite}
       </dd>

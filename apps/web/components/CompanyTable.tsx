@@ -8,9 +8,11 @@ import type { Company } from '@/lib/data';
 import { formatUsd } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-/** The table's grid (tracks + gaps), shared with its loading skeleton. */
+/** The table's grid (tracks + gaps), shared with its loading skeleton. On a
+    phone each row stacks: the name on its own line, the stage and sector
+    wrapping under it, then the two figures side by side. */
 export const COMPANY_COLUMNS =
-  'grid-cols-[minmax(0,2.6fr)_1.1fr_1fr_1fr] gap-5 max-[700px]:grid-cols-[1fr_auto] max-[700px]:gap-y-3';
+  'grid-cols-[minmax(0,2.6fr)_1.1fr_1fr_1fr] gap-5 max-[700px]:grid-cols-2 max-[700px]:gap-y-3 max-[700px]:[&>:nth-child(-n+2)]:col-span-full';
 
 const ROW = cn('grid items-center border-t border-line px-[22px] py-4', COMPANY_COLUMNS);
 
@@ -93,7 +95,7 @@ function CompanyCells({ company }: { company: Company }) {
       <span className="flex min-w-0 items-center gap-3.5" role="cell">
         <CompanyLogo name={company.name} domain={company.domain} size={40} />
         <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="font-display text-base font-semibold tracking-tight text-ink">
+          <span className="font-display text-base font-semibold tracking-tight text-ink [overflow-wrap:anywhere]">
             {company.name}
           </span>
           <span className="truncate text-[13px] text-graphite-500">
@@ -102,7 +104,7 @@ function CompanyCells({ company }: { company: Company }) {
         </span>
       </span>
       <span
-        className="flex flex-col items-start gap-1.5 max-[700px]:flex-row max-[700px]:items-center max-[700px]:gap-2"
+        className="flex min-w-0 flex-col items-start gap-1.5 max-[700px]:flex-row max-[700px]:flex-wrap max-[700px]:items-center max-[700px]:gap-x-2 max-[700px]:gap-y-1"
         role="cell"
       >
         {masked('stage') ? chip : <Badge variant="pill">{company.stage}</Badge>}
@@ -111,17 +113,29 @@ function CompanyCells({ company }: { company: Company }) {
         </span>
       </span>
       <span
-        className="text-right font-mono text-base font-medium text-ink max-[700px]:col-start-1 max-[700px]:text-left"
+        className="text-right font-mono text-base font-medium text-ink max-[700px]:flex max-[700px]:flex-col max-[700px]:items-start max-[700px]:gap-0.5"
         role="cell"
       >
+        <MobileLabel>Last valuation</MobileLabel>
         {masked('lastValuationUsd') ? chip : formatUsd(company.lastValuationUsd)}
       </span>
       <span
-        className="text-right font-mono text-[15px] text-graphite-700 max-[700px]:col-start-1 max-[700px]:text-left"
+        className="text-right font-mono text-[15px] text-graphite-700 max-[700px]:flex max-[700px]:flex-col max-[700px]:items-start max-[700px]:gap-0.5"
         role="cell"
       >
+        <MobileLabel>Total raised</MobileLabel>
         {masked('totalRaisedUsd') ? chip : formatUsd(company.totalRaisedUsd)}
       </span>
     </>
+  );
+}
+
+/** The column header, repeated inside the cell where the header strip is
+    hidden — two bare figures side by side would not say which is which. */
+function MobileLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="hidden text-[10px] tracking-[0.05em] text-graphite-500 uppercase max-[700px]:block">
+      {children}
+    </span>
   );
 }

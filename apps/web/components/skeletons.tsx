@@ -194,10 +194,13 @@ export function ProfileSkeleton({
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8 pb-16" aria-busy="true">
       <LoadingStatus label={`Loading ${label}…`} />
 
-      <div aria-hidden="true" className="flex min-h-9 items-center justify-between gap-4">
+      <div
+        aria-hidden="true"
+        className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-3"
+      >
         <Skeleton className="h-3 w-28" />
         {p.actions > 0 ? (
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             {Array.from({ length: p.actions }, (_, i) => (
               <Skeleton key={i} className="h-9 w-20 rounded-full" />
             ))}

@@ -16,11 +16,11 @@ import { CONTRIBUTION_TYPES, TYPE_LABELS } from './contribute/types';
 /** Single entry point into the contribution hub: one dropdown listing every
     child entity type, plus the whole-company edit proposal. Auth is handled by
     the hub page itself (login redirect). */
-export function ProposeChangeMenu({ slug }: { slug: string }) {
+export function ProposeChangeMenu({ slug, className }: { slug: string; className?: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="primary" shape="pill" size="sm">
+        <Button variant="primary" shape="pill" size="sm" className={className}>
           Propose a change <span aria-hidden>▾</span>
         </Button>
       </DropdownMenuTrigger>
