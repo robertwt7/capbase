@@ -67,7 +67,7 @@ describe('Read gate (e2e)', () => {
   };
 
   const ids: Record<string, string | undefined> = {};
-  const tokens: { locked?: string; contributor?: string } = {};
+  const tokens: { locked?: string; contributor?: string; admin?: string } = {};
 
   const base = {
     domain: '',
@@ -286,7 +286,7 @@ describe('Read gate (e2e)', () => {
 
     // --- Viewers.
     const jwt = app.get(JwtService);
-    for (const role of ['USER', 'CONTRIBUTOR'] as const) {
+    for (const role of ['USER', 'CONTRIBUTOR', 'ADMIN'] as const) {
       const user = await prisma.user.create({
         data: {
           email: `${tag}-${role.toLowerCase()}@test.dev`,
@@ -300,12 +300,13 @@ describe('Read gate (e2e)', () => {
       ids[`user-${role}`] = user.id;
       const token = jwt.sign({ sub: user.id, email: user.email, role, tv: user.tokenVersion });
       if (role === 'USER') tokens.locked = token;
-      else tokens.contributor = token;
+      else if (role === 'CONTRIBUTOR') tokens.contributor = token;
+      else tokens.admin = token;
     }
   }, SITEMAP_TIMEOUT_MS);
 
   afterAll(async () => {
-    for (const role of ['USER', 'CONTRIBUTOR']) {
+    for (const role of ['USER', 'CONTRIBUTOR', 'ADMIN']) {
       const id = ids[`user-${role}`];
       if (id) await prisma.user.delete({ where: { id } });
     }
@@ -324,7 +325,7 @@ describe('Read gate (e2e)', () => {
     await app.close();
   });
 
-  type Viewer = 'signedOut' | 'locked' | 'contributor';
+  type Viewer = 'signedOut' | 'locked' | 'contributor' | 'admin';
   const get = (path: string, viewer: Viewer) => {
     const req = http().get(path);
     const token = viewer === 'signedOut' ? undefined : tokens[viewer];
@@ -380,25 +381,55 @@ describe('Read gate (e2e)', () => {
   });
 
   describe('company history', () => {
-    it.each(['signedOut', 'locked'] as const)('%s: only public-record company-field entries and merges', async (viewer) => {
-      const { body } = await get(`/companies/${slugs.publicCo}/history`, viewer);
-      expect(body.items.map((i: { field: string; action: string }) => `${i.action}:${i.field}`).sort()).toEqual([
-        'MERGE:',
-        'UPDATE:hq',
-      ]);
-      expect(body.hiddenCount).toBe(4);
+    const path = () => `/companies/${slugs.publicCo}/history`;
+    const denied = (body: unknown) => {
+      expect(body).not.toHaveProperty('items');
+      expect(body).not.toHaveProperty('total');
+      expect(body).not.toHaveProperty('hiddenCount');
       expect(leaks(body, [S.description, S.roundName, S.correctedAmount])).toEqual([]);
+    };
+
+    it('anonymous and invalid JWT receive 401 without history data', async () => {
+      denied((await http().get(path()).expect(401)).body);
+      denied((await http().get(path()).set('Authorization', 'Bearer invalid').expect(401)).body);
+      await http().get(`/companies/${slugs.partnerCo}/history`).expect(401);
     });
 
-    it('contributor: every entry', async () => {
-      const { body } = await get(`/companies/${slugs.publicCo}/history`, 'contributor');
+    it('USER receives 403, even after a recent approved contribution unlocks profiles', async () => {
+      denied((await http().get(path()).set('Authorization', `Bearer ${tokens.locked}`).expect(403)).body);
+      const contribution = await prisma.changeProposal.create({
+        data: { companyId: ids.publicCo!, submittedById: ids['user-USER']!, changes: { hq: 'London' }, moderationStatus: 'APPROVED' },
+      });
+      try {
+        expect((await get(`/companies/${slugs.publicCo}`, 'locked')).body.access.unlocked).toBe(true);
+        denied((await http().get(path()).set('Authorization', `Bearer ${tokens.locked}`).expect(403)).body);
+      } finally {
+        await prisma.changeProposal.delete({ where: { id: contribution.id } });
+      }
+    });
+
+    it.each(['contributor', 'admin'] as const)('%s: every entry with capped pagination', async (viewer) => {
+      const { body } = await get(path(), viewer);
       expect(body.items).toHaveLength(6);
       expect(body.hiddenCount).toBe(0);
+      const page = await get(`${path()}?page=2&pageSize=2`, viewer);
+      expect(page.body).toMatchObject({ page: 2, pageSize: 2, total: 6, hiddenCount: 0 });
+      expect(page.body.items).toHaveLength(2);
+      await http().get(`${path()}?pageSize=101`).set('Authorization', `Bearer ${tokens[viewer]}`).expect(400);
     });
 
-    it('a partner-only company shows a signed-out viewer nothing', async () => {
-      const { body } = await get(`/companies/${slugs.partnerCo}/history`, 'signedOut');
-      expect(body.items).toEqual([]);
+    it('ban, token revocation and demotion take effect on the next history request', async () => {
+      const id = ids['user-CONTRIBUTOR']!;
+      try {
+        await prisma.user.update({ where: { id }, data: { bannedAt: new Date() } });
+        denied((await http().get(path()).set('Authorization', `Bearer ${tokens.contributor}`).expect(401)).body);
+        await prisma.user.update({ where: { id }, data: { bannedAt: null, tokenVersion: 1 } });
+        denied((await http().get(path()).set('Authorization', `Bearer ${tokens.contributor}`).expect(401)).body);
+        await prisma.user.update({ where: { id }, data: { tokenVersion: 0, role: 'USER' } });
+        denied((await http().get(path()).set('Authorization', `Bearer ${tokens.contributor}`).expect(403)).body);
+      } finally {
+        await prisma.user.update({ where: { id }, data: { role: 'CONTRIBUTOR', bannedAt: null, tokenVersion: 0 } });
+      }
     });
   });
 

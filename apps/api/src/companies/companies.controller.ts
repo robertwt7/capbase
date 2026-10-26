@@ -11,6 +11,9 @@ import type {
 } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { Contribution } from '../auth/decorators/contribution.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { CompaniesService } from './companies.service';
@@ -73,10 +76,9 @@ export class CompaniesController {
     return { count: await this.companies.countSlugs() };
   }
 
-  // Declared before @Get(':slug') so the more specific path wins over the param
-  // route. Public, but gated like the profile: a locked viewer sees the
-  // allowlisted entries and a count of the rest — see getCompanyHistory.
-  @UseGuards(OptionalJwtAuthGuard)
+  // The persistent role controls history independently of profile unlocks.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CONTRIBUTOR', 'ADMIN')
   @Get(':slug/history')
   history(
     @Param('slug') slug: string,

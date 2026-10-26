@@ -654,7 +654,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
 });
 
 /**
- * One page of a company's change timeline, gated per viewer like the profile.
+ * One page of a company's change timeline, restricted to contributor/admin roles.
  * Returns null when the slug is unknown (the page renders notFound) — there is
  * no offline fallback: an invented audit trail would be worse than none.
  */
@@ -669,6 +669,7 @@ export async function getCompanyHistory(
     );
   } catch (err) {
     redirectIfMerged(err, '/companies', '/history');
+    if (err instanceof ApiError && [401, 403, 404].includes(err.status)) return null;
     console.warn(`[data] getCompanyHistory(${slug}) failed:`, err);
     return null;
   }

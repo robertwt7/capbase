@@ -2,6 +2,7 @@
 // shapes exchanged between the NestJS API (apps/api) and the Next.js web app
 // (apps/web). Keep them runtime-dependency-free — plain TypeScript only.
 
+import type { CompanyTechnology, CompanyApp } from './technology';
 import type { EntityIdentifierRef } from './identifiers';
 
 export type Stage =
@@ -319,6 +320,8 @@ export interface Company {
   exits?: ExitEvent[];
   diversity?: DiversitySignal[];
   financials?: CompanyFinancials;
+  companyTechnologies?: CompanyTechnology[];
+  companyApps?: CompanyApp[];
   /** External identifiers — the crosswalk to EDGAR, GLEIF, Wikidata and the
    *  rest. Detail reads only; the directory pages don't carry them. DOMAIN is
    *  filtered out server-side: the profile already links the website, and

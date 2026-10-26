@@ -17,3 +17,4 @@ export * from './domain/geography';
 export * from './domain/reports';
 export * from './domain/indexing';
 export * from './domain/search';
+export * from './domain/technology';

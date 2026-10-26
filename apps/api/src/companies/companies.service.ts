@@ -1,16 +1,21 @@
 import {
   BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
   HttpException,
   HttpStatus,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
   gateLimit,
+  canViewCompanyHistory,
   normalizeDomain,
   partnerVisible,
   publicIngestLabel,
@@ -46,13 +51,13 @@ import {
   unmaskedFilters,
   visibleRoundInvestors,
 } from '../gate/gate';
-import { lockedHistoryWhere } from '../gate/history';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { toFacets } from '../prisma/country-facets';
 import { MAX_MERGE_HOPS, PUBLIC_COMPANY } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
+import { loadCompanyTechnology } from './company-technology.reader';
 import { toCompany, toCompanyEditFields } from './company.mapper';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
@@ -198,6 +203,7 @@ export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   /**
@@ -420,6 +426,14 @@ export class CompaniesService {
     }
 
     const company = maskPartnerFields(toCompany(row), row.partnerFields, access, COMPANY_BLANKS);
+    // Evidence and citations must not disclose a parent target hidden by the partner gate.
+    const targetField = row.websiteUrl?.trim() ? 'websiteUrl' : 'domain';
+    if (this.config?.get<string>('TECH_DETAILS_ENABLED') === 'true' && !company.masked?.includes(targetField)) {
+      const details = await loadCompanyTechnology(this.prisma, row, access);
+      company.companyTechnologies = details.companyTechnologies;
+      company.companyApps = details.companyApps;
+      Object.assign(gate.totals, details.totals);
+    }
     // A public round the partner corrected shows the corrected columns masked.
     if (company.rounds) {
       company.rounds = company.rounds.map((r, i) =>
@@ -549,6 +563,8 @@ export class CompaniesService {
       ...(company.acquisitions ?? []).map((a) => a.id),
       ...(company.exits ?? []).map((e) => e.id),
       ...(company.diversity ?? []).map((d) => d.id),
+      ...(company.companyTechnologies ?? []).map((t) => t.id),
+      ...(company.companyApps ?? []).map((app) => app.id),
     ];
 
     const rows = await this.prisma.citation.findMany({
@@ -601,53 +617,26 @@ export class CompaniesService {
     });
   }
 
-  /**
-   * The company's change timeline, newest first.
-   *
-   * Unlocked viewers see every recorded change to the company row and its
-   * children. A locked viewer — signed in or not — sees an allowlist
-   * (`lockedHistoryWhere`): company-field changes from public records and
-   * moderated edits whose field the partner never wrote. A revision's
-   * before/after can carry any value the row ever held — a round's amount, a
-   * partner's description — so the rest is withheld and only counted
-   * (`hiddenCount`). A partner-only company shows a signed-out viewer nothing.
-   * Display names only; the submitter emails the admin queue shows never
-   * appear here.
-   */
+  /** Complete history for contributor/admin roles. Display names only; no private contacts. */
   async getCompanyHistory(
     slug: string,
     page = 1,
     pageSize = DEFAULT_PAGE_SIZE,
     viewer?: { id: string; role: Role },
   ): Promise<CompanyHistoryResponse> {
+    if (!viewer) throw new UnauthorizedException();
+    if (!canViewCompanyHistory(viewer.role)) throw new ForbiddenException('Insufficient role');
     const [company, access] = await Promise.all([
       this.prisma.company.findFirst({
         where: { slug, ...PUBLIC_COMPANY },
-        select: { id: true, partnerOnly: true },
+        select: { id: true },
       }),
       this.users.accessFor(viewer),
     ]);
     if (!company) return this.redirectOrNotFound(slug);
 
-    const all = { companyId: company.id };
-    if (stubFor(company.partnerOnly, access)) {
-      const hiddenCount = await this.prisma.revision.count({ where: all });
-      return { total: 0, page, pageSize, items: [], hiddenCount, access };
-    }
-    let where: Prisma.RevisionWhereInput = all;
-    if (!access.unlocked) {
-      const touched = await this.prisma.revision.findMany({
-        where: { companyId: company.id, entityType: 'company', actorSource: 'PARTNER' },
-        distinct: ['field'],
-        select: { field: true },
-      });
-      where = lockedHistoryWhere(
-        company.id,
-        touched.map((r) => r.field),
-      );
-    }
-    const [everything, total, rows] = await this.prisma.$transaction([
-      this.prisma.revision.count({ where: all }),
+    const where = { companyId: company.id };
+    const [total, rows] = await this.prisma.$transaction([
       this.prisma.revision.count({ where }),
       this.prisma.revision.findMany({
         where,
@@ -669,14 +658,14 @@ export class CompaniesService {
       after: row.after,
       action: row.action as RevisionAction,
       actor: row.actor as RevisionActor,
-      // Never the email — this endpoint is public. Never the raw ingest tag
+      // Never the email or private contact details. Never the raw ingest tag
       // either: an internal source name maps through an explicit public label.
       actorName:
         row.actor === 'INGEST' ? publicIngestLabel(row.actorSource) : (row.actorUser?.name ?? null),
       createdAt: row.createdAt.toISOString(),
     }));
 
-    return { total, page, pageSize, items, hiddenCount: everything - total, access };
+    return { total, page, pageSize, items, hiddenCount: 0, access };
   }
 
   /** Human-readable subject per revision, so the timeline says "Series B round"
@@ -738,6 +727,16 @@ export class CompaniesService {
           select: { id: true, type: true },
         });
         return rows.map((r) => [r.id, `${r.type} exit`]);
+      }
+      case 'companyTechnology': {
+        const rows = await this.prisma.companyTechnology.findMany({
+          where, include: { technology: { select: { name: true } } },
+        });
+        return rows.map((r) => [r.id, `${r.technology.name} website technology`]);
+      }
+      case 'companyApp': {
+        const rows = await this.prisma.companyApp.findMany({ where, include: { resource: true } });
+        return rows.map((r) => [r.id, `${r.resource.store === 'APPLE' ? 'App Store' : 'Google Play'} app ${r.resource.appId}`]);
       }
       case 'diversity': {
         const rows = await this.prisma.diversitySignal.findMany({

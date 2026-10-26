@@ -43,6 +43,7 @@ services:
       # chars. This default is for THIS local stack only — prod uses deploy-secrets.
       JWT_SECRET: ${JWT_SECRET:-local-docker-stack-jwt-secret-not-for-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      TECH_DETAILS_ENABLED: ${TECH_DETAILS_ENABLED:-false}
       # Production also requires a 32-byte key for authenticator-app secrets; this default
       # is for THIS local stack only. 2FA enforcement is off here unless you set the roles
       # (ADMIN,CONTRIBUTOR rehearses production).
@@ -106,6 +107,14 @@ services:
       CRON_SCHEDULE: ${CRON_SCHEDULE:-0 6 * * *}
       INGEST_ON_BOOT: ${INGEST_ON_BOOT:-false}
       INGEST_LIMIT: ${INGEST_LIMIT:-50}
+      TECH_ENRICHMENT_ENABLED: ${TECH_ENRICHMENT_ENABLED:-false}
+      TECH_ENRICHMENT_COMPANY_IDS: ${TECH_ENRICHMENT_COMPANY_IDS:-}
+      TECH_ENRICHMENT_SCHEDULE: ${TECH_ENRICHMENT_SCHEDULE:-0 * * * *}
+      TECH_ENRICHMENT_LIMIT: ${TECH_ENRICHMENT_LIMIT:-5}
+      TECH_ENRICHMENT_TIMEOUT_MS: ${TECH_ENRICHMENT_TIMEOUT_MS:-300000}
+      TECH_ENRICHMENT_REFRESH_DAYS: ${TECH_ENRICHMENT_REFRESH_DAYS:-30}
+      TECH_ENRICHMENT_USER_AGENT: ${TECH_ENRICHMENT_USER_AGENT:-CapbaseTechnology/1.0 (+https://capbase.fyi/data)}
+      TECH_ENRICHMENT_HEARTBEAT_URL: ${TECH_ENRICHMENT_HEARTBEAT_URL:-}
     ports:
       - '3002:3002'
     healthcheck:

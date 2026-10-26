@@ -1,5 +1,6 @@
 'use client';
 
+import { canViewCompanyHistory, type Role } from '@repo/api';
 import { Ellipsis } from 'lucide-react';
 import Link from 'next/link';
 
@@ -14,7 +15,7 @@ import {
 /** The profile's secondary links (Compare, History) folded into one menu,
     for the phone layout where they no longer fit beside the primary action.
     The page shows the plain buttons instead above that width. */
-export function MoreActionsMenu({ slug, className }: { slug: string; className?: string }) {
+export function MoreActionsMenu({ slug, role, className }: { slug: string; role?: Role; className?: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -32,9 +33,11 @@ export function MoreActionsMenu({ slug, className }: { slug: string; className?:
         <DropdownMenuItem asChild>
           <Link href={`/compare?companies=${slug}`}>Compare</Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href={`/companies/${slug}/history`}>History</Link>
-        </DropdownMenuItem>
+        {canViewCompanyHistory(role) && (
+          <DropdownMenuItem asChild>
+            <Link href={`/companies/${slug}/history`}>History</Link>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

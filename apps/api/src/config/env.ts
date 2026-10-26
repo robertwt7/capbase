@@ -75,6 +75,11 @@ export function validateEnv(env: Record<string, unknown>): Record<string, unknow
     );
   }
 
+  const techDetails = env.TECH_DETAILS_ENABLED;
+  if (techDetails !== undefined && techDetails !== 'true' && techDetails !== 'false') {
+    errors.push('TECH_DETAILS_ENABLED must be true or false');
+  }
+
   const port = str('PORT');
   if (port && !/^\d+$/.test(port)) errors.push(`PORT must be a number, got "${port}"`);
 

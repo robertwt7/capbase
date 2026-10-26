@@ -98,6 +98,8 @@ function fixture() {
     acquisitionDeal: table([{ id: 'a-1', companyId: 'c-lose' }]),
     exitEvent: table([{ id: 'e-1', companyId: 'c-lose' }]),
     diversitySignal: table([{ id: 'd-1', companyId: 'c-lose' }]),
+    companyWebsiteScan: table([{ id: 'scan-lose', companyId: 'c-lose', scanKey: 'immutable-origin-key' }]),
+    companyApp: table([{ id: 'app-lose', companyId: 'c-lose', provenanceKey: 'immutable-app-key' }]),
     changeProposal: table([{ id: 'pr-1', companyId: 'c-lose' }]),
     roundInvestor: table([{ id: 'ri-1', investorId: 'i-lose' }]),
     fund: table([{ id: 'f-1', managerId: 'i-lose' }]),
@@ -245,6 +247,7 @@ function fixture() {
   const refreshed: { sql: string; values: unknown[] }[] = [];
   const prisma = {
     ...db,
+    $queryRaw: async () => [],
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
     $executeRaw: async (q: { sql: string; values: unknown[] }) => {
       refreshed.push(q);
@@ -269,6 +272,8 @@ function snapshot(db: ReturnType<typeof fixture>['db']) {
     exits: of(db.exitEvent, 'companyId'),
     diversity: of(db.diversitySignal, 'companyId'),
     proposals: of(db.changeProposal, 'companyId'),
+    scans: of(db.companyWebsiteScan, 'companyId'),
+    apps: of(db.companyApp, 'companyId'),
     saves: db.savedCompany.rows.map((r) => `${String(r.userId)}:${String(r.companyId)}`).sort(),
     // The MERGE/UNMERGE entries the operations write about THEMSELVES are
     // deliberately not reversed — they are the audit trail for both directions

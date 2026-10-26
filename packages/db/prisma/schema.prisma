@@ -315,6 +315,8 @@ model Company {
   proposals    ChangeProposal[]
   savedBy      SavedCompany[]
   revisions    Revision[]
+  websiteScans CompanyWebsiteScan[]
+  appLinks     CompanyApp[]
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
@@ -1069,4 +1071,97 @@ model ApiKey {
   createdAt    DateTime  @default(now())
 
   @@index([userId, revokedAt])
+}
+
+
+/// Original, versioned website detector catalog. No vulnerability/version inventory.
+model Technology {
+  id        String @id @default(cuid())
+  slug      String @unique
+  name      String
+  category  String
+  vendorUrl String
+  observations CompanyTechnology[]
+}
+
+/// Immutable scan identity survives ownership changes during merge/unmerge.
+model CompanyWebsiteScan {
+  id                String @id @default(cuid())
+  scanKey           String @unique
+  companyId         String
+  company           Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  targetUrl         String
+  targetDomain      String
+  detectorVersion   String
+  createdAt         DateTime @default(now())
+  lastAttemptAt     DateTime?
+  lastSuccessfulAt  DateTime?
+  nextAttemptAt     DateTime @default(now())
+  outcome           String?
+  failureCount      Int @default(0)
+  lastResultDigest  String?
+  observations      CompanyTechnology[]
+
+  @@index([nextAttemptAt])
+  @@index([companyId, targetUrl, createdAt, id])
+}
+
+model CompanyTechnology {
+  id                 String @id @default(cuid())
+  scanId             String
+  scan               CompanyWebsiteScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  technologyId       String
+  technology         Technology @relation(fields: [technologyId], references: [id])
+  evidenceUrl        String
+  ruleId             String
+  evidence           String
+  firstSeenAt        DateTime
+  lastSeenAt         DateTime
+  detectorVersion    String
+  absenceCount       Int @default(0)
+  firstAbsentAt      DateTime?
+  lastAbsentAt       DateTime?
+  retiredAt          DateTime?
+  suppressedAt       DateTime?
+  suppressionReason  String?
+
+  @@unique([scanId, technologyId])
+  @@index([scanId, lastSeenAt])
+}
+
+/// Store product identity, deliberately never a company identifier.
+model AppResource {
+  id       String @id @default(cuid())
+  store    String
+  appId    String
+  storeUrl String
+  links    CompanyApp[]
+  @@unique([store, appId])
+}
+
+/// Link-only fallback: explicit verification required; no speculative rating columns.
+model CompanyApp {
+  id                 String @id @default(cuid())
+  provenanceKey      String @unique
+  companyId          String
+  company            Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  resourceId         String
+  resource           AppResource @relation(fields: [resourceId], references: [id])
+  targetUrl          String
+  evidenceUrl        String
+  firstSeenAt        DateTime
+  lastSeenAt         DateTime
+  verifiedAt         DateTime?
+  verificationReason String?
+  verificationUrl    String?
+  suppressedAt       DateTime?
+  suppressionReason  String?
+  createdAt          DateTime @default(now())
+  @@index([companyId, targetUrl, resourceId])
+}
+
+/// Persistent discovery cursor, separate from per-target retry state.
+model EnrichmentCursor {
+  key      String @id
+  cursorId String?
 }

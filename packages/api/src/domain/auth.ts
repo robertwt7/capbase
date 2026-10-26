@@ -4,6 +4,11 @@ export type Role = 'USER' | 'CONTRIBUTOR' | 'ADMIN';
 
 export const ROLES: readonly Role[] = ['USER', 'CONTRIBUTOR', 'ADMIN'];
 
+/** History requires a persistent role; rolling contribution unlocks do not grant access. */
+export function canViewCompanyHistory(role: Role | null | undefined): boolean {
+  return role === 'CONTRIBUTOR' || role === 'ADMIN';
+}
+
 export interface RegisterInput {
   email: string;
   name: string;

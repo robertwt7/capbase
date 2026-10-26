@@ -1,8 +1,7 @@
 import { describe, it, expect } from '@jest/globals';
-import type { ViewerAccess } from '@repo/api';
+import { canViewCompanyHistory, type ViewerAccess } from '@repo/api';
 
 import { COMPANY_BLANKS, maskFields, maskPartnerFields, publicRowsWhere, rowVisible, stubFor } from './gate';
-import { lockedHistoryWhere } from './history';
 
 const signedOut: ViewerAccess = { unlocked: false, signedIn: false, unlockedUntil: null };
 const locked: ViewerAccess = { unlocked: false, signedIn: true, unlockedUntil: null };
@@ -74,25 +73,14 @@ describe('stubFor', () => {
   });
 });
 
-describe('lockedHistoryWhere', () => {
-  it('allows only company-field entries from admins and public sources, minus partner-touched fields', () => {
-    expect(lockedHistoryWhere('c1', ['description', 'totalRaisedUsd'])).toEqual({
-      companyId: 'c1',
-      entityType: 'company',
-      field: { notIn: ['description', 'totalRaisedUsd'] },
-      OR: [
-        { actor: 'ADMIN' },
-        {
-          actor: 'INGEST',
-          actorSource: {
-            in: ['SEC_EDGAR', 'SEC_ADV', 'SEC_ADV_FUNDS', 'SEC_FORM_C', 'SBIR', 'SEC_S1', 'INNOVATE_UK', 'COMPANIES_HOUSE', 'WIKIDATA'],
-          },
-        },
-      ],
-    });
-  });
-
-  it('adds no field filter when the partner never touched the company', () => {
-    expect(lockedHistoryWhere('c1', [])).not.toHaveProperty('field');
+describe('canViewCompanyHistory', () => {
+  it.each([
+    [undefined, false],
+    [null, false],
+    ['USER', false],
+    ['CONTRIBUTOR', true],
+    ['ADMIN', true],
+  ] as const)('permits role %s: %s', (role, allowed) => {
+    expect(canViewCompanyHistory(role)).toBe(allowed);
   });
 });

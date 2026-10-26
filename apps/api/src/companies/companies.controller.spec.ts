@@ -5,6 +5,10 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { ROLES_KEY } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 import { CompaniesController } from './companies.controller';
@@ -41,6 +45,12 @@ describe('CompaniesController routing', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('requires JWT and persistent contributor/admin roles for history', () => {
+    const handler = CompaniesController.prototype.history;
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([JwtAuthGuard, RolesGuard]);
+    expect(Reflect.getMetadata(ROLES_KEY, handler)).toEqual(['CONTRIBUTOR', 'ADMIN']);
   });
 
   it('serves GET /companies/sitemap from listSlugs, not the :slug route', async () => {

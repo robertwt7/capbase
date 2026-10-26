@@ -36,6 +36,7 @@ import { SearchService } from '../search/search.service';
 import { V1ReadThrottle } from '../throttle/throttle';
 import { UsersService } from '../users/users.service';
 import { V1ListCompaniesDto } from './dto/v1-list-companies.dto';
+import { COMPANY_DETAIL_SCHEMA } from './company-detail.schema';
 import { assertListDepth, LIST_DEPTH_MESSAGE } from './list-depth';
 
 /**
@@ -127,9 +128,9 @@ export class V1ReadController {
   @V1ReadThrottle()
   @ApiOperation({
     summary: 'Get a company profile',
-    description: 'The full profile with every section and the citations behind it.',
+    description: 'The full profile with citations. When enabled, optional companyTechnologies and companyApps contain current public website observations and verified store links. These are detail-only fields; expiry and suppression are applied at read time.',
   })
-  @ApiOkResponse({ description: '`{ company, access, citations }`.' })
+  @ApiOkResponse({ description: '`{ company, access, latestRound, citations }`. Technology fields and totals are omitted while TECH_DETAILS_ENABLED is false.', schema: COMPANY_DETAIL_SCHEMA })
   @ApiMovedPermanentlyResponse({
     description: 'The slug was merged into another company: `{ slug }` in the body names it.',
   })

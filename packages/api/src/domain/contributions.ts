@@ -33,6 +33,8 @@ export const GATED_SECTIONS = {
   companyExits: 'members',
   companyInvestors: 'open',
   companyPeople: 'open',
+  companyTechnologies: 'open',
+  companyApps: 'open',
   investorPortfolio: 'open',
   investorPeople: 'open',
   investorFunds: 'open',
@@ -73,6 +75,8 @@ export interface CompanyAccess extends GateAccess {
     acquisitions: number;
     exits: number;
     diversity: number;
+    companyTechnologies?: number;
+    companyApps?: number;
   };
 }
 

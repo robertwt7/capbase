@@ -29,7 +29,7 @@ export const SOURCE_TYPES: readonly SourceType[] = [
 /** Everything reviewable is citable, except a proposal of either kind (which is itself a
  *  change) — plus `fund`, which is citable without being reviewable: funds are
  *  ingest-only, so they never enter the moderation queue. */
-export type CitableType = Exclude<ReviewableType, 'proposal' | 'investorProposal'> | 'fund';
+export type CitableType = Exclude<ReviewableType, 'proposal' | 'investorProposal'> | 'fund' | 'companyTechnology' | 'companyApp';
 
 export const CITABLE_TYPES: readonly CitableType[] = [
   'company',
@@ -40,6 +40,8 @@ export const CITABLE_TYPES: readonly CitableType[] = [
   'exit',
   'diversity',
   'fund',
+  'companyTechnology',
+  'companyApp',
 ];
 
 export interface SourceRef {
@@ -89,27 +91,10 @@ export interface CompanyHistoryResponse {
   page: number;
   pageSize: number;
   items: Revision[];
-  /** Entries withheld from this viewer — 0 once unlocked. */
+  /** Compatibility field: always 0 for permitted contributor/admin callers. */
   hiddenCount: number;
   access: ViewerAccess;
 }
-
-/**
- * Ingest sources whose company-field revisions a LOCKED viewer may read on the
- * history timeline. An explicit allowlist, like the labels below: a new source
- * stays hidden until it is added here on purpose.
- */
-export const PUBLIC_INGEST_SOURCES: readonly string[] = [
-  'SEC_EDGAR',
-  'SEC_ADV',
-  'SEC_ADV_FUNDS',
-  'SEC_FORM_C',
-  'SBIR',
-  'SEC_S1',
-  'INNOVATE_UK',
-  'COMPANIES_HOUSE',
-  'WIKIDATA',
-];
 
 /**
  * Internal ingest tag → what the public timeline may say. An explicit table on
@@ -127,6 +112,7 @@ const PUBLIC_INGEST_LABELS: Record<string, string> = {
   INNOVATE_UK: 'Innovate UK',
   COMPANIES_HOUSE: 'Companies House',
   PARTNER: 'partner',
+  WEBSITE_TECH: 'Company website',
 };
 
 export function publicIngestLabel(source: string | null | undefined): string {

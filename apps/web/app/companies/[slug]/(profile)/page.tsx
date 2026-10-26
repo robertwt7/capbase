@@ -1,9 +1,11 @@
+import { canViewCompanyHistory } from '@repo/api';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { Citation, companyEntityId } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
+import { CompanyTechnology } from '@/components/CompanyTechnology';
 import { FundingLadder } from '@/components/FundingLadder';
 import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
@@ -147,16 +149,18 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           >
             Compare
           </Button>
-          <Button
-            variant="outline"
-            shape="pill"
-            size="sm"
-            href={`/companies/${company.slug}/history`}
-            className="max-[600px]:hidden"
-          >
-            History
-          </Button>
-          <MoreActionsMenu slug={company.slug} className="w-9 px-0 min-[601px]:hidden" />
+          {canViewCompanyHistory(session?.role) && (
+            <Button
+              variant="outline"
+              shape="pill"
+              size="sm"
+              href={`/companies/${company.slug}/history`}
+              className="max-[600px]:hidden"
+            >
+              History
+            </Button>
+          )}
+          <MoreActionsMenu slug={company.slug} role={session?.role} className="w-9 px-0 min-[601px]:hidden" />
           <ProposeChangeMenu slug={company.slug} className="max-[600px]:flex-1" />
         </div>
       </div>
@@ -274,6 +278,8 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           {m('description', company.description)}
         </p>
       </section>
+
+      <CompanyTechnology company={company} access={access} citations={citations} />
 
       <Block
         title="Funding rounds"

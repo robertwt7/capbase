@@ -28,6 +28,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in your env file}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your env file}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      TECH_DETAILS_ENABLED: ${TECH_DETAILS_ENABLED:-false}
       # Encrypts authenticator-app secrets at rest (openssl rand -base64 32). Keep it with the
       # other secrets: losing it makes every enrolled authenticator app unreadable.
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?set MFA_ENCRYPTION_KEY in your env file}
@@ -116,6 +117,14 @@ services:
       CRON_SCHEDULE: ${CRON_SCHEDULE:-0 6 * * *}
       INGEST_ON_BOOT: ${INGEST_ON_BOOT:-false}
       INGEST_LIMIT: ${INGEST_LIMIT:-50}
+      TECH_ENRICHMENT_ENABLED: ${TECH_ENRICHMENT_ENABLED:-false}
+      TECH_ENRICHMENT_COMPANY_IDS: ${TECH_ENRICHMENT_COMPANY_IDS:-}
+      TECH_ENRICHMENT_SCHEDULE: ${TECH_ENRICHMENT_SCHEDULE:-0 * * * *}
+      TECH_ENRICHMENT_LIMIT: ${TECH_ENRICHMENT_LIMIT:-5}
+      TECH_ENRICHMENT_TIMEOUT_MS: ${TECH_ENRICHMENT_TIMEOUT_MS:-300000}
+      TECH_ENRICHMENT_REFRESH_DAYS: ${TECH_ENRICHMENT_REFRESH_DAYS:-30}
+      TECH_ENRICHMENT_USER_AGENT: ${TECH_ENRICHMENT_USER_AGENT:-CapbaseTechnology/1.0 (+https://capbase.fyi/data)}
+      TECH_ENRICHMENT_HEARTBEAT_URL: ${TECH_ENRICHMENT_HEARTBEAT_URL:-}
       # Failed ingests (cron and manual backfills) are reported here.
       SENTRY_DSN: ${JOBS_SENTRY_DSN:-}
       # Dead man's switch, POSTed after every successful scheduled ingest; empty = off.

@@ -1,4 +1,5 @@
 import { HttpException } from '@nestjs/common';
+import type { Role } from '@repo/api';
 
 import type { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
@@ -38,7 +39,11 @@ function serviceWith(rows: { id: string; slug: string; mergedIntoId: string | nu
 
   const users = {
     lastContributionAt: jest.fn(async () => null),
-    accessFor: jest.fn(async () => ({ unlocked: false, signedIn: false, unlockedUntil: null })),
+    accessFor: jest.fn(async (viewer?: { role: Role }) => ({
+      unlocked: viewer?.role === 'CONTRIBUTOR' || viewer?.role === 'ADMIN',
+      signedIn: Boolean(viewer),
+      unlockedUntil: null,
+    })),
   } as unknown as UsersService;
   return new CompaniesService(prisma, users);
 }
@@ -81,12 +86,12 @@ describe('CompaniesService tombstones', () => {
     );
   });
 
-  it('redirects the history page too', async () => {
+  it('redirects the history page for an authorized contributor', async () => {
     const service = serviceWith([
       { id: 'c-lose', slug: 'acme-old', mergedIntoId: 'c-keep' },
       { id: 'c-keep', slug: 'acme', mergedIntoId: null },
     ]);
-    const { status, body } = await statusOf(() => service.getCompanyHistory('acme-old'));
+    const { status, body } = await statusOf(() => service.getCompanyHistory('acme-old', 1, 20, { id: 'contributor', role: 'CONTRIBUTOR' }));
     expect(status).toBe(301);
     expect(body).toMatchObject({ redirectTo: 'acme' });
   });

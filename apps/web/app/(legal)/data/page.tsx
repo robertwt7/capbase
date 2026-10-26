@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   ...canonical('/data'),
 };
 
-const LAST_UPDATED = '17 October 2026';
+const LAST_UPDATED = '26 October 2026';
 
 // One entry per ingested source. Keep in step with apps/jobs/src/sources/ —
 // a new source is not live until it is listed here with its terms.
@@ -117,6 +117,34 @@ export default function DataPage() {
           </p>
         </section>
       ))}
+
+      <h2 id="website-technologies">Website technologies and mobile apps</h2>
+      <p>
+        Where available, Capbase inspects the public company homepage using an original, versioned
+        set of technology signatures: explicit generator metadata, known script locations and
+        framework artifacts. We respect robots policies, limit requests and do not run scripts or
+        download third-party assets. Evidence links lead to the company website; the observation
+        date belongs to each detected technology, not to a shared source record.
+      </p>
+      <p>
+        These signals describe a public website. They do not establish a company&apos;s internal
+        software purchases, backend systems or complete product infrastructure. A missing section
+        means we have no current eligible observations; it does not mean the company uses no
+        technology. Website observations expire after 60 days, even if collection stops. A failed
+        fetch does not refresh the observation date or establish that a technology disappeared.
+      </p>
+      <p>
+        Mobile apps appear only when a store link is present on the company website and its
+        association has been verified with supporting evidence. App Store and Google Play links
+        identify products, not company identities. Links expire after 60 days without website
+        revalidation. We publish outgoing store links only: no download, revenue, audience or
+        rating estimates. Website content and store brands retain their owners&apos; rights;
+        Capbase stores short factual evidence descriptors rather than complete pages.
+      </p>
+      <p>
+        Incorrect detections and app associations can be reported through the profile&apos;s
+        report-issue link. Suppressed observations stay hidden until explicitly reviewed.
+      </p>
 
       <h2>Partner data</h2>
       <p>

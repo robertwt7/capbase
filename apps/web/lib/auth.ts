@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { canViewCompanyHistory } from '@repo/api';
 import type { AuthUser, MyContributionsResponse } from '@repo/api';
 
 import { apiFetch } from './api';
@@ -79,4 +80,11 @@ export async function getMyContributions(): Promise<MyContributionsResponse> {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
   });
+}
+
+/** Resolve current API-backed roles before reading any company history. */
+export async function requireCompanyHistory(next: string): Promise<AuthUser> {
+  const user = await requireUser(next);
+  if (!canViewCompanyHistory(user.role)) notFound();
+  return user;
 }

@@ -63,6 +63,12 @@ describe('validateEnv', () => {
     }
   });
 
+  it('requires an explicit boolean technology display switch', () => {
+    expect(validateEnv({ ...base, TECH_DETAILS_ENABLED: 'true' })).toBeTruthy();
+    expect(validateEnv({ ...base, TECH_DETAILS_ENABLED: 'false' })).toBeTruthy();
+    expect(() => validateEnv({ ...base, TECH_DETAILS_ENABLED: 'yes' })).toThrow(/TECH_DETAILS_ENABLED/);
+  });
+
   describe('MFA', () => {
     const key = Buffer.alloc(32, 7).toString('base64');
     const prod = { ...base, NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(48) };

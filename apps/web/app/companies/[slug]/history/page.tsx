@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import type { Revision } from '@repo/api';
+import { canViewCompanyHistory, type Revision } from '@repo/api';
 
-import { LockedSection } from '@/components/LockedSection';
+import { getSession, requireCompanyHistory } from '@/lib/auth';
 import { Button, EmptyState, Pagination, SectionHeader } from '@/components/ui';
 import { getCompanyDetail, getCompanyHistory } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
@@ -42,6 +42,10 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const session = await getSession();
+  if (!canViewCompanyHistory(session?.role)) {
+    return { title: 'Change history', robots: { index: false, follow: true } };
+  }
   const result = await getCompanyDetail(slug);
   // notFound() here too, not only in the page: under loading.tsx the response
   // is already a streamed 200, and metadata is the blocking <head> for
@@ -51,8 +55,7 @@ export async function generateMetadata({
   return {
     title: `${result.company.name} — Change history`,
     description: `Every recorded change to ${result.company.name}'s Capbase profile: what changed, who changed it, and when.`,
-    // Public and linkable, but it would compete with the profile for
-    // "{company} funding" — so it stays out of the index and passes link equity on.
+    // History is role restricted and never indexed.
     robots: { index: false, follow: true },
   };
 }
@@ -65,6 +68,7 @@ export default async function CompanyHistory({
   searchParams: Promise<{ page?: string }>;
 }) {
   const { slug } = await params;
+  await requireCompanyHistory(`/companies/${slug}/history`);
   const { page: rawPage } = await searchParams;
   const page = Math.max(1, Number(rawPage) || 1);
 
@@ -93,10 +97,8 @@ export default async function CompanyHistory({
           Change history
         </h1>
         <p className="mt-3 max-w-[60ch] text-[15px] text-graphite-700">
-          Every recorded change to {company.name}&apos;s profile — from moderated contributions and
-          from automated ingestion. Changes to the company&apos;s own fields from public records and
-          moderated edits are open to everyone; the rest of the timeline — rounds, people, licensed
-          data — opens with an approved contribution.
+          Every recorded change to {company.name}&apos;s profile, from moderated contributions and
+          automated ingestion. Available to contributors and administrators.
         </p>
       </header>
 
@@ -121,7 +123,7 @@ export default async function CompanyHistory({
               </Button>
             }
           >
-            Nothing recorded yet. Capbase started keeping a public change log recently, so changes
+            Nothing recorded yet. Capbase started keeping a change log recently, so changes
             made before then are not listed here — this is not a claim that {company.name} has never
             been edited.
           </EmptyState>
@@ -134,19 +136,6 @@ export default async function CompanyHistory({
             </ol>
           )
         )}
-        {/* Signing in alone does not open these — the allowlist is the same for
-            every locked viewer — so the panel speaks of contributing. */}
-        <LockedSection
-          access={history.access}
-          next={`/companies/${company.slug}/history`}
-          contributeHref={`/companies/${company.slug}/contribute`}
-          total={history.total + history.hiddenCount}
-          shown={history.total}
-          noun="entries"
-          subject={`${formatCount(history.hiddenCount)} more ${history.hiddenCount === 1 ? 'entry' : 'entries'}`}
-          placeholder="row"
-        />
-
         <Pagination
           page={history.page}
           pageSize={history.pageSize}

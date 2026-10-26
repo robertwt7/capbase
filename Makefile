@@ -544,3 +544,13 @@ help: ## List available commands
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| sort \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+
+
+# Explicit, bounded pilot cohort comes from the jobs environment, never all companies.
+.PHONY: enrich-technologies enrich-technologies-prod
+enrich-technologies: ## Scan website technologies (LIMIT=5 DRY_RUN=1 SLUG=...)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-technologies.js --limit $(or $(LIMIT),5) $(if $(filter 1,$(DRY_RUN)),--dry-run) $(if $(SLUG),--slug $(SLUG))
+
+enrich-technologies-prod: ## [VPS] Bounded website scan inside deployed jobs stack
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-technologies.js --limit $(or $(LIMIT),5) $(if $(filter 1,$(DRY_RUN)),--dry-run) $(if $(SLUG),--slug $(SLUG))

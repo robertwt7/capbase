@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SentryModule } from '@sentry/nestjs/setup';
 
+import { EnrichmentModule } from './enrichment/enrichment.module';
 import { HealthController } from './health.controller';
 import { IngestModule } from './ingest/ingest.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -14,6 +15,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ScheduleModule.forRoot(),
     PrismaModule,
     IngestModule,
+    EnrichmentModule,
   ],
   controllers: [HealthController],
 })

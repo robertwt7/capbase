@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SITEMAP_PAGE_SIZE } from '@repo/api';
 
 import { CompaniesService } from './companies.service';
@@ -145,9 +146,10 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
   let citationFindMany: jest.Mock<
     (args: { where: { entityId: { in: string[] } } }) => Promise<unknown[]>
   >;
+  let websiteScanFindFirst: jest.Mock;
   const user = { id: 'u1', role: 'USER' as const };
 
-  function build(company = dbCompany()) {
+  function build(company = dbCompany(), techEnabled = false) {
     row = company;
     lastContributionAt = jest.fn(async () => null);
     // Only cited rows come back — the real query filters by the id list.
@@ -158,7 +160,10 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
     );
     const count = (section: keyof ReturnType<typeof dbCompany>) =>
       jest.fn(async () => (row[section] as unknown[]).length);
+    websiteScanFindFirst = jest.fn(async () => null);
     const prisma = {
+      companyWebsiteScan: { findFirst: websiteScanFindFirst },
+      $queryRaw: jest.fn(async () => []),
       company: { findFirst: findFirstHonouringInclude(row) },
       fundingRound: {
         count: count('rounds'),
@@ -181,7 +186,7 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
     const users = Object.assign(Object.create(UsersService.prototype) as UsersService, {
       lastContributionAt,
     });
-    service = new CompaniesService(prisma, users);
+    service = new CompaniesService(prisma, users, new ConfigService({ TECH_DETAILS_ENABLED: String(techEnabled) }));
   }
 
   beforeEach(() => build());
@@ -277,6 +282,31 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
     expect(company.primarySector).toBe('Fintech');
     expect(company.people?.[0]?.linkedinUrl).toBe('https://www.linkedin.com/in/person-1');
     expect(company.people?.[0]?.title).toBe('Chief Executive Officer');
+  });
+
+  it.each([
+    { websiteUrl: 'https://helia.com', partnerFields: ['websiteUrl'], target: 'websiteUrl' },
+    { websiteUrl: null, partnerFields: ['domain'], target: 'domain' },
+  ])('withholds enrichment for a masked $target, preserving signed-in reads', async ({ target, ...overrides }) => {
+    build(dbCompany(overrides), true);
+    const anonymous = await service.getCompanyDetail('helia');
+    expect(anonymous.company.masked).toContain(target);
+    expect(anonymous.company).not.toHaveProperty('companyTechnologies');
+    expect(anonymous.company).not.toHaveProperty('companyApps');
+    expect(anonymous.access.totals).not.toHaveProperty('companyTechnologies');
+    expect(websiteScanFindFirst).not.toHaveBeenCalled();
+    const signedIn = await service.getCompanyDetail('helia', user);
+    expect(signedIn.company.companyTechnologies).toEqual([]);
+    expect(signedIn.company.companyApps).toEqual([]);
+    expect(websiteScanFindFirst).toHaveBeenCalled();
+  });
+
+  it('keeps an unmasked website eligible when only its separate domain field is masked', async () => {
+    build(dbCompany({ partnerFields: ['domain'] }), true);
+    const anonymous = await service.getCompanyDetail('helia');
+    expect(anonymous.company.masked).toEqual(['domain']);
+    expect(anonymous.company.companyTechnologies).toEqual([]);
+    expect(websiteScanFindFirst).toHaveBeenCalled();
   });
 
   describe('partner provenance', () => {
@@ -447,6 +477,8 @@ describe('CompaniesService.createCompany (new fields persist)', () => {
 });
 
 describe('CompaniesService.getCompanyHistory', () => {
+  const contributor = { id: 'contributor1', role: 'CONTRIBUTOR' as const };
+  const admin = { id: 'admin1', role: 'ADMIN' as const };
   function revision(overrides: Record<string, unknown> = {}) {
     return {
       id: 'rev1',
@@ -503,13 +535,15 @@ describe('CompaniesService.getCompanyHistory', () => {
       service: new CompaniesService(prisma, users),
       findFirst,
       findMany,
+      count,
+      users,
     };
   }
 
   it('404s for a company that is not approved', async () => {
     const { service, findFirst } = makeService([], null);
 
-    await expect(service.getCompanyHistory('helia')).rejects.toThrow(NotFoundException);
+    await expect(service.getCompanyHistory('helia', 1, 20, contributor)).rejects.toThrow(NotFoundException);
     // The APPROVED filter is part of the query, not a post-check.
     expect(findFirst.mock.calls[0]![0]).toMatchObject({
       where: { slug: 'helia', moderationStatus: 'APPROVED', mergedIntoId: null },
@@ -528,7 +562,7 @@ describe('CompaniesService.getCompanyHistory', () => {
       }),
     ]);
 
-    const result = await service.getCompanyHistory('helia', 2, 10);
+    const result = await service.getCompanyHistory('helia', 2, 10, contributor);
 
     expect(result).toMatchObject({ total: 2, page: 2, pageSize: 10 });
     expect(findMany.mock.calls[0]![0]).toMatchObject({
@@ -553,7 +587,7 @@ describe('CompaniesService.getCompanyHistory', () => {
       revision({ actor: 'INGEST', actorSource: 'WIKIDATA', actorUser: null }),
     ]);
 
-    const { items } = await service.getCompanyHistory('helia');
+    const { items } = await service.getCompanyHistory('helia', 1, 20, contributor);
 
     expect(items[0]!.actorName).toBe('Wikidata');
   });
@@ -564,50 +598,40 @@ describe('CompaniesService.getCompanyHistory', () => {
       revision({ id: 'rev-x', actor: 'INGEST', actorSource: 'SOME_INTERNAL_TAG', actorUser: null }),
     ]);
 
-    const { items } = await service.getCompanyHistory('helia');
+    const { items } = await service.getCompanyHistory('helia', 1, 20, contributor);
 
     expect(items.map((i) => i.actorName)).toEqual(['partner', 'automated']);
   });
 
-  describe('for a locked viewer (an allowlist)', () => {
-    const locked = { unlocked: false, signedIn: true, unlockedUntil: null };
-    const signedOut = { unlocked: false, signedIn: false, unlockedUntil: null };
-    const everyKind = () => [
-      revision({ id: 'child-create', entityType: 'round', entityId: 'r1', field: '', action: 'CREATE', after: { amountUsd: 5 } }),
-      revision({ id: 'round-fix', entityType: 'round', entityId: 'r1', field: 'amountUsd', actor: 'INGEST', actorSource: 'PARTNER', actorUser: null }),
-      revision({ id: 'partner-field', field: 'description', after: 'PARTNER-PROSE', actor: 'INGEST', actorSource: 'PARTNER', actorUser: null }),
-      revision({ id: 'human-over-partner', field: 'description', before: 'PARTNER-PROSE', after: 'Human prose' }),
-      revision({ id: 'public-ingest', field: 'hq', actor: 'INGEST', actorSource: 'COMPANIES_HOUSE', actorUser: null }),
-      revision({ id: 'merge', field: '', action: 'MERGE', before: null, after: null }),
-      revision({ id: 'unknown-source', field: 'stage', actor: 'INGEST', actorSource: 'SOME_NEW_SOURCE', actorUser: null }),
-    ];
+  it('denies anonymous service calls before company or revision queries', async () => {
+    const { service, findFirst, findMany, count, users } = makeService([revision()]);
+    await expect(service.getCompanyHistory('helia')).rejects.toThrow(UnauthorizedException);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
+    expect(count).not.toHaveBeenCalled();
+    expect(users.accessFor).not.toHaveBeenCalled();
+  });
 
-    it('shows only public-record company-field entries and merges, and counts the rest', async () => {
-      const { service } = makeService(everyKind(), undefined, locked);
-      const res = await service.getCompanyHistory('helia');
+  it.each([false, true])('denies USER regardless of profile unlock (%s)', async (unlocked) => {
+    const { service, findFirst, findMany, count, users } = makeService(
+      [revision()], undefined, { unlocked, signedIn: true, unlockedUntil: null },
+    );
+    await expect(service.getCompanyHistory('helia', 1, 20, { id: 'u1', role: 'USER' }))
+      .rejects.toThrow(ForbiddenException);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
+    expect(count).not.toHaveBeenCalled();
+    expect(users.accessFor).not.toHaveBeenCalled();
+  });
 
-      expect(res.items.map((i) => i.id)).toEqual(['public-ingest', 'merge']);
-      expect(res.total).toBe(2);
-      expect(res.hiddenCount).toBe(5);
-      expect(res.access).toEqual(locked);
-      expect(JSON.stringify(res)).not.toContain('PARTNER-PROSE');
-    });
-
-    it('shows a signed-out viewer nothing of a partner-only company, only the count', async () => {
-      const { service, findMany } = makeService(everyKind(), { id: 'c1', partnerOnly: true }, signedOut);
-      const res = await service.getCompanyHistory('helia');
-
-      expect(res.items).toEqual([]);
-      expect(res.hiddenCount).toBe(7);
-      expect(findMany).not.toHaveBeenCalled();
-    });
-
-    it('shows an unlocked viewer everything', async () => {
-      const { service } = makeService(everyKind());
-      const res = await service.getCompanyHistory('helia');
-      expect(res.items).toHaveLength(7);
-      expect(res.hiddenCount).toBe(0);
-    });
+  it.each([contributor, admin])('returns the complete history to $role', async (viewer) => {
+    const { service } = makeService([
+      revision({ entityType: 'round', entityId: 'r1', field: '', action: 'CREATE' }),
+      revision({ id: 'partner', actor: 'INGEST', actorSource: 'PARTNER' }),
+    ]);
+    const res = await service.getCompanyHistory('helia', 1, 20, viewer);
+    expect(res.items).toHaveLength(2);
+    expect(res.hiddenCount).toBe(0);
   });
 
   it('never exposes a contributor email', async () => {
@@ -617,7 +641,7 @@ describe('CompaniesService.getCompanyHistory', () => {
       revision({ actorUser: { name: 'Ada Admin', email: 'ada@example.com' } }),
     ]);
 
-    const { items } = await service.getCompanyHistory('helia');
+    const { items } = await service.getCompanyHistory('helia', 1, 20, contributor);
 
     expect(JSON.stringify(items)).not.toContain('@example.com');
     expect(items[0]!.actorName).toBe('Ada Admin');

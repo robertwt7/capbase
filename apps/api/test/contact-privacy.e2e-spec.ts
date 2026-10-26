@@ -42,6 +42,7 @@ describe('Contact privacy (e2e)', () => {
   let personId: string | undefined;
   let key: string;
   let userId: string | undefined;
+  let session: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -129,6 +130,7 @@ describe('Contact privacy (e2e)', () => {
       select: { id: true },
     });
     userId = owner.id;
+    session = app.get(JwtService).sign({ sub: owner.id, email: `${tag}@test.dev`, role: 'CONTRIBUTOR', tv: 0 });
     key = (
       await app
         .get(ApiKeysService)
@@ -162,7 +164,6 @@ describe('Contact privacy (e2e)', () => {
       `/people/${tag}-person`,
       `/investors/${tag}-firm`,
       `/companies/${tag}-co`,
-      `/companies/${tag}-co/history`,
       `/search?q=${q}`,
       `/people?q=${q}`,
       '/people/sitemap',
@@ -172,6 +173,8 @@ describe('Contact privacy (e2e)', () => {
       const res = await http().get(path).expect(200);
       assertClean(path, res.body);
     }
+    const history = await http().get(`/companies/${tag}-co/history`).set(bearer(session)).expect(200);
+    assertClean('authorized history', history.body);
     // The fixture really is reachable — the checks above read the person.
     const person = await http().get(`/people/${tag}-person`).expect(200);
     expect(JSON.stringify(person.body)).toContain(name);
@@ -192,10 +195,11 @@ describe('Contact privacy (e2e)', () => {
   });
 
   it('the timeline names partner data generically and never leaks a raw tag', async () => {
-    // Signed out, neither entry is shown at all (the history allowlist).
-    const anon = await http().get(`/companies/${tag}-co/history`).expect(200);
-    expect(anon.body.items).toEqual([]);
-    // An unlocked viewer sees both — and still no raw tag.
+    // Signed out, no history or revision count is returned.
+    const anon = await http().get(`/companies/${tag}-co/history`).expect(401);
+    expect(anon.body).not.toHaveProperty('items');
+    expect(anon.body).not.toHaveProperty('total');
+    // A contributor sees both — and still no raw tag.
     const jwt = app.get(JwtService).sign({ sub: userId, email: `${tag}@test.dev`, role: 'CONTRIBUTOR', tv: 0 });
     const res = await http().get(`/companies/${tag}-co/history`).set(bearer(jwt)).expect(200);
     const names = (res.body.items as { field: string; actorName: string }[])

@@ -92,6 +92,8 @@ const COMPANY_CHILDREN = [
   'exitEvent',
   'diversitySignal',
   'changeProposal',
+  'companyWebsiteScan',
+  'companyApp',
 ] as const;
 
 type CompanyChild = (typeof COMPANY_CHILDREN)[number];
@@ -434,6 +436,7 @@ export class MergeService {
     losingId: string,
     adminUserId: string,
   ): Promise<MovedRecord> {
+    await lockCompanies(tx, survivorId, losingId);
     const [survivor, loser] = await Promise.all([
       tx.company.findUnique({ where: { id: survivorId } }),
       tx.company.findUnique({ where: { id: losingId } }),
@@ -763,6 +766,7 @@ export class MergeService {
     moved: MovedRecord,
     adminUserId: string,
   ): Promise<void> {
+    await lockCompanies(tx, survivorId, losingId);
     const [survivor, loser] = await Promise.all([
       tx.company.findUnique({ where: { id: survivorId } }),
       tx.company.findUnique({ where: { id: losingId } }),
@@ -978,4 +982,10 @@ async function restoreByColumn(
   if (ids.length === 0) return;
   const delegate = tx[model] as unknown as { updateMany(args: unknown): Promise<unknown> };
   await delegate.updateMany({ where: { id: { in: ids } }, data: { [column]: losingId } });
+}
+
+/** Match enrichment's owning-row protocol and prevent lock order inversions. */
+async function lockCompanies(tx: Prisma.TransactionClient, a: string, b: string): Promise<void> {
+  const [first, second] = [a, b].sort();
+  await tx.$queryRaw`SELECT id FROM "Company" WHERE id IN (${first}, ${second}) ORDER BY id FOR UPDATE`;
 }

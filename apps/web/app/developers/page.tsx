@@ -201,6 +201,20 @@ export default function DevelopersPage() {
         </section>
 
         <section>
+          <h2 className={H2}>Company technology details</h2>
+          <p className={P}>
+            When available, <C>GET /v1/companies/:slug</C> includes optional
+            <C>company.companyTechnologies</C> and <C>company.companyApps</C> arrays, with
+            matching counts in <C>access.totals</C>. Technology rows contain names, categories,
+            vendor and evidence URLs, and first/last observation dates. App rows contain verified
+            outgoing store links and observation dates. These fields are absent while technology
+            display is disabled and never appear in directory/search results. Expired and
+            suppressed observations are excluded. See the <Link href="/data#website-technologies"
+              className={LINK}>collection methodology</Link> for limitations.
+          </p>
+        </section>
+
+        <section>
           <h2 className={H2}>IP allowlist</h2>
           <p className={P}>
             When you create a key you can list up to {MAX_API_KEY_CIDRS} addresses or CIDR ranges (

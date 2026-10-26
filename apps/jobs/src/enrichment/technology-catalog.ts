@@ -1,0 +1,23 @@
+/** Original, deliberately small website-only catalog. No vendor fingerprint database. */
+export const TECHNOLOGY_CATALOG = [
+  { slug: 'wordpress', name: 'WordPress', category: 'Content management', vendorUrl: 'https://wordpress.org/' },
+  { slug: 'drupal', name: 'Drupal', category: 'Content management', vendorUrl: 'https://www.drupal.org/' },
+  { slug: 'ghost', name: 'Ghost', category: 'Content management', vendorUrl: 'https://ghost.org/' },
+  { slug: 'webflow', name: 'Webflow', category: 'Content management', vendorUrl: 'https://webflow.com/' },
+  { slug: 'wix', name: 'Wix', category: 'Content management', vendorUrl: 'https://www.wix.com/' },
+  { slug: 'squarespace', name: 'Squarespace', category: 'Content management', vendorUrl: 'https://www.squarespace.com/' },
+  { slug: 'shopify', name: 'Shopify', category: 'Commerce', vendorUrl: 'https://www.shopify.com/' },
+  { slug: 'nextjs', name: 'Next.js', category: 'Web framework', vendorUrl: 'https://nextjs.org/' },
+  { slug: 'nuxt', name: 'Nuxt', category: 'Web framework', vendorUrl: 'https://nuxt.com/' },
+  { slug: 'gatsby', name: 'Gatsby', category: 'Web framework', vendorUrl: 'https://www.gatsbyjs.com/' },
+  { slug: 'astro', name: 'Astro', category: 'Web framework', vendorUrl: 'https://astro.build/' },
+  { slug: 'sveltekit', name: 'SvelteKit', category: 'Web framework', vendorUrl: 'https://svelte.dev/docs/kit/' },
+  { slug: 'google-analytics', name: 'Google Analytics', category: 'Analytics', vendorUrl: 'https://marketingplatform.google.com/about/analytics/' },
+  { slug: 'google-tag-manager', name: 'Google Tag Manager', category: 'Tag management', vendorUrl: 'https://marketingplatform.google.com/about/tag-manager/' },
+  { slug: 'plausible', name: 'Plausible', category: 'Analytics', vendorUrl: 'https://plausible.io/' },
+  { slug: 'matomo', name: 'Matomo', category: 'Analytics', vendorUrl: 'https://matomo.org/' },
+  { slug: 'intercom', name: 'Intercom', category: 'Customer support', vendorUrl: 'https://www.intercom.com/' },
+  { slug: 'hubspot', name: 'HubSpot', category: 'Marketing', vendorUrl: 'https://www.hubspot.com/' },
+  { slug: 'zendesk', name: 'Zendesk', category: 'Customer support', vendorUrl: 'https://www.zendesk.com/' },
+  { slug: 'crisp', name: 'Crisp', category: 'Customer support', vendorUrl: 'https://crisp.chat/' },
+] as const;
