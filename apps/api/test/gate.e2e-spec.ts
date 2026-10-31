@@ -575,6 +575,40 @@ describe('Read gate (e2e)', () => {
     );
   });
 
+  describe('retracting an approved edit', () => {
+    it('masks a reverted partner field again for a signed-out viewer', async () => {
+      const proposal = await prisma.changeProposal.create({
+        data: {
+          companyId: ids.publicCo!,
+          changes: { description: `human-description-${stamp}` },
+          submittedById: ids['user-USER'],
+        },
+        select: { id: true },
+      });
+      const decide = (status: 'APPROVED' | 'REJECTED') =>
+        http()
+          .patch(`/admin/submissions/proposal/${proposal.id}`)
+          .set('Authorization', `Bearer ${tokens.admin}`)
+          .send({ status })
+          .expect(200);
+
+      // The approval replaced the partner's value with a human one: unmasked.
+      await decide('APPROVED');
+      const approved = await get(`/companies/${slugs.publicCo}`, 'signedOut');
+      expect(approved.body.company.description).toBe(`human-description-${stamp}`);
+      expect(approved.body.company.masked).toBeUndefined();
+
+      // The retraction restores the partner's value — and its mark with it.
+      const res = await decide('REJECTED');
+      expect(res.body).toMatchObject({ revertedFields: ['description'], skippedFields: [] });
+      const out = await get(`/companies/${slugs.publicCo}`, 'signedOut');
+      expect(out.body.company.masked).toEqual(['description']);
+      expect(leaks(out.body, [S.description])).toEqual([]);
+      const locked = await get(`/companies/${slugs.publicCo}`, 'locked');
+      expect(locked.body.company.description).toBe(S.description);
+    });
+  });
+
   describe('/v1', () => {
     it('gives a contributor key everything — its owner is unlocked', async () => {
       const key = (

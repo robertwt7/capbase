@@ -1,3 +1,6 @@
+import type { ReviewStatus } from './company';
+import type { ViewerAccess } from './contributions';
+
 /** CONTRIBUTOR is granted by an admin only: it may mint contributor API keys for /v1 and always
  *  sees complete company profiles, but moderates nothing. */
 export type Role = 'USER' | 'CONTRIBUTOR' | 'ADMIN';
@@ -211,8 +214,16 @@ export interface AdminUser {
   bannedAt: string | null;
   createdAt: string;
   pendingCount: number;
+  approvedCount: number;
   /** Whether the account has a second factor. */
   mfaEnabled: boolean;
+}
+
+/** `GET /admin/users/:id`: one account plus what the moderator needs to judge its
+ *  contributions — every status counted, and the gate state those rows give it now. */
+export interface AdminUserDetail extends AdminUser {
+  access: ViewerAccess;
+  contributions: Record<ReviewStatus, number>;
 }
 
 export interface AdminUserListQuery {

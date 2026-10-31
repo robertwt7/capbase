@@ -229,7 +229,7 @@ model Revision {
   before     Json?
   after      Json?
 
-  action      String // 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE'
+  action      String // 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT'
   actor       String // 'USER' | 'ADMIN' | 'INGEST'
   actorUserId String?
   actorUser   User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
@@ -306,6 +306,11 @@ model Company {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   rounds       FundingRound[]
   people       PersonRole[]
   investors    InvestorHolding[]
@@ -323,6 +328,8 @@ model Company {
   @@index([partnerOnly])
   /// Admin queue: one status, newest first, cursor on (createdAt, id).
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   /// Contribution gate + pending cap: a user's rows in one status, newest first.
   @@index([submittedById, moderationStatus, createdAt])
   // Server-side directory filters/sorts always scope to APPROVED first.
@@ -373,8 +380,18 @@ model ChangeProposal {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+  /// The partner marks this proposal's approval removed (withoutPartnerFields), re-applied if
+  /// the approval is retracted. Null = approved before this was recorded (fail closed on revert).
+  clearedPartnerFields Json?
+
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -398,8 +415,18 @@ model InvestorChangeProposal {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+  /// The partner marks this proposal's approval removed (withoutPartnerFields), re-applied if
+  /// the approval is retracted. Null = approved before this was recorded (fail closed on revert).
+  clearedPartnerFields Json?
+
   @@index([investorId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -438,11 +465,18 @@ model FundingRound {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   investors RoundInvestor[]
 
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -710,6 +744,11 @@ model InvestorHolding {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   // The leading investorId serves every per-firm lookup; externalSource, id let
@@ -717,6 +756,8 @@ model InvestorHolding {
   // signed in, three index ranges that skip the partner rows signed out.
   @@index([investorId, externalSource, id])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -771,11 +812,18 @@ model PersonRole {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([investorId])
   @@index([personId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -888,9 +936,16 @@ model AcquisitionDeal {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -913,9 +968,16 @@ model ExitEvent {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 
@@ -933,8 +995,15 @@ model DiversitySignal {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  /// When an admin last approved/rejected this row; null while PENDING and for ingested rows.
+  reviewedAt   DateTime?
+  /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
+  reviewedById String?
+
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
+  /// Admin queue for a decided status, newest decision first.
+  @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
 }
 

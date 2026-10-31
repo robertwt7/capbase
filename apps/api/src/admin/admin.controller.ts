@@ -15,6 +15,7 @@ import {
   type IdentifiableType,
   type MergeQueueResponse,
   type AdminUser,
+  type AdminUserDetail,
   type MergeStatus,
   type Paginated,
   type PendingSubmissionsResponse,
@@ -30,7 +31,12 @@ import { ListUsersDto, UpdateUserDto } from './dto/admin-users.dto';
 import { ManualMergeCandidateDto, MergeDecisionDto } from './dto/merge.dto';
 import { ModerationDecisionDto } from './dto/moderation-decision.dto';
 import { MergeService } from './merge/merge.service';
-import { parseReviewableType, parseReviewStatus } from './submission-params';
+import {
+  parseReviewableType,
+  parseReviewStatus,
+  parseSubmissionSearch,
+  parseSubmissionSource,
+} from './submission-params';
 import { AdminUsersService } from './users/admin-users.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -49,8 +55,19 @@ export class AdminController {
     @Query('status') status?: string,
     @Query('type') type?: string,
     @Query('before') before?: string,
+    @Query('source') source?: string,
+    @Query('user') user?: string,
+    @Query('q') q?: string,
   ): Promise<PendingSubmissionsResponse> {
-    return this.admin.listSubmissions(parseReviewStatus(status), parseReviewableType(type), before);
+    return this.admin.listSubmissions({
+      status: parseReviewStatus(status),
+      type: parseReviewableType(type),
+      before: before || undefined,
+      source: parseSubmissionSource(source),
+      // An unknown id simply matches nothing.
+      userId: user || undefined,
+      q: parseSubmissionSearch(q),
+    });
   }
 
   /** The nav badge's count, without rendering a page of the queue. */
@@ -139,6 +156,12 @@ export class AdminController {
   @Get('users')
   listUsers(@Query() query: ListUsersDto): Promise<Paginated<AdminUser>> {
     return this.users.list(query);
+  }
+
+  /** One account with its contribution counts per status and its gate state now. */
+  @Get('users/:id')
+  getUser(@Param('id') id: string): Promise<AdminUserDetail> {
+    return this.users.detail(id);
   }
 
   /** Ban/unban and change role. Banning also rejects the user's pending queue. */

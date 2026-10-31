@@ -153,6 +153,10 @@ function Entry({ item }: { item: Revision }) {
   // A merge moves a whole row, so it carries no field and no diff — without its
   // own branch it would render as "— changed" with two JSON blobs.
   const merge = item.action === 'MERGE' || item.action === 'UNMERGE';
+  // A retraction is an approval undone: of a whole row (no field) or of one
+  // field of an edit, which carries a diff back to the value it replaced.
+  const retracted = item.action === 'RETRACT' && item.field === '';
+  const reverted = item.action === 'RETRACT' && item.field !== '';
 
   return (
     <li className="grid grid-cols-[170px_1fr] items-baseline gap-x-6 border-t border-line py-4 max-md:grid-cols-1 max-md:gap-y-2">
@@ -166,6 +170,13 @@ function Entry({ item }: { item: Revision }) {
           <span className="font-display font-semibold">{item.entityLabel}</span>
           {item.action === 'CREATE' ? (
             <span className="text-graphite-700"> added</span>
+          ) : retracted ? (
+            <span className="text-graphite-700"> retracted</span>
+          ) : reverted ? (
+            <span className="text-graphite-700">
+              {' '}
+              — {FIELD_LABELS[item.field] ?? item.field} reverted
+            </span>
           ) : merge ? (
             <span className="text-graphite-700">
               {' '}
@@ -182,7 +193,7 @@ function Entry({ item }: { item: Revision }) {
           )}
         </p>
 
-        {item.action === 'UPDATE' ? (
+        {item.action === 'UPDATE' || reverted ? (
           <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 font-mono text-[13px]">
             <span className="text-graphite-500 line-through decoration-graphite-400">
               {display(item.field, item.before)}
@@ -199,6 +210,12 @@ function Entry({ item }: { item: Revision }) {
             {item.action === 'MERGE'
               ? 'Two records described the same company. Its rounds, people and sources now sit on this profile, and the old address redirects here.'
               : 'The merge was reversed; the records are separate again.'}
+          </p>
+        ) : null}
+
+        {retracted ? (
+          <p className="mt-1.5 text-[13px] text-graphite-500">
+            A moderator withdrew its approval; it no longer shows on the profile.
           </p>
         ) : null}
       </div>

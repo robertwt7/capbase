@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { ROLES, type AdminUser, type Role } from '@repo/api';
 
 import { Badge, Button, Input, PageContainer, Pagination } from '../../../components/ui';
@@ -79,7 +80,7 @@ export default async function AdminUsers({
               <tr className="border-b border-line font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase">
                 <th className="px-4 py-3 font-medium">Account</th>
                 <th className="px-4 py-3 font-medium">Joined</th>
-                <th className="px-4 py-3 text-right font-medium">Pending</th>
+                <th className="px-4 py-3 font-medium">Contributions</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
@@ -132,8 +133,17 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
       <td className="px-4 py-3 font-mono text-[13px] text-graphite-700">
         {formatDate(user.createdAt)}
       </td>
-      <td className="px-4 py-3 text-right font-mono text-[13px] text-graphite-700">
-        {formatCount(user.pendingCount)}
+      <td className="px-4 py-3 font-mono text-[13px] text-graphite-700">
+        {/* Into the queue's per-user view: their approved rows, or their pending
+            ones when nothing is approved yet. */}
+        <Link
+          href={`/admin?user=${encodeURIComponent(user.id)}&status=${
+            user.approvedCount === 0 && user.pendingCount > 0 ? 'PENDING' : 'APPROVED'
+          }`}
+          className="whitespace-nowrap underline-offset-[3px] hover:text-ink hover:underline"
+        >
+          {formatCount(user.approvedCount)} approved · {formatCount(user.pendingCount)} pending
+        </Link>
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1.5">

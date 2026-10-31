@@ -77,6 +77,16 @@ export function formatDate(iso: string): string {
   });
 }
 
+/** Day precision ("Oct 31, 2026"), for events where the month alone is too coarse —
+    moderation decisions, access windows. */
+export function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 export function formatYear(iso: string): string {
   return new Date(iso).getFullYear().toString();
 }

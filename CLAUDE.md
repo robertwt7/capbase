@@ -298,18 +298,19 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   search and multi-company totals are exact. **No role filter** —
   3,744 distinct free-text role strings is not a vocabulary. `/people/[slug]` — person
   profile: roles grouped by organisation, each with its kind, year range and citation.
-- `/companies/[slug]/history` — public, paginated change timeline for one company
-  (what changed, from what to what, who, when). Gated by an **allowlist** for every locked
-  viewer, signed in or not (a revision's `before`/`after` can carry any value a row ever held):
-  only company-field entries from a moderated edit/merge (`ADMIN`) or a `PUBLIC_INGEST_SOURCES`
-  source, on a field the partner has never written on that company. The rest is counted in
-  `hiddenCount` behind a `LockedSection`; unlocked viewers see everything. `noindex, follow`, so
-  it never competes with the profile in search.
+- `/companies/[slug]/history` — paginated change timeline for one company (what changed, from
+  what to what, who, when), **CONTRIBUTOR/ADMIN only** (`canViewCompanyHistory` in `@repo/api`):
+  the web's `requireCompanyHistory` sends a signed-out visitor to login and 404s any other role,
+  and the API answers 401/403. Those roles are always unlocked, so entries are not gated (a
+  revision's `before`/`after` can carry any value a row ever held, partner values included) and
+  `hiddenCount` is always 0. `noindex, follow`, so it never competes with the profile in search.
 - `/admin/users` — account list: search, ban/unban (a ban revokes sessions and rejects
   the user's pending queue), and one "Make user / contributor / admin" button per other role
   (a downgrade revokes the API keys the new role no longer permits; a ban revokes all).
   A mono `2FA` badge (`No 2FA`, dashed, for an un-enrolled admin/contributor) and, when enrolled,
   a monochrome **Reset 2FA** button (`resetMfaAction` → `POST /admin/users/:id/reset-mfa`).
+  A Contributions cell (`approvedCount` / `pendingCount`, one `UNION ALL` grouped by user and
+  status) links into the queue's per-user view.
 - `/profile/settings` → **Security** (`SecuritySection.tsx`): Passkeys (list, "Synced"/"This
   device", add via `startRegistration`, remove), Authenticator app (set up / remove), Recovery
   codes ("N of 10 remaining", regenerate). Every change is an inline password step (no modal)
@@ -344,7 +345,7 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   admin-shaped. Never link to `/admin` from the public site. **Both queues are
   paged and no admin read may load a whole status**: APPROVED is every ingested row (~255k), and
   loading it ran the API out of heap. Submissions page by cursor (`before` ← `nextCursor`,
-  `SUBMISSION_PAGE_SIZE`; nine tables merged on `(createdAt desc, type, id desc)`, so an
+  `SUBMISSION_PAGE_SIZE`; nine tables merged on `(<sort key> desc, type, id desc)`, so an
   offset would load every row above it from each), merges by page number (`MERGE_PAGE_SIZE`,
   windowed across signals in `MERGE_SIGNALS` order). Every admin page is Tailwind +
   `components/ui` inside `PageContainer` (so it shares the header's left edge), with filter pills
@@ -353,7 +354,27 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   queue renders each submission as an **open** `Card` (every field visible, no expand; an
   `investorProposal` shows the same field diff as a company proposal and links the firm), ending
   in one form whose Approve/Reject buttons pick the action via `formAction`. The reason is sent
-  only on reject. The web layer does no
+  only on reject. **Queue filters** (`SubmissionQuery`, all URL params, one `queueHref` helper
+  that drops `before` on every change): status pills; on a decided status a **Contributed /
+  Ingested** source pill (the web defaults to `contributed`; the API defaults to `all`, which
+  `/v1/submissions` keeps); type pills; a GET search box `q` matching the company (or, for an
+  investor edit, the firm) name through the trigram indexes; and `user=<id>`, the **per-user
+  view** — every submitter on a card links there, headed by a card from `GET /admin/users/:id`
+  (`AdminUserDetail`: counts per status and `accessFor`'s gate state, so a retraction's effect on
+  access shows at once). **Sort key** (`submissionSortKey`): decided contributed rows sort by
+  `reviewedAt` (newest decision first, served by `(moderationStatus, reviewedAt, id)`),
+  everything else by `createdAt`. Each decided card says "Approved/Rejected by <admin> · date".
+  **Retraction**: rejecting an APPROVED row (`notice.status` read before deciding) unpublishes it
+  and writes a whole-row `RETRACT` revision; rejecting an approved company or investor edit
+  (`revertProposal` / `revertInvestorProposal`) restores each field that still holds the
+  proposal's value (from its newest real `UPDATE` revision, or the investor proposal's
+  `previous`), re-adds the partner marks the approval removed (`clearedPartnerFields`; null =
+  approved before it was recorded → fail closed: a `PARTNER`-identified or `partnerOnly` row
+  re-marks every restored non-null value), writes one `RETRACT` revision per restored field,
+  deletes the field citations the approval minted (unless another approved proposal cites the
+  same URL for that field), and returns/logs `revertedFields` / `skippedFields`. No cascade: a
+  retracted company keeps its approved children. Access needs nothing extra — `accessFor` reads
+  approved rows live. The web layer does no
   per-action auth; the API's `@Roles('ADMIN')` on `AdminController` is the gate.
   `POST /admin/people/:id/suppress|unsuppress` exists in the API; its only web UI is
   Suppress & resolve on a person report (below).
@@ -541,9 +562,8 @@ the viewer is signed in, so they use `listAccess(viewer)` (no contribution looku
 Enforcement goes through **one module, `apps/api/src/gate/`**: `publicRowsWhere(access)` (the
 child-row filter, in its `OR` form because Prisma's `{ not: 'PARTNER' }` drops NULL-source rows),
 `maskPartnerFields` / `maskFields` (with per-entity blanks for non-nullable fields), `stubFor`,
-`takeFor`/`limitRows`, `listAccess`, `unmaskedFilters`, and `history.ts`'s `lockedHistoryWhere`
-(the history allowlist; `PUBLIC_INGEST_SOURCES` in `@repo/api` `provenance.ts` is explicit, so a
-new source stays hidden until added). Mappers stay pure: a service maps, then gates. Each
+`takeFor`/`limitRows`, `listAccess` and `unmaskedFilters`. (Company history needs none of it: it
+is CONTRIBUTOR/ADMIN only, see Routes.) Mappers stay pure: a service maps, then gates. Each
 section is capped **in the query** (`take`), so a gated row is never even loaded, and counts
 come from separate indexed `count()`s over every approved row. A new read has these to call.
 
@@ -693,6 +713,14 @@ or re-runs it by hand.
 `RecoveryCode` (sha256 only, `usedAt`); `AuthChallenge` (the sign-in steps; pruned an hour after
 expiry on each insert; `prod-cleanup.sql` drops them all from a dump).
 
+**Moderation decisions**: every contributable table carries `reviewedAt` / `reviewedById`
+(a plain id, not a relation — users are never deleted; `listSubmissions` names them with one
+lookup per page), written by every decision path (`moderate`, the ban sweep `rejectPending`)
+and indexed `(moderationStatus, reviewedAt, id)`. The `moderation_review` migration backfilled
+them from the `CREATE`/proposal revisions, else `updatedAt` (reviewer unknown), so every
+contributed decided row has a `reviewedAt`; ingested rows stay null. `ChangeProposal` /
+`InvestorChangeProposal.clearedPartnerFields` records the partner marks an approval removed.
+
 `ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,
 `allowedCidrs`, `lastUsedAt` debounced to once a minute, `revokedAt`); `InvestorChangeProposal`
 holds investor-firm edits (see Backend). `Company.domain` is indexed for `?domain=`.
@@ -731,7 +759,10 @@ stays narrow.
   captures the before-state *inside* the transaction (applying a diff destroys what it
   replaces), `moderate` writes a `CREATE` entry per newly published row, and
   `IngestService.writeCompany` records enrichment/own-key updates as `actor: 'INGEST'`.
-  Rejections write nothing; the row never became public.
+  Rejecting a PENDING row writes nothing; it never became public. Rejecting an **APPROVED** one
+  is a retraction and writes `RETRACT` entries (`field: ''` with the row as `before` and a
+  JsonNull `after`; or, for an edit, one per restored field with the proposal's value → the
+  restored one), rendered "retracted" / "<field> reverted" on the history page.
 - Values entering `before`/`after` must go through **`toJsonValue`** (`@repo/db`):
   `BigInt` → `Number` (money columns would throw in `JSON.stringify`), `Date` → ISO, and a
   genuine null → `Prisma.JsonNull`, never bare `null` (which means SQL NULL, i.e. "not

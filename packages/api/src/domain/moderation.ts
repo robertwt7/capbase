@@ -49,7 +49,34 @@ export interface PendingSubmission {
   sourceUrl: string | null;
   /** The contribution payload itself. */
   data: unknown;
+  /** When an admin decided it; null while PENDING and for ingested rows. */
+  reviewedAt: string | null;
+  /** Who decided it (display name only); null when unknown. */
+  reviewedBy: { id: string; name: string } | null;
 }
+
+/** Who wrote a row: a person (website or API key) or an ingest source. */
+export const SUBMISSION_SOURCES = ['contributed', 'ingested', 'all'] as const;
+export type SubmissionSource = (typeof SUBMISSION_SOURCES)[number];
+
+/** One page request of the submission queue. */
+export interface SubmissionQuery {
+  status: ReviewStatus;
+  type?: ReviewableType;
+  /** `nextCursor` from the previous page. */
+  before?: string;
+  /** Default 'all' at the API (what /v1 has always returned); the web sends 'contributed'. */
+  source?: SubmissionSource;
+  /** One contributor's rows; implies 'contributed'. */
+  userId?: string;
+  /** Company (or, for an investor edit, firm) name, SUBMISSION_QUERY_MIN..MAX chars. */
+  q?: string;
+}
+
+/** Shortest name search the queue applies; anything shorter is ignored. */
+export const SUBMISSION_QUERY_MIN = 2;
+/** Longest name search the queue accepts (400 past it). */
+export const SUBMISSION_QUERY_MAX = 100;
 
 /** Rows per page of the submission queue. Never unbounded: APPROVED holds
  *  every ingested row (hundreds of thousands), and loading them all ran the API

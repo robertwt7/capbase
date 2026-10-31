@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import {
   DEFAULT_PAGE_SIZE,
   type AdminUser,
+  type AdminUserDetail,
   type AdminUserListQuery,
   type Paginated,
+  type ReviewStatus,
   type UpdateUserInput,
 } from '@repo/api';
 import { Prisma } from '@repo/db';
@@ -12,6 +14,7 @@ import { ApiKeysService } from '../../api-keys/api-keys.service';
 import { SecurityEvent } from '../../auth/mfa/mfa.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UsersService } from '../../users/users.service';
 
 const userSelect = {
   id: true,
@@ -38,6 +41,10 @@ const CONTRIBUTION_TABLES = [
 
 type UserRow = Prisma.UserGetPayload<{ select: typeof userSelect }>;
 
+type ContributionCounts = Record<ReviewStatus, number>;
+
+const NO_CONTRIBUTIONS: ContributionCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0 };
+
 /** The user-moderation half of the admin portal: list, ban, change role, reset 2FA. */
 @Injectable()
 export class AdminUsersService {
@@ -45,6 +52,7 @@ export class AdminUsersService {
     private readonly prisma: PrismaService,
     private readonly apiKeys: ApiKeysService,
     private readonly mail: MailService,
+    private readonly usersService: UsersService,
   ) {}
 
   async list(query: AdminUserListQuery = {}): Promise<Paginated<AdminUser>> {
@@ -70,9 +78,9 @@ export class AdminUsersService {
       }),
       this.prisma.user.count({ where }),
     ]);
-    const pending = await this.pendingCounts(rows.map((r) => r.id));
+    const counts = await this.contributionCounts(rows.map((r) => r.id));
     return {
-      items: rows.map((r) => this.toAdminUser(r, pending.get(r.id) ?? 0)),
+      items: rows.map((r) => this.toAdminUser(r, counts.get(r.id))),
       total,
       page,
       pageSize,
@@ -112,15 +120,31 @@ export class AdminUsersService {
     };
 
     const row = await this.prisma.$transaction(async (tx) => {
-      if (banning) await this.rejectPending(tx, id);
+      if (banning) await this.rejectPending(tx, id, actorId);
       const updated = await tx.user.update({ where: { id }, data, select: userSelect });
       if (input.role !== undefined || input.banned !== undefined) {
         await this.apiKeys.revokeForRole(tx, id, updated.role, updated.bannedAt !== null);
       }
       return updated;
     });
-    const pending = await this.pendingCounts([id]);
-    return this.toAdminUser(row, pending.get(id) ?? 0);
+    const counts = await this.contributionCounts([id]);
+    return this.toAdminUser(row, counts.get(id));
+  }
+
+  /**
+   * One account for the moderator's per-user queue: its submissions counted in every
+   * status, and the gate state those give it right now (`UsersService.accessFor`, the
+   * one definition — so rejecting their only approved row shows as locked here at once).
+   */
+  async detail(id: string): Promise<AdminUserDetail> {
+    const row = await this.prisma.user.findUnique({ where: { id }, select: userSelect });
+    if (!row) throw new NotFoundException('User not found');
+    const [counts, access] = await Promise.all([
+      this.contributionCounts([id]),
+      this.usersService.accessFor({ id: row.id, role: row.role }),
+    ]);
+    const contributions = counts.get(id) ?? NO_CONTRIBUTIONS;
+    return { ...this.toAdminUser(row, contributions), access, contributions };
   }
 
   /**
@@ -155,13 +179,22 @@ export class AdminUsersService {
     });
     // After the commit and un-awaited, like every other email: it never fails the reset.
     void this.mail.sendSecurityNotice(row.email, row.name, SecurityEvent.adminReset);
-    const pending = await this.pendingCounts([id]);
-    return this.toAdminUser(row, pending.get(id) ?? 0);
+    const counts = await this.contributionCounts([id]);
+    return this.toAdminUser(row, counts.get(id));
   }
 
-  private async rejectPending(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  /** The ban sweep: every PENDING row the user has, REJECTED by the banning admin. */
+  private async rejectPending(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    adminUserId: string,
+  ): Promise<void> {
     const where = { submittedById: userId, moderationStatus: 'PENDING' as const };
-    const data = { moderationStatus: 'REJECTED' as const };
+    const data = {
+      moderationStatus: 'REJECTED' as const,
+      reviewedAt: new Date(),
+      reviewedById: adminUserId,
+    };
     await Promise.all([
       tx.company.updateMany({ where, data }),
       tx.fundingRound.updateMany({ where, data }),
@@ -175,23 +208,29 @@ export class AdminUsersService {
     ]);
   }
 
-  /** PENDING submissions per user across every contributable table, in one query. */
-  private async pendingCounts(userIds: string[]): Promise<Map<string, number>> {
+  /** Submissions per user and status across every contributable table, in one query. */
+  private async contributionCounts(userIds: string[]): Promise<Map<string, ContributionCounts>> {
     if (userIds.length === 0) return new Map();
     const ids = Prisma.join(userIds);
     const branches = CONTRIBUTION_TABLES.map(
       (table) => Prisma.sql`
-        SELECT "submittedById" FROM ${Prisma.raw(`"${table}"`)}
-        WHERE "moderationStatus" = 'PENDING' AND "submittedById" IN (${ids})`,
+        SELECT "submittedById", "moderationStatus" FROM ${Prisma.raw(`"${table}"`)}
+        WHERE "submittedById" IN (${ids})`,
     );
-    const rows = await this.prisma.$queryRaw<{ id: string; n: number }[]>`
-      SELECT "submittedById" AS id, COUNT(*)::int AS n
-      FROM (${Prisma.join(branches, ' UNION ALL ')}) pending
-      GROUP BY "submittedById"`;
-    return new Map(rows.map((r) => [r.id, r.n]));
+    const rows = await this.prisma.$queryRaw<{ id: string; status: ReviewStatus; n: number }[]>`
+      SELECT "submittedById" AS id, "moderationStatus"::text AS status, COUNT(*)::int AS n
+      FROM (${Prisma.join(branches, ' UNION ALL ')}) contributions
+      GROUP BY "submittedById", "moderationStatus"`;
+    const counts = new Map<string, ContributionCounts>();
+    for (const r of rows) {
+      const user = counts.get(r.id) ?? { ...NO_CONTRIBUTIONS };
+      user[r.status] = r.n;
+      counts.set(r.id, user);
+    }
+    return counts;
   }
 
-  private toAdminUser(row: UserRow, pendingCount: number): AdminUser {
+  private toAdminUser(row: UserRow, counts: ContributionCounts = NO_CONTRIBUTIONS): AdminUser {
     return {
       id: row.id,
       email: row.email,
@@ -199,7 +238,8 @@ export class AdminUsersService {
       role: row.role,
       bannedAt: row.bannedAt ? row.bannedAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
-      pendingCount,
+      pendingCount: counts.PENDING,
+      approvedCount: counts.APPROVED,
       mfaEnabled: row.mfaEnabledAt !== null,
     };
   }

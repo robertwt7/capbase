@@ -8,6 +8,7 @@ import { SecurityEvent } from '../../auth/mfa/mfa.service';
 import { MfaPolicy } from '../../auth/mfa/policy';
 import type { MailService } from '../../mail/mail.service';
 import type { PrismaService } from '../../prisma/prisma.service';
+import type { UsersService } from '../../users/users.service';
 import { AdminUsersService } from './admin-users.service';
 
 const CONTRIBUTABLE = [
@@ -50,17 +51,23 @@ function prismaFor(existing: typeof baseUser | null) {
   const prisma = {
     user: { findUnique: jest.fn(async () => existing) },
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
-    $queryRaw: jest.fn(async () => [{ id: 'u1', n: 3 }]),
+    $queryRaw: jest.fn(async () => [
+      { id: 'u1', status: 'PENDING', n: 3 },
+      { id: 'u1', status: 'APPROVED', n: 2 },
+    ]),
   };
   return { prisma: prisma as unknown as PrismaService, tx };
 }
 
 const mail = { sendSecurityNotice: jest.fn(async () => undefined) };
+const access = { unlocked: true, signedIn: true, unlockedUntil: '2026-02-01T00:00:00.000Z' };
+const users = { accessFor: jest.fn(async () => access) };
 const serviceFor = (prisma: PrismaService) =>
   new AdminUsersService(
     prisma,
     new ApiKeysService(prisma, new MfaPolicy(new ConfigService({}))),
     mail as unknown as MailService,
+    users as unknown as UsersService,
   );
 
 type Mocked = { updateMany: jest.Mock };
@@ -71,7 +78,7 @@ const keyRevocations = (tx: Record<string, unknown>) =>
 type UserTx = { user: { update: jest.Mock } };
 
 describe('AdminUsersService.update', () => {
-  it('bans: stamps bannedAt, revokes sessions and rejects every pending row', async () => {
+  it('bans: stamps bannedAt, revokes sessions and rejects every pending row as the admin', async () => {
     const { prisma, tx } = prismaFor(baseUser);
     const result = await serviceFor(prisma).update('u1', { banned: true }, 'admin');
 
@@ -83,10 +90,11 @@ describe('AdminUsersService.update', () => {
     for (const m of CONTRIBUTABLE) {
       expect((tx[m] as Mocked).updateMany).toHaveBeenCalledWith({
         where: { submittedById: 'u1', moderationStatus: 'PENDING' },
-        data: { moderationStatus: 'REJECTED' },
+        data: { moderationStatus: 'REJECTED', reviewedAt: expect.any(Date), reviewedById: 'admin' },
       });
     }
     expect(result.pendingCount).toBe(3);
+    expect(result.approvedCount).toBe(2);
   });
 
   it('unbans without touching submissions or sessions', async () => {
@@ -190,5 +198,20 @@ describe('AdminUsersService.resetMfa', () => {
   it('404s an unknown user', async () => {
     const { prisma } = prismaFor(null);
     await expect(serviceFor(prisma).resetMfa('nope', 'admin')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('AdminUsersService.detail', () => {
+  it('counts every status and reports the gate state accessFor gives the account', async () => {
+    const { prisma } = prismaFor(baseUser);
+    const result = await serviceFor(prisma).detail('u1');
+    expect(result.contributions).toEqual({ PENDING: 3, APPROVED: 2, REJECTED: 0 });
+    expect(result).toMatchObject({ id: 'u1', pendingCount: 3, approvedCount: 2, access });
+    expect(users.accessFor).toHaveBeenCalledWith({ id: 'u1', role: 'USER' });
+  });
+
+  it('404s an unknown user', async () => {
+    const { prisma } = prismaFor(null);
+    await expect(serviceFor(prisma).detail('nope')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

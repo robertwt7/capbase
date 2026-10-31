@@ -18,7 +18,7 @@ export interface RevisionInput {
   field: string;
   before: JsonColumnValue;
   after: JsonColumnValue;
-  action: 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE';
+  action: 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT';
   actor: 'USER' | 'ADMIN' | 'INGEST';
   actorUserId?: string | null;
   actorSource?: string | null;
@@ -41,6 +41,28 @@ export function createRevision(args: {
     before: toJsonValue(null),
     after: toJsonValue(args.after),
     action: 'CREATE',
+    actor: 'ADMIN',
+    actorUserId: args.actorUserId,
+  };
+}
+
+/** A whole-row RETRACT entry: an approved row was rejected, so it left the profile. `before` is
+    what it showed; there is no `after`. */
+export function retractRevision(args: {
+  companyId: string;
+  entityType: RevisableType;
+  entityId: string;
+  before: unknown;
+  actorUserId: string;
+}): RevisionInput {
+  return {
+    companyId: args.companyId,
+    entityType: args.entityType,
+    entityId: args.entityId,
+    field: '',
+    before: toJsonValue(args.before),
+    after: toJsonValue(null),
+    action: 'RETRACT',
     actor: 'ADMIN',
     actorUserId: args.actorUserId,
   };

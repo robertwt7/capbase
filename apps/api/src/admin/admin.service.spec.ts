@@ -1,6 +1,8 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
-import { AdminService } from './admin.service';
+import type { PendingSubmission, SubmissionQuery } from '@repo/api';
+
+import { AdminService, bySubmissionOrder, submissionSortKey } from './admin.service';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_REJECTION_REASON } from './submission-notice';
@@ -163,7 +165,12 @@ describe('AdminService.moderate (proposal)', () => {
     });
     expect(tx.changeProposal.update).toHaveBeenCalledWith({
       where: { id: 'p1' },
-      data: { moderationStatus: 'APPROVED' },
+      data: {
+        moderationStatus: 'APPROVED',
+        reviewedAt: expect.any(Date),
+        reviewedById: 'admin1',
+        clearedPartnerFields: [],
+      },
     });
     expect(result).toEqual({
       id: 'p1',
@@ -182,6 +189,10 @@ describe('AdminService.moderate (proposal)', () => {
       where: { id: 'c1' },
       data: { hq: 'Berlin', partnerFields: ['description'] },
     });
+    // Recorded so a retraction can mask the partner's value again.
+    expect(tx.changeProposal.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ clearedPartnerFields: ['hq'] }) }),
+    );
   });
 
   it('records one revision per changed field, with the pre-change value', async () => {
@@ -248,7 +259,7 @@ describe('AdminService.moderate (proposal)', () => {
     expect(prisma.company.update).not.toHaveBeenCalled();
     expect(prisma.changeProposal.update).toHaveBeenCalledWith({
       where: { id: 'p1' },
-      data: { moderationStatus: 'REJECTED' },
+      data: { moderationStatus: 'REJECTED', reviewedAt: expect.any(Date), reviewedById: 'admin1' },
     });
   });
 });
@@ -272,7 +283,7 @@ describe('AdminService.moderate (contributed rows)', () => {
     expect(tx.fundingRound.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'r1' },
-        data: { moderationStatus: 'APPROVED' },
+        data: { moderationStatus: 'APPROVED', reviewedAt: expect.any(Date), reviewedById: 'admin1' },
       }),
     );
     const data = revisionData(tx.revision.create.mock.calls[0]![0]);
@@ -616,18 +627,27 @@ describe('AdminService.listSubmissions (paging)', () => {
   type Row = { id: string; moderationStatus: string; createdAt: Date } & Record<string, unknown>;
   type Where = Record<string, unknown>;
 
-  /** Just enough of Prisma's filter semantics for the cursor: equality,
-   *  `lt`/`lte` on dates and ids, and `OR`. */
+  /** Just enough of Prisma's filter semantics for the queue: equality (null
+   *  included), `lt`/`lte` on dates and ids, `{ not: null }`, case-insensitive
+   *  `contains`, a relation filter, and `OR`/`AND`. */
   function matches(row: Row, where: Where): boolean {
     return Object.entries(where).every(([key, cond]) => {
       if (key === 'OR') return (cond as Where[]).some((w) => matches(row, w));
-      const value = row[key] as Date | string;
+      if (key === 'AND') return (cond as Where[]).every((w) => matches(row, w));
+      const value = row[key];
       const n = (v: unknown) => (v instanceof Date ? v.getTime() : (v as string));
-      if (cond instanceof Date) return n(value) === cond.getTime();
-      if (cond !== null && typeof cond === 'object') {
-        const { lt, lte } = cond as { lt?: unknown; lte?: unknown };
-        if (lt !== undefined) return n(value) < n(lt);
-        if (lte !== undefined) return n(value) <= n(lte);
+      if (cond === null) return value === null || value === undefined;
+      if (cond instanceof Date) return value instanceof Date && value.getTime() === cond.getTime();
+      if (typeof cond === 'object') {
+        const c = cond as { lt?: unknown; lte?: unknown; not?: null; contains?: string };
+        if ('not' in c) return value !== null && value !== undefined;
+        if (c.contains !== undefined) {
+          return typeof value === 'string' && value.toLowerCase().includes(c.contains.toLowerCase());
+        }
+        if (value === null || value === undefined) return false;
+        if (c.lt !== undefined) return n(value) < n(c.lt);
+        if (c.lte !== undefined) return n(value) <= n(c.lte);
+        return typeof value === 'object' && matches(value as Row, c as Where);
       }
       return value === cond;
     });
@@ -635,12 +655,16 @@ describe('AdminService.listSubmissions (paging)', () => {
 
   function table(rows: Row[]) {
     return {
-      findMany: jest.fn(async ({ where, take }: { where: Where; take: number }) =>
-        rows
-          .filter((r) => matches(r, where))
-          // orderBy [createdAt desc, id desc]
-          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1))
-          .slice(0, take),
+      findMany: jest.fn(
+        async ({ where, take, orderBy }: { where: Where; take: number; orderBy: Where[] }) => {
+          const key = Object.keys(orderBy[0]!)[0]!;
+          const t = (r: Row) => (r[key] as Date).getTime();
+          return rows
+            .filter((r) => matches(r, where))
+            // orderBy [<key> desc, id desc]
+            .sort((a, b) => t(b) - t(a) || (a.id < b.id ? 1 : -1))
+            .slice(0, take);
+        },
       ),
       count: jest.fn(async ({ where }: { where: Where }) =>
         rows.filter((r) => matches(r, where)).length,
@@ -706,7 +730,7 @@ describe('AdminService.listSubmissions (paging)', () => {
     const seen: string[] = [];
     let before: string | undefined;
     for (let pages = 0; pages < 10; pages++) {
-      const res = await service.listSubmissions('APPROVED', type, before);
+      const res = await service.listSubmissions({ status: 'APPROVED', type, before });
       expect(res.items.length).toBeLessThanOrEqual(50);
       seen.push(...res.items.map((i) => i.id));
       if (!res.nextCursor) return { seen, last: res };
@@ -743,7 +767,7 @@ describe('AdminService.listSubmissions (paging)', () => {
     expect(new Set(seen).size).toBe(150);
     expect(seen.filter((id) => id.startsWith('i'))).toHaveLength(20);
 
-    const res = await service.listSubmissions('APPROVED', 'investorProposal');
+    const res = await service.listSubmissions({ status: 'APPROVED', type: 'investorProposal' });
     expect(res.total).toBe(20);
     expect(res.countsByType.investorProposal).toBe(20);
     expect(res.items[0]).toMatchObject({
@@ -763,7 +787,7 @@ describe('AdminService.listSubmissions (paging)', () => {
 
   it('reports true totals, not the page size', async () => {
     const { service } = makeService();
-    const res = await service.listSubmissions('APPROVED');
+    const res = await service.listSubmissions({ status: 'APPROVED' });
     expect(res.items).toHaveLength(50);
     expect(res.total).toBe(130);
     expect(res.countsByType).toMatchObject({ exit: 70, diversity: 60, company: 0 });
@@ -780,12 +804,172 @@ describe('AdminService.listSubmissions (paging)', () => {
 
   it('rejects a malformed cursor', async () => {
     const { service } = makeService();
-    await expect(service.listSubmissions('APPROVED', undefined, 'nonsense')).rejects.toThrow(
-      'Invalid cursor',
-    );
     await expect(
-      service.listSubmissions('APPROVED', undefined, '2026-10-01T00:00:00.000Z_bogus_x1'),
+      service.listSubmissions({ status: 'APPROVED', before: 'nonsense' }),
     ).rejects.toThrow('Invalid cursor');
+    await expect(
+      service.listSubmissions({
+        status: 'APPROVED',
+        before: '2026-10-01T00:00:00.000Z_bogus_x1',
+      }),
+    ).rejects.toThrow('Invalid cursor');
+  });
+
+  describe('filters and the decision-time sort', () => {
+    const day = (d: number, h = 0) => new Date(Date.UTC(2026, 9, d, h));
+    const helia = { slug: 'helia', name: 'Helia Energy' };
+    const quill = { slug: 'quill', name: 'Quill' };
+    // Contributed, decided: createdAt and reviewedAt disagree on the order, and
+    // three reviewedAt values cover 40 rows, so pages break inside ties.
+    const contributedRounds: Row[] = Array.from({ length: 40 }, (_, i) => ({
+      id: `r${String(i).padStart(3, '0')}`,
+      moderationStatus: 'APPROVED',
+      createdAt: day(1 + (i % 7)),
+      reviewedAt: day(20 + (i % 3)),
+      reviewedById: 'admin1',
+      submittedById: i % 2 ? 'u1' : 'u2',
+      submittedBy: { id: i % 2 ? 'u1' : 'u2', name: 'U', email: 'u@test.dev' },
+      name: 'Seed',
+      date: new Date('2024-01-01'),
+      amountUsd: 1n,
+      postMoneyUsd: null,
+      lead: null,
+      investors: [],
+      company: i % 4 === 0 ? helia : quill,
+    }));
+    const contributedExits: Row[] = Array.from({ length: 30 }, (_, i) => ({
+      id: `e${String(i).padStart(3, '0')}`,
+      moderationStatus: 'APPROVED',
+      createdAt: day(2 + (i % 5)),
+      reviewedAt: day(20 + (i % 3)),
+      reviewedById: 'admin2',
+      submittedById: 'u1',
+      type: 'IPO',
+      date: new Date('2024-01-01'),
+      valueUsd: null,
+      detail: '',
+      company: quill,
+    }));
+    // Ingested: no submitter, never decided, and the newest createdAt of all.
+    const ingestedRounds: Row[] = Array.from({ length: 30 }, (_, i) => ({
+      id: `g${String(i).padStart(3, '0')}`,
+      moderationStatus: 'APPROVED',
+      createdAt: day(25, i % 4),
+      reviewedAt: null,
+      reviewedById: null,
+      submittedById: null,
+      name: 'Form D',
+      date: new Date('2024-01-01'),
+      amountUsd: 1n,
+      postMoneyUsd: null,
+      lead: null,
+      investors: [],
+      company: helia,
+    }));
+
+    function filteredService() {
+      const prisma = {
+        company: table([]),
+        fundingRound: table([...contributedRounds, ...ingestedRounds]),
+        personRole: table([]),
+        investorHolding: table([]),
+        acquisitionDeal: table([]),
+        exitEvent: table(contributedExits),
+        diversitySignal: table([]),
+        changeProposal: table([]),
+        investorChangeProposal: table([]),
+        citation: { findMany: jest.fn(async () => []) },
+        user: {
+          findMany: jest.fn(async () => [
+            { id: 'admin1', name: 'Ada Admin' },
+            { id: 'admin2', name: 'Bo Admin' },
+          ]),
+        },
+      };
+      return {
+        prisma,
+        service: new AdminService(prisma as unknown as PrismaService, {} as MailService),
+      };
+    }
+
+    async function walkAll(service: AdminService, query: Omit<SubmissionQuery, 'before'>) {
+      const items: PendingSubmission[] = [];
+      let before: string | undefined;
+      for (let pages = 0; pages < 10; pages++) {
+        const res = await service.listSubmissions({ ...query, before });
+        items.push(...res.items);
+        if (!res.nextCursor) return { items, first: res };
+        before = res.nextCursor;
+      }
+      throw new Error('never reached the last page');
+    }
+
+    it('picks the sort key from status and source', () => {
+      expect(submissionSortKey({ status: 'APPROVED', source: 'contributed' })).toBe('reviewedAt');
+      expect(submissionSortKey({ status: 'REJECTED', userId: 'u1' })).toBe('reviewedAt');
+      expect(submissionSortKey({ status: 'PENDING', source: 'contributed' })).toBe('createdAt');
+      expect(submissionSortKey({ status: 'APPROVED', source: 'ingested' })).toBe('createdAt');
+      expect(submissionSortKey({ status: 'APPROVED' })).toBe('createdAt');
+    });
+
+    it('walks contributed rows newest decision first, across ties and tables, once each', async () => {
+      const { service } = filteredService();
+      const { items } = await walkAll(service, { status: 'APPROVED', source: 'contributed' });
+
+      expect(items).toHaveLength(70);
+      expect(new Set(items.map((i) => i.id)).size).toBe(70);
+      const expected = [...items].sort(bySubmissionOrder('reviewedAt')).map((i) => i.id);
+      expect(items.map((i) => i.id)).toEqual(expected);
+      // Ordered by the decision, not by when it was submitted.
+      expect(items[0]!.reviewedAt).toBe(day(22).toISOString());
+      expect(items.some((i) => i.id.startsWith('g'))).toBe(false);
+    });
+
+    it('names each decider with one lookup per page', async () => {
+      const { service, prisma } = filteredService();
+      const res = await service.listSubmissions({ status: 'APPROVED', source: 'contributed' });
+      expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
+      const round = res.items.find((i) => i.type === 'round')!;
+      const exit = res.items.find((i) => i.type === 'exit')!;
+      expect(round.reviewedBy).toEqual({ id: 'admin1', name: 'Ada Admin' });
+      expect(exit.reviewedBy).toEqual({ id: 'admin2', name: 'Bo Admin' });
+    });
+
+    it('lists only ingested rows under source=ingested, by createdAt', async () => {
+      const { service } = filteredService();
+      const { items, first } = await walkAll(service, { status: 'APPROVED', source: 'ingested' });
+      expect(items.map((i) => i.id).sort()).toEqual(ingestedRounds.map((r) => r.id).sort());
+      expect(first.countsByType).toMatchObject({ round: 30, exit: 0 });
+      expect(items.every((i) => i.reviewedBy === null && i.reviewedAt === null)).toBe(true);
+    });
+
+    it('lists both under source=all (the /v1 default), counts included', async () => {
+      const { service } = filteredService();
+      const res = await service.listSubmissions({ status: 'APPROVED', source: 'all' });
+      expect(res.total).toBe(100);
+      // createdAt order: the ingested rows are newest.
+      expect(res.items[0]!.id.startsWith('g')).toBe(true);
+    });
+
+    it('narrows to one contributor in every table, counts following', async () => {
+      const { service } = filteredService();
+      const { items, first } = await walkAll(service, { status: 'APPROVED', userId: 'u2' });
+      expect(items).toHaveLength(20);
+      expect(items.every((i) => i.submittedBy?.id === 'u2')).toBe(true);
+      expect(first.countsByType).toMatchObject({ round: 20, exit: 0 });
+    });
+
+    it("matches a child row through its company's name, case-insensitively", async () => {
+      const { service } = filteredService();
+      const { items, first } = await walkAll(service, {
+        status: 'APPROVED',
+        source: 'contributed',
+        q: 'HELIA',
+      });
+      expect(items).toHaveLength(10);
+      expect(items.every((i) => i.companyName === 'Helia Energy')).toBe(true);
+      expect(first.countsByType).toMatchObject({ round: 10, exit: 0 });
+    });
   });
 });
 
@@ -880,7 +1064,10 @@ describe('AdminService.moderate (investor proposal)', () => {
       where: { id: 'ip1' },
       data: {
         moderationStatus: 'APPROVED',
+        reviewedAt: expect.any(Date),
+        reviewedById: 'a1',
         previous: { websiteUrl: 'http://old.example', hq: 'Menlo Park' },
+        clearedPartnerFields: [],
       },
     });
     // A firm has no company timeline and no firm-level citations.
@@ -903,7 +1090,7 @@ describe('AdminService.moderate (investor proposal)', () => {
     await newService(prisma).moderate('investorProposal', 'ip1', 'REJECTED', 'a1');
     expect(prisma.investorChangeProposal.update).toHaveBeenCalledWith({
       where: { id: 'ip1' },
-      data: { moderationStatus: 'REJECTED' },
+      data: { moderationStatus: 'REJECTED', reviewedAt: expect.any(Date), reviewedById: 'a1' },
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.investor.update).not.toHaveBeenCalled();
@@ -1012,6 +1199,363 @@ describe('AdminService.moderate directory counts', () => {
       id: 'c1',
       type: 'company',
       moderationStatus: 'APPROVED',
+    });
+  });
+});
+
+describe('AdminService.moderate (retracting an approval)', () => {
+  const approvedRound = {
+    moderationStatus: 'APPROVED',
+    name: 'Series B',
+    company: { slug: 'helia', name: 'Helia' },
+    submittedBy: null,
+  };
+  const round = {
+    id: 'r1',
+    companyId: 'c1',
+    name: 'Series B',
+    date: new Date('2024-03-01'),
+    amountUsd: 75_000_000n,
+    postMoneyUsd: null,
+    lead: null,
+    investors: [],
+  };
+
+  it('writes one RETRACT entry carrying what the profile showed', async () => {
+    const { prisma, tx } = makeRowPrisma(round, null, approvedRound);
+
+    await newService(prisma).moderate('round', 'r1', 'REJECTED', 'admin1');
+
+    expect(tx.revision.create).toHaveBeenCalledTimes(1);
+    const data = revisionData(tx.revision.create.mock.calls[0]![0]);
+    expect(data).toMatchObject({
+      companyId: 'c1',
+      entityType: 'round',
+      entityId: 'r1',
+      field: '',
+      action: 'RETRACT',
+      actor: 'ADMIN',
+      actorUserId: 'admin1',
+    });
+    expect(data.before).toMatchObject({ name: 'Series B', amountUsd: 75_000_000 });
+    // No after-state: the row left the profile. JsonNull, never SQL NULL.
+    expect(data.after).not.toBeNull();
+    expect(tx.fundingRound.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { moderationStatus: 'REJECTED', reviewedAt: expect.any(Date), reviewedById: 'admin1' },
+      }),
+    );
+  });
+
+  it('leaves the Person a retracted role resolved', async () => {
+    const { prisma, tx } = makeRowPrisma(
+      { id: 'x1', companyId: 'c1', personId: 'h1', name: 'Jane Smith' },
+      null,
+      { ...approvedRound, role: 'CEO' },
+    );
+    await newService(prisma).moderate('person', 'x1', 'REJECTED', 'admin1');
+    expect(tx.person.findFirst).not.toHaveBeenCalled();
+    expect(tx.personRole.update).toHaveBeenCalledTimes(1);
+    expect(revisionData(tx.revision.create.mock.calls[0]![0])).toMatchObject({ action: 'RETRACT' });
+  });
+
+  /** A Prisma double for rejecting an APPROVED edit proposal. */
+  function makeRevertPrisma(opts: {
+    changes: Record<string, unknown>;
+    company?: Record<string, unknown>;
+    revisions: { field: string; before: unknown; after: unknown }[];
+    proposal?: Record<string, unknown>;
+    partnerIdentifiers?: number;
+    otherProposals?: { changes: Record<string, unknown> }[];
+  }) {
+    const company = { ...dbCompany(), partnerFields: [], partnerOnly: false, ...opts.company };
+    const tx = {
+      changeProposal: {
+        findUniqueOrThrow: jest.fn(async () => ({
+          id: 'p1',
+          companyId: 'c1',
+          changes: opts.changes,
+          sourceUrl: null,
+          submittedById: 'u1',
+          clearedPartnerFields: [],
+          company,
+          ...opts.proposal,
+        })),
+        findMany: jest.fn(async () => opts.otherProposals ?? []),
+        update: jest.fn(async () => ({})),
+      },
+      company: { update: jest.fn(async () => ({})) },
+      revision: {
+        // Newest first, as the query orders them.
+        findMany: jest.fn(async () => opts.revisions),
+        createMany: jest.fn(async () => ({})),
+      },
+      entityIdentifier: { count: jest.fn(async () => opts.partnerIdentifiers ?? 0) },
+      source: { findUnique: jest.fn(async () => ({ id: 's1' })) },
+      citation: { deleteMany: jest.fn(async () => ({ count: 1 })) },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+      $executeRaw: jest.fn(async () => 0),
+      changeProposal: {
+        update: jest.fn(async () => ({})),
+        findUnique: jest.fn(async () => ({
+          moderationStatus: 'APPROVED',
+          changes: opts.changes,
+          company: { slug: 'helia', name: 'Helia' },
+          submittedBy: null,
+        })),
+      },
+    };
+    return { prisma, tx };
+  }
+
+  const companyUpdate = (tx: ReturnType<typeof makeRevertPrisma>['tx']) =>
+    (tx.company.update.mock.calls[0]![0] as unknown as { data: Record<string, unknown> }).data;
+
+  it('restores only the fields still showing its value, money back to BigInt', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin', headcount: 42, totalRaisedUsd: 5000 },
+      // headcount was edited again after the approval.
+      company: { hq: 'Berlin', headcount: 50, totalRaisedUsd: 5000n },
+      revisions: [
+        { field: 'hq', before: 'SF', after: 'Berlin' },
+        { field: 'headcount', before: 10, after: 42 },
+        { field: 'totalRaisedUsd', before: 1000, after: 5000 },
+      ],
+    });
+
+    const result = await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+
+    expect(result).toEqual({
+      id: 'p1',
+      type: 'proposal',
+      moderationStatus: 'REJECTED',
+      revertedFields: ['hq', 'totalRaisedUsd'],
+      skippedFields: ['headcount'],
+    });
+    expect(companyUpdate(tx)).toEqual({ hq: 'SF', totalRaisedUsd: 1000n });
+    const rows = (tx.revision.createMany.mock.calls[0]![0] as unknown as {
+      data: Record<string, unknown>[];
+    }).data;
+    expect(rows).toEqual([
+      expect.objectContaining({
+        field: 'hq',
+        before: 'Berlin',
+        after: 'SF',
+        action: 'RETRACT',
+        actor: 'ADMIN',
+        actorUserId: 'admin1',
+        proposalId: 'p1',
+      }),
+      expect.objectContaining({ field: 'totalRaisedUsd', before: 5000, after: 1000 }),
+    ]);
+    expect(tx.changeProposal.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { moderationStatus: 'REJECTED', reviewedAt: expect.any(Date), reviewedById: 'admin1' },
+    });
+  });
+
+  it('restores a null it replaced as SQL null on the row and JsonNull in the history', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { lastValuationUsd: 9000 },
+      company: { lastValuationUsd: 9000n },
+      revisions: [{ field: 'lastValuationUsd', before: null, after: 9000 }],
+    });
+    await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    expect(companyUpdate(tx)).toEqual({ lastValuationUsd: null });
+    const [row] = (tx.revision.createMany.mock.calls[0]![0] as unknown as {
+      data: Record<string, unknown>[];
+    }).data;
+    expect(row!.after).not.toBeNull();
+    expect(row!.before).toBe(9000);
+  });
+
+  it('goes back past a re-approval that changed nothing', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin' },
+      company: { hq: 'Berlin' },
+      revisions: [
+        { field: 'hq', before: 'Berlin', after: 'Berlin' },
+        { field: 'hq', before: 'SF', after: 'Berlin' },
+      ],
+    });
+    await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    expect(companyUpdate(tx)).toEqual({ hq: 'SF' });
+  });
+
+  it('re-marks the partner fields the approval cleared, only for fields it reverts', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin', headcount: 42 },
+      company: { hq: 'Berlin', headcount: 50, partnerFields: ['description'] },
+      revisions: [
+        { field: 'hq', before: 'SF', after: 'Berlin' },
+        { field: 'headcount', before: 10, after: 42 },
+      ],
+      proposal: { clearedPartnerFields: ['hq', 'headcount'] },
+    });
+    await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    expect(companyUpdate(tx)).toEqual({ hq: 'SF', partnerFields: ['description', 'hq'] });
+    expect(tx.entityIdentifier.count).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for an approval that predates the record: a partner-touched row re-marks every restored value', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin', lastValuationUsd: 9000 },
+      company: { hq: 'Berlin', lastValuationUsd: 9000n },
+      revisions: [
+        { field: 'hq', before: 'SF', after: 'Berlin' },
+        { field: 'lastValuationUsd', before: null, after: 9000 },
+      ],
+      proposal: { clearedPartnerFields: null },
+      partnerIdentifiers: 1,
+    });
+    await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    // A restored null has nothing to mask.
+    expect(companyUpdate(tx)).toMatchObject({ partnerFields: ['hq'] });
+  });
+
+  it('marks nothing for a legacy approval on a row the partner never touched', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin' },
+      company: { hq: 'Berlin' },
+      revisions: [{ field: 'hq', before: 'SF', after: 'Berlin' }],
+      proposal: { clearedPartnerFields: null },
+    });
+    await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    expect(companyUpdate(tx)).toEqual({ hq: 'SF' });
+  });
+
+  it("deletes the reverted fields' citations, keeping any another approved edit also cites", async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin', headcount: 42, founded: 2019 },
+      company: { hq: 'Berlin', headcount: 42, founded: 2020 },
+      revisions: [
+        { field: 'hq', before: 'SF', after: 'Berlin' },
+        { field: 'headcount', before: 10, after: 42 },
+        { field: 'founded', before: 2016, after: 2019 },
+      ],
+      proposal: { sourceUrl: 'https://example.com/report' },
+      otherProposals: [{ changes: { headcount: 42 } }],
+    });
+    await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    expect(tx.citation.deleteMany).toHaveBeenCalledWith({
+      where: {
+        sourceId: 's1',
+        entityType: 'company',
+        entityId: 'c1',
+        field: { in: ['hq'] },
+        submittedById: 'u1',
+      },
+    });
+  });
+
+  it('touches nothing but the status when every field moved on', async () => {
+    const { prisma, tx } = makeRevertPrisma({
+      changes: { hq: 'Berlin' },
+      company: { hq: 'Paris' },
+      revisions: [{ field: 'hq', before: 'SF', after: 'Berlin' }],
+    });
+    const result = await newService(prisma).moderate('proposal', 'p1', 'REJECTED', 'admin1');
+    expect(result).toMatchObject({ revertedFields: [], skippedFields: ['hq'] });
+    expect(tx.company.update).not.toHaveBeenCalled();
+    expect(tx.revision.createMany).not.toHaveBeenCalled();
+    expect(tx.changeProposal.update).toHaveBeenCalled();
+  });
+
+  it('re-approving a reverted edit applies the diff again', async () => {
+    const { prisma, tx } = makePrisma({ hq: 'Berlin' }, { moderationStatus: 'REJECTED' });
+    await newService(prisma).moderate('proposal', 'p1', 'APPROVED', 'admin1');
+    expect(tx.company.update).toHaveBeenCalledWith({ where: { id: 'c1' }, data: { hq: 'Berlin' } });
+  });
+
+  describe('investor edits', () => {
+    function makeInvestorRevert(opts: {
+      changes: Record<string, unknown>;
+      investor: Record<string, unknown>;
+      previous: Record<string, unknown> | null;
+      cleared?: string[] | null;
+    }) {
+      const investor = {
+        id: 'inv1',
+        slug: 'sequoia',
+        name: 'Sequoia Capital',
+        legalName: null,
+        type: 'Venture',
+        hq: 'Menlo Park',
+        countryCode: 'US',
+        websiteUrl: null,
+        linkedinUrl: null,
+        domain: null,
+        description: null,
+        foundedYear: 1972,
+        partnerFields: [],
+        partnerOnly: false,
+        ...opts.investor,
+      };
+      const tx = {
+        investorChangeProposal: {
+          findUniqueOrThrow: jest.fn(async () => ({
+            id: 'ip1',
+            investorId: 'inv1',
+            changes: opts.changes,
+            previous: opts.previous,
+            clearedPartnerFields: opts.cleared === undefined ? [] : opts.cleared,
+            investor,
+          })),
+          update: jest.fn(async () => ({})),
+        },
+        investor: { update: jest.fn(async () => ({})) },
+        entityIdentifier: { count: jest.fn(async () => 0) },
+        revision: { create: jest.fn(), createMany: jest.fn() },
+      };
+      const prisma = {
+        $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+        investorChangeProposal: {
+          update: jest.fn(),
+          findUnique: jest.fn(async () => ({
+            moderationStatus: 'APPROVED',
+            changes: opts.changes,
+            investor: { slug: 'sequoia', name: 'Sequoia Capital' },
+            submittedBy: null,
+          })),
+        },
+      };
+      return { prisma, tx };
+    }
+
+    it('restores `previous` for unchanged fields and re-marks the cleared ones', async () => {
+      const { prisma, tx } = makeInvestorRevert({
+        changes: { websiteUrl: 'https://new.example', hq: 'Menlo Park, CA' },
+        investor: { websiteUrl: 'https://new.example', hq: 'Palo Alto', partnerFields: ['type'] },
+        previous: { websiteUrl: 'http://old.example', hq: 'Menlo Park' },
+        cleared: ['websiteUrl'],
+      });
+      const result = await newService(prisma).moderate('investorProposal', 'ip1', 'REJECTED', 'a1');
+      expect(result).toMatchObject({ revertedFields: ['websiteUrl'], skippedFields: ['hq'] });
+      expect(tx.investor.update).toHaveBeenCalledWith({
+        where: { id: 'inv1' },
+        data: { websiteUrl: 'http://old.example', partnerFields: ['type', 'websiteUrl'] },
+      });
+      expect(tx.investorChangeProposal.update).toHaveBeenCalledWith({
+        where: { id: 'ip1' },
+        data: { moderationStatus: 'REJECTED', reviewedAt: expect.any(Date), reviewedById: 'a1' },
+      });
+      expect(tx.revision.createMany).not.toHaveBeenCalled();
+    });
+
+    it('fails closed for a partner-only firm approved before the record', async () => {
+      const { prisma, tx } = makeInvestorRevert({
+        changes: { description: 'New' },
+        investor: { description: 'New', partnerOnly: true },
+        previous: { description: 'Partner copy' },
+        cleared: null,
+      });
+      await newService(prisma).moderate('investorProposal', 'ip1', 'REJECTED', 'a1');
+      expect(tx.investor.update).toHaveBeenCalledWith({
+        where: { id: 'inv1' },
+        data: { description: 'Partner copy', partnerFields: ['description'] },
+      });
     });
   });
 });

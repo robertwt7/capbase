@@ -51,11 +51,13 @@ export class V1AdminController {
   @V1ReadThrottle()
   @Get()
   list(@Query() query: V1ListSubmissionsDto): Promise<PendingSubmissionsResponse> {
-    return this.admin.listSubmissions(
-      parseReviewStatus(query.status),
-      parseReviewableType(query.type),
-      query.before,
-    );
+    // Every row, contributed or ingested, as /v1 has always listed: no new filters here.
+    return this.admin.listSubmissions({
+      status: parseReviewStatus(query.status),
+      type: parseReviewableType(query.type),
+      before: query.before,
+      source: 'all',
+    });
   }
 
   @ApiOperation({

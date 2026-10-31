@@ -65,7 +65,9 @@ export interface Citation {
 
 /** MERGE/UNMERGE carry no field diff — they record that a whole row was folded
  *  into another, or split back out. The timeline renders them separately. */
-export type RevisionAction = 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE';
+/** RETRACT: an admin rejected a row that was already approved — `field: ''` takes the whole row
+ *  off the profile, a named field is a proposal's value being restored to what it replaced. */
+export type RevisionAction = 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT';
 
 export type RevisionActor = 'USER' | 'ADMIN' | 'INGEST';
 

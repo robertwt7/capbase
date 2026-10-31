@@ -1,5 +1,6 @@
 import type {
   AdminUser,
+  AdminUserDetail,
   IdentifiableType,
   MergeQueueResponse,
   MergeStatus,
@@ -9,24 +10,24 @@ import type {
   ReportQueueResponse,
   ReportStatus,
   ResolveReportInput,
-  ReviewStatus,
+  SubmissionQuery,
   UpdateUserInput,
 } from '@repo/api';
 
 import { apiFetch } from './api';
 import { getToken } from './auth';
 
-/** One page of the moderation queue for a status (admin-only, always fresh).
- *  `before` is the previous page's `nextCursor`. */
-export async function getSubmissions(
-  status: ReviewStatus,
-  type?: ReviewableType,
-  before?: string,
-): Promise<PendingSubmissionsResponse> {
+/** One page of the moderation queue (admin-only, always fresh): a status plus
+ *  optional type, source, contributor and company/firm name. `before` is the
+ *  previous page's `nextCursor`. */
+export async function getSubmissions(q: SubmissionQuery): Promise<PendingSubmissionsResponse> {
   const token = await getToken();
-  const query = new URLSearchParams({ status });
-  if (type) query.set('type', type);
-  if (before) query.set('before', before);
+  const query = new URLSearchParams({ status: q.status });
+  if (q.type) query.set('type', q.type);
+  if (q.before) query.set('before', q.before);
+  if (q.source) query.set('source', q.source);
+  if (q.userId) query.set('user', q.userId);
+  if (q.q) query.set('q', q.q);
   return apiFetch<PendingSubmissionsResponse>(`/admin/submissions?${query}`, {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
@@ -122,6 +123,15 @@ export async function getUsers(q: string | undefined, page: number): Promise<Pag
   const params = new URLSearchParams({ page: String(page) });
   if (q) params.set('q', q);
   return apiFetch<Paginated<AdminUser>>(`/admin/users?${params.toString()}`, {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** One account with its contribution counts per status and its gate state now. */
+export async function getAdminUser(id: string): Promise<AdminUserDetail> {
+  const token = await getToken();
+  return apiFetch<AdminUserDetail>(`/admin/users/${encodeURIComponent(id)}`, {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
   });
