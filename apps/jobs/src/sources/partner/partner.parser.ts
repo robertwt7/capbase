@@ -679,6 +679,27 @@ export function toRound(
 }
 
 /**
+ * The company facts a partner row states besides prose and money: its industry
+ * labels (primary industry plus verticals, trimmed and de-duplicated), its
+ * location (`Undisclosed` when it names none) and its country. Shared by
+ * `toRecord` and the `backfill-partner-company-facts` pass so the two can't
+ * drift.
+ */
+export function companyFacts(company: CompanyRow): { industry: string[]; hq: string; countryCode: string | null } {
+  return {
+    industry: [
+      ...new Set(
+        [company.industry, ...(company.verticals ?? '').split(/[;,]/)]
+          .map((s) => s?.trim())
+          .filter((s): s is string => !!s),
+      ),
+    ],
+    hq: placeOf(company.city, company.country) || 'Undisclosed',
+    countryCode: partnerCountry(company.country),
+  };
+}
+
+/**
  * One company with its rounds and its investors' holdings, or null when the
  * company is not imported (not live/exited, or no completed deal survives).
  */
@@ -722,13 +743,7 @@ export function toRecord(
 
   const site = websiteUrl(company.website);
   const description = cleanProse(company.about);
-  const industry = [
-    ...new Set(
-      [company.industry, ...(company.verticals ?? '').split(/[;,]/)]
-        .map((s) => s?.trim())
-        .filter((s): s is string => !!s),
-    ),
-  ];
+  const { industry, hq, countryCode } = companyFacts(company);
 
   return {
     source: PARTNER,
@@ -736,7 +751,7 @@ export function toRecord(
     roundDedup: 'enrich',
     company: {
       name: company.name.trim(),
-      hq: placeOf(company.city, company.country) || 'Undisclosed',
+      hq,
       // The snapshot carries no founding year; 0 is the schema's "unknown".
       foundedYear: 0,
       industry,
@@ -748,7 +763,7 @@ export function toRecord(
       // Always a string: an absent value would get the SEC placeholder copy.
       oneLiner: oneLinerOf(description),
       description: description ?? '',
-      countryCode: partnerCountry(company.country),
+      countryCode,
       operatingStatus: company.status === 'Active' ? 'Active' : null,
       identifiers: [pid(company.company_id)],
     },

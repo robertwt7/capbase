@@ -2018,13 +2018,15 @@ export class IngestService {
     return { id: created.id, matched: null, own: false };
   }
 
-  /** Fill blank fields on a matched row; replace copy only when it is the
-   *  generic SEC placeholder. Never touches name, stage, status, raised
-   *  totals, or the row's own provenance keys — except that a `Bootstrapped`
-   *  stage gives way to the record's when the record shows an equity raise. */
-  private async enrich(companyId: string, r: NormalizedRecord): Promise<void> {
+  /** Fill blank fields on a matched row — including an empty industry list and
+   *  an undisclosed location; replace copy only when it is the generic SEC
+   *  placeholder. Never touches name, stage, status, raised totals, or the row's
+   *  own provenance keys — except that a `Bootstrapped` stage gives way to the
+   *  record's when the record shows an equity raise. Returns whether any column
+   *  was filled. */
+  private async enrich(companyId: string, r: NormalizedRecord): Promise<boolean> {
     const row = await this.prisma.company.findUnique({ where: { id: companyId } });
-    if (!row) return;
+    if (!row) return false;
     const c = r.company;
 
     const data: Record<string, unknown> = {};
@@ -2038,6 +2040,8 @@ export class IngestService {
     if (!row.companyType && c.companyType) data.companyType = c.companyType;
     if (row.founded === 0 && c.foundedYear) data.founded = c.foundedYear;
     if (row.headcount === 0 && c.headcount) data.headcount = c.headcount;
+    if (row.industry.length === 0 && c.industry.length > 0) data.industry = c.industry;
+    if (isUndisclosedPlace(row.hq) && !isUndisclosedPlace(c.hq)) data.hq = c.hq;
     if (c.oneLiner && row.oneLiner.startsWith(SEC_ONE_LINER_PREFIX)) data.oneLiner = c.oneLiner;
     if (c.description && row.description.includes(SEC_DESCRIPTION_MARKER)) {
       data.description = c.description;
@@ -2054,6 +2058,22 @@ export class IngestService {
 
     // `row` is the pre-update state, so writeCompany needs no second read.
     await this.writeCompany(companyId, r.source, data, row as unknown as Record<string, unknown>);
+    return Object.keys(data).length > 0;
+  }
+
+  /**
+   * Re-apply match-&-enrich of one record's company facts to a row it already
+   * matched. Company columns only — no rounds, holdings, people or
+   * identifiers. Never writes prose: the one-liner and description are dropped
+   * from the record first (`enrich` only replaces SEC placeholder copy, but this
+   * pass must not write copy at all). Used by `backfill-partner-company-facts`.
+   * Returns whether anything was written.
+   */
+  async enrichCompanyFacts(companyId: string, r: NormalizedRecord): Promise<boolean> {
+    const company = { ...r.company };
+    delete company.oneLiner;
+    delete company.description;
+    return this.enrich(companyId, { ...r, company, rounds: [] });
   }
 
   /**
@@ -2184,6 +2204,12 @@ function matchName(
         countriesCompatible(country, index.countryOf.get(id) ?? null) &&
         sameEntityAllowed(index, id, companyNumber),
     );
+}
+
+/** An empty or `Undisclosed` location — what a create writes when a source
+ *  states none, so enrichment may fill it and must never copy it. */
+function isUndisclosedPlace(hq: string | null | undefined): boolean {
+  return !hq?.trim() || hq.trim() === 'Undisclosed';
 }
 
 const COMPANY_NUMBER_PREFIX = 'COMPANIES_HOUSE:';

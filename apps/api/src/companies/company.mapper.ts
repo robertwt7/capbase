@@ -88,14 +88,19 @@ export function toPerson(row: DbPersonRoleWithPerson): Person {
 /** The linked firm, when the caller included it. Only an APPROVED investor gets
  *  a slug: a pending firm has no public page to link to. */
 type DbHoldingWithInvestor = DbInvestorHolding & {
-  investor?: { slug: string; moderationStatus: string } | null;
+  investor?: { slug: string; moderationStatus: string; name?: string } | null;
 };
 
 export function toInvestorHolding(row: DbHoldingWithInvestor): InvestorHolding {
+  const linked = row.investor?.moderationStatus === 'APPROVED' ? row.investor : null;
   return {
     id: row.id,
-    slug: row.investor?.moderationStatus === 'APPROVED' ? row.investor.slug : null,
-    name: row.name,
+    slug: linked?.slug ?? null,
+    // The profile the row links to names the firm (`KKR` links to Kohlberg
+    // Kravis Roberts); the holding's own name is what the source or contributor
+    // wrote, and stays where the include carries no firm name (the admin queue
+    // shows the submitted name).
+    name: linked?.name || row.name,
     type: row.type as InvestorType,
     firstRound: row.firstRound,
     rounds: row.rounds,

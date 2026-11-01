@@ -767,6 +767,101 @@ describe('IngestService match-&-enrich', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  describe('industry and location', () => {
+    const wikidata = (company: Partial<NormalizedRecord['company']>) =>
+      record({
+        source: 'WIKIDATA',
+        companyExternalId: 'Q42',
+        company: { ...record().company, name: 'Acme Robotics', ...company },
+      });
+    const updated = (prisma: ReturnType<typeof mockPrisma>) =>
+      (prisma.company.update.mock.calls[0]?.[0] as { data: Record<string, unknown> } | undefined)?.data ?? {};
+
+    it('fills an empty industry list', async () => {
+      const prisma = mockPrisma([companyRow({ industry: [] })]);
+      await serviceWith(prisma, [wikidata({ industry: ['Software'] })]).run(RUN);
+      expect(updated(prisma).industry).toEqual(['Software']);
+    });
+
+    it('never replaces a non-empty industry list', async () => {
+      const prisma = mockPrisma([companyRow({ industry: ['Robotics'] })]);
+      await serviceWith(prisma, [wikidata({ industry: ['Software'] })]).run(RUN);
+      expect(updated(prisma)).not.toHaveProperty('industry');
+    });
+
+    it('fills an Undisclosed or empty location', async () => {
+      for (const hq of ['Undisclosed', '']) {
+        const prisma = mockPrisma([companyRow({ hq })]);
+        await serviceWith(prisma, [wikidata({ hq: 'Austin, US' })]).run(RUN);
+        expect(updated(prisma).hq).toBe('Austin, US');
+      }
+    });
+
+    it('never replaces a real location, and never writes Undisclosed', async () => {
+      const real = mockPrisma([companyRow({ hq: 'Boston, US' })]);
+      await serviceWith(real, [wikidata({ hq: 'Austin, US' })]).run(RUN);
+      expect(updated(real)).not.toHaveProperty('hq');
+
+      const blank = mockPrisma([companyRow({ hq: '' })]);
+      await serviceWith(blank, [wikidata({ hq: 'Undisclosed' })]).run(RUN);
+      expect(updated(blank)).not.toHaveProperty('hq');
+    });
+
+    it('a partner fill marks its columns and records one revision per field', async () => {
+      const prisma = mockPrisma([
+        companyRow({ industry: [], hq: 'Undisclosed', countryCode: 'GB', partnerFields: [] }),
+      ]);
+      const written = await serviceWith(prisma, []).enrichCompanyFacts(
+        'c-sec',
+        record({
+          source: 'PARTNER',
+          company: { ...record().company, foundedYear: 0, industry: ['Software'], hq: 'London, GB', countryCode: 'GB' },
+        }),
+      );
+
+      expect(written).toBe(true);
+      const data = updated(prisma);
+      expect(data).toMatchObject({ industry: ['Software'], hq: 'London, GB' });
+      expect([...(data.partnerFields as string[])].sort()).toEqual(['hq', 'industry']);
+      const rows = revisionsFrom(prisma);
+      expect(rows.map((row) => row.field).sort()).toEqual(['hq', 'industry']);
+      expect(rows.every((row) => row.actorSource === 'PARTNER')).toBe(true);
+    });
+
+    it('enrichCompanyFacts never writes copy, even over the SEC placeholder', async () => {
+      // companyRow() carries the SEC placeholder one-liner and description.
+      const prisma = mockPrisma([companyRow({ industry: [] })]);
+      const written = await serviceWith(prisma, []).enrichCompanyFacts(
+        'c-sec',
+        record({
+          source: 'PARTNER',
+          company: {
+            ...record().company,
+            foundedYear: 0,
+            industry: ['Software'],
+            oneLiner: 'Partner one-liner.',
+            description: 'Partner description.',
+          },
+        }),
+      );
+
+      expect(written).toBe(true);
+      const data = updated(prisma);
+      expect(data).not.toHaveProperty('oneLiner');
+      expect(data).not.toHaveProperty('description');
+    });
+
+    it('enrichCompanyFacts reports false when there is nothing to fill', async () => {
+      const prisma = mockPrisma([companyRow({ countryCode: 'US', partnerFields: [] })]);
+      const written = await serviceWith(prisma, []).enrichCompanyFacts(
+        'c-sec',
+        record({ source: 'PARTNER', company: { ...record().company, foundedYear: 0, countryCode: 'US' } }),
+      );
+      expect(written).toBe(false);
+      expect(prisma.company.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('a Bootstrapped row', () => {
     const round = (overrides: Partial<NonNullable<NormalizedRecord['rounds']>[number]> = {}) => ({
       externalId: 'R1',

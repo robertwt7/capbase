@@ -57,6 +57,40 @@ describe('company.mapper row identity', () => {
     expect(holding.id).toBe('h1');
   });
 
+  it('names a holding after the approved firm it links to', () => {
+    const holding = toInvestorHolding({
+      id: 'h2',
+      name: 'KKR',
+      type: 'Private equity',
+      firstRound: 'Series B',
+      rounds: 1,
+      investor: { slug: 'kohlberg-kravis-roberts', name: 'Kohlberg Kravis Roberts', moderationStatus: 'APPROVED' },
+    } as never);
+    expect(holding).toMatchObject({ slug: 'kohlberg-kravis-roberts', name: 'Kohlberg Kravis Roberts' });
+  });
+
+  it('keeps the holding name for an unapproved or absent firm', () => {
+    const base = { id: 'h3', name: 'KKR', type: 'Private equity', firstRound: 'Seed', rounds: 1 };
+    const pending = toInvestorHolding({
+      ...base,
+      investor: { slug: 'kkr', name: 'Kohlberg Kravis Roberts', moderationStatus: 'PENDING' },
+    } as never);
+    expect(pending).toMatchObject({ slug: null, name: 'KKR' });
+    expect(toInvestorHolding({ ...base, investor: null } as never)).toMatchObject({ slug: null, name: 'KKR' });
+  });
+
+  it('keeps the submitted name when the include carries no firm name (admin queue)', () => {
+    const holding = toInvestorHolding({
+      id: 'h4',
+      name: 'Submitted Capital',
+      type: 'Venture',
+      firstRound: 'Seed',
+      rounds: 1,
+      investor: { slug: 'canonical-capital', moderationStatus: 'APPROVED' },
+    } as never);
+    expect(holding).toMatchObject({ slug: 'canonical-capital', name: 'Submitted Capital' });
+  });
+
   it('emits id from toAcquisition', () => {
     const deal = toAcquisition({
       id: 'a1',

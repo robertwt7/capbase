@@ -61,6 +61,9 @@ describe('Read gate (e2e)', () => {
     fund: `Gate SEC Fund ${stamp}`,
     partnerFund: `Gate Partner Fund ${stamp}`,
     partnerPerson: `Gate Partner Person ${stamp}`,
+    // No stamp: the directory tests search by it and must not see these two.
+    backersCo: 'Gate Backers Co',
+    backerFirm: 'Gate Backer Firm',
   };
   const slugs = {
     publicCo: `${tag}-pub`,
@@ -71,6 +74,8 @@ describe('Read gate (e2e)', () => {
     fund: `${tag}-fund`,
     partnerFund: `${tag}-pfund`,
     partnerPerson: `${tag}-pperson`,
+    backersCo: `${tag}-backers`,
+    backerFirm: `${tag}-bfirm`,
   };
 
   const ids: Record<string, string | undefined> = {};
@@ -301,6 +306,35 @@ describe('Read gate (e2e)', () => {
       },
     });
 
+    // --- A public company with three backers: holdings sort by rounds
+    // recorded, and a linked firm's own name replaces the holding's.
+    ids.backerFirm = (
+      await prisma.investor.create({
+        data: {
+          slug: slugs.backerFirm,
+          name: names.backerFirm,
+          type: 'Venture',
+          externalSource: 'SEC_ADV',
+          externalId: `${tag}-bfirm`,
+          moderationStatus: 'APPROVED',
+        },
+        select: { id: true },
+      })
+    ).id;
+    ids.backersCo = (
+      await prisma.company.create({
+        data: { ...base, slug: slugs.backersCo, name: names.backersCo, externalSource: 'SEC_EDGAR', externalId: `${tag}-backers` },
+        select: { id: true },
+      })
+    ).id;
+    await prisma.investorHolding.createMany({
+      data: [
+        { companyId: ids.backersCo, name: 'Backer One', type: 'Venture', firstRound: 'Seed', rounds: 1, externalSource: 'WIKIDATA', externalId: `${tag}-bh-1`, moderationStatus: 'APPROVED' },
+        { companyId: ids.backersCo, investorId: ids.backerFirm, name: 'GBF', type: 'Venture', firstRound: 'Seed', rounds: 3, externalSource: 'PARTNER', externalId: `${tag}-bh-3`, moderationStatus: 'APPROVED' },
+        { companyId: ids.backersCo, name: 'Backer Two', type: 'Venture', firstRound: 'Series A', rounds: 2, externalSource: 'WIKIDATA', externalId: `${tag}-bh-2`, moderationStatus: 'APPROVED' },
+      ],
+    });
+
     // --- Viewers.
     const jwt = app.get(JwtService);
     for (const role of ['USER', 'CONTRIBUTOR', 'ADMIN'] as const) {
@@ -336,10 +370,12 @@ describe('Read gate (e2e)', () => {
     if (ids.fund) await prisma.fund.delete({ where: { id: ids.fund } });
     if (ids.firm) await prisma.investor.delete({ where: { id: ids.firm } });
     if (ids.partnerFirm) await prisma.investor.delete({ where: { id: ids.partnerFirm } });
+    if (ids.backerFirm) await prisma.investor.delete({ where: { id: ids.backerFirm } });
     // Companies cascade rounds (and their investors), roles, holdings, revisions.
     if (ids.publicCo) await prisma.company.delete({ where: { id: ids.publicCo } });
     if (ids.partnerCo) await prisma.company.delete({ where: { id: ids.partnerCo } });
     if (ids.partnerCoBare) await prisma.company.delete({ where: { id: ids.partnerCoBare } });
+    if (ids.backersCo) await prisma.company.delete({ where: { id: ids.backersCo } });
     await app.close();
   });
 
@@ -404,6 +440,29 @@ describe('Read gate (e2e)', () => {
       expect(locked.body.company.partnerOnly).toBeUndefined();
       expect(locked.body.company.description).toBe(S.poDescription);
       expect(locked.body.indexable).toBe(true);
+    });
+  });
+
+  describe('company backers', () => {
+    const backerNames = (body: { company: { investors: { name: string }[] } }) => body.company.investors.map((i) => i.name);
+
+    it('unlocked: every backer, most rounds first, under the linked firm’s name', async () => {
+      const { body } = await get(`/companies/${slugs.backersCo}`, 'contributor');
+      expect(backerNames(body)).toEqual([names.backerFirm, 'Backer Two', 'Backer One']);
+      expect(body.company.investors[0].slug).toBe(slugs.backerFirm);
+      expect(text(body)).not.toContain('"GBF"');
+    });
+
+    it('signed in but locked: the two most active backers', async () => {
+      const { body } = await get(`/companies/${slugs.backersCo}`, 'locked');
+      expect(backerNames(body)).toEqual([names.backerFirm, 'Backer Two']);
+      expect(body.access.totals).toMatchObject({ investors: 3 });
+    });
+
+    it('signed out: only non-partner backers, in the same order', async () => {
+      const { body } = await get(`/companies/${slugs.backersCo}`, 'signedOut');
+      expect(backerNames(body)).toEqual(['Backer Two', 'Backer One']);
+      expect(leaks(body, [names.backerFirm, 'GBF'])).toEqual([]);
     });
   });
 

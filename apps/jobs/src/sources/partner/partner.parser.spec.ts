@@ -4,6 +4,7 @@ import { FxTable } from '../../util/fx';
 import {
   PARTNER_SECTOR_MAP,
   cleanProse,
+  companyFacts,
   companyStage,
   currencyCode,
   firmType,
@@ -501,6 +502,49 @@ describe('toRecord', () => {
   it('imports nothing for an abandoned company, or one with no surviving deal', () => {
     expect(toRecord(company({ status: 'Abandoned' }), deals, edges, kept, fx)).toBeNull();
     expect(toRecord(company(), [deals[2]!], edges, kept, fx)).toBeNull();
+  });
+  it('states the same facts companyFacts does', () => {
+    const row = company({ verticals: 'Robotics; AI' });
+    const r = toRecord(row, deals, edges, kept, fx)!;
+    const facts = companyFacts(row);
+    expect(r.company.industry).toEqual(facts.industry);
+    expect(r.company.hq).toBe(facts.hq);
+    expect(r.company.countryCode).toBe(facts.countryCode);
+  });
+});
+
+describe('companyFacts', () => {
+  const row = (over: Partial<CompanyRow> = {}): CompanyRow => ({
+    company_id: 'PC1',
+    name: 'Acme Robotics',
+    country: 'US',
+    city: 'Austin',
+    website: null,
+    industry: 'Software',
+    verticals: null,
+    about: null,
+    status: 'Active',
+    ...over,
+  });
+
+  it('merges the industry with the verticals, trimmed and de-duplicated', () => {
+    expect(companyFacts(row({ verticals: ' AI ; Software,Robotics, ' })).industry).toEqual([
+      'Software',
+      'AI',
+      'Robotics',
+    ]);
+  });
+
+  it('handles absent labels and places', () => {
+    expect(companyFacts(row({ industry: null, verticals: null, city: null, country: null }))).toEqual({
+      industry: [],
+      hq: 'Undisclosed',
+      countryCode: null,
+    });
+  });
+
+  it('places a company by city and country', () => {
+    expect(companyFacts(row())).toEqual({ industry: ['Software'], hq: 'Austin, US', countryCode: 'US' });
   });
 });
 

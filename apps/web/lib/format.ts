@@ -101,6 +101,12 @@ export function foundedYear(year: number): string | null {
   return year > 0 ? String(year) : null;
 }
 
+/** A round name that says nothing about the round: the partner's generic
+ *  `Undisclosed round`, or Wikidata/S-1's bare `Undisclosed`. */
+export function isUndisclosedRound(name: string | null | undefined): boolean {
+  return !name || /^undisclosed( round)?$/i.test(name.trim());
+}
+
 /** A percentage as published (2 → "2%", 1.75 → "1.75%"), or an em dash when
  *  the source states none. Never "0%" for unknown. */
 export function formatPct(value: number | null | undefined): string {

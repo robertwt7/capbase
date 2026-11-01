@@ -259,8 +259,14 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle). Each section is its gated rows plus a
-  `LockedSection`; a **funding summary line** (round count, the API's `latestRound`, total raised)
-  sits under the Funding rounds header for everyone, even when the ladder itself is gated.
+  `LockedSection`; a **funding summary line** (recorded round count, the API's `latestRound`,
+  recorded total) sits under the Funding rounds header for everyone, even when the ladder itself is
+  gated. An unknown headcount and a zero raised total render as an em dash, never "0"/"$0" (zero
+  means every amount was undisclosed, or grants only). The **Investors** section is ordered by
+  rounds recorded (then name), so a locked preview shows the most active backers, and each row
+  shows the **linked firm's** name (the holding's stored name only when it links to no approved
+  firm — the admin queue keeps the submitted name); the line reads "First round: X · N rounds
+  recorded" ("First round undisclosed" for a generic round name), never "since" or "lead".
 - `/funds` — fund directory (URL-driven filters, same pattern as companies): search,
   strategy and status filters, sort by size/vintage/name, `?manager=<slug>` scoping. **Sorted
   by size by default** (`Fund.sizeUsd` = gross assets, else capital closed — the figure the

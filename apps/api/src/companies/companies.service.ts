@@ -98,8 +98,13 @@ function approvedChildren(access: ViewerAccess) {
     },
     investors: {
       where: visible,
-      // The linked firm's slug turns each card into a link to its profile.
-      include: { investor: { select: { slug: true, moderationStatus: true } } },
+      // The linked firm's slug turns each card into a link to its profile, and
+      // its name is what the card shows (the name that profile carries).
+      include: { investor: { select: { slug: true, name: true, moderationStatus: true } } },
+      // Most rounds recorded first, so a capped preview shows the most active
+      // backers rather than an arbitrary two. A company's holdings are few and
+      // already narrowed by the (companyId) index, so the sort is trivial.
+      orderBy: [{ rounds: 'desc' as const }, { name: 'asc' as const }, { id: 'asc' as const }],
       take: takeFor(gateLimit('companyInvestors', access)),
     },
     acquisitions: {

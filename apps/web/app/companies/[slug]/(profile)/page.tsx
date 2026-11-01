@@ -22,6 +22,7 @@ import {
   formatDate,
   formatUsd,
   foundedYear,
+  isUndisclosedRound,
   signedPct,
 } from '@/lib/format';
 import { canonical } from '@/lib/metadata';
@@ -194,13 +195,20 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <p className="mt-3 max-w-[48ch] text-[17px] text-graphite-700">
             {m('oneLiner', company.oneLiner)}
           </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {company.industry.map((tag) => (
-              <Badge key={tag} variant="box">
-                {tag}
-              </Badge>
-            ))}
-          </div>
+          {(company.industry.length > 0 || masked('industry')) && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {company.industry.map((tag) => (
+                <Badge key={tag} variant="box">
+                  {tag}
+                </Badge>
+              ))}
+              {masked('industry') && (
+                <span className="flex items-center gap-2 font-mono text-xs text-graphite-500">
+                  Industry <SignInChip next={path} />
+                </span>
+              )}
+            </div>
+          )}
           {(company.websiteUrl ||
             company.linkedinUrl ||
             company.twitterUrl ||
@@ -236,7 +244,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           )}
           <Fact
             label="Headcount"
-            value={m('headcount', formatCount(company.headcount))}
+            value={m('headcount', company.headcount > 0 ? formatCount(company.headcount) : '—')}
             cite={cite('headcount')}
           />
           <Fact label="Stage" value={m('stage', company.stage)} />
@@ -256,14 +264,20 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
       </header>
 
       <section className="flex flex-wrap gap-x-16 gap-y-3.5 border-b border-line py-8">
+        {/* Zero means none recorded — every amount undisclosed, or grants only
+            — so it is a dash, never "$0". */}
         <Stat
-          label="Total raised"
+          label="Raised (recorded)"
           value={m(
             'totalRaisedUsd',
-            <>
-              {formatUsd(company.totalRaisedUsd)}
-              {cite('totalRaisedUsd')}
-            </>,
+            company.totalRaisedUsd > 0 ? (
+              <>
+                {formatUsd(company.totalRaisedUsd)}
+                {cite('totalRaisedUsd')}
+              </>
+            ) : (
+              '—'
+            ),
           )}
         />
         <Stat
@@ -296,12 +310,16 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
       <Block
         title="Funding rounds"
-        note={access.totals.rounds > 0 ? `${access.totals.rounds} rounds` : undefined}
+        note={
+          access.totals.rounds > 0
+            ? `${formatCount(access.totals.rounds)} ${access.totals.rounds === 1 ? 'round' : 'rounds'}`
+            : undefined
+        }
       >
         {/* The summary line everyone may read, even when the ladder is gated. */}
         {access.totals.rounds > 0 && (
           <p className="-mt-2 mb-5 font-mono text-[13px] text-graphite-700">
-            {formatCount(access.totals.rounds)} {access.totals.rounds === 1 ? 'round' : 'rounds'}
+            {formatCount(access.totals.rounds)} {access.totals.rounds === 1 ? 'round' : 'rounds'} recorded
             {latestRound && (
               <>
                 {' · latest '}
@@ -309,7 +327,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               </>
             )}
             {!masked('totalRaisedUsd') && company.totalRaisedUsd > 0 && (
-              <> · {formatUsd(company.totalRaisedUsd)} raised</>
+              <> · {formatUsd(company.totalRaisedUsd)} recorded</>
             )}
           </p>
         )}
@@ -372,7 +390,12 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
                 </span>
                 <span className="col-span-full flex flex-wrap items-baseline gap-x-3 text-[13px] text-graphite-500">
                   <span>
-                    {inv.rounds} {inv.rounds === 1 ? 'round' : 'rounds'} · since {inv.firstRound}
+                    {isUndisclosedRound(inv.firstRound)
+                      ? 'First round undisclosed'
+                      : `First round: ${inv.firstRound}`}
+                    {/* S-1/Wikidata edges carry no round count; omit it rather than say "0". */}
+                    {inv.rounds > 0 &&
+                      ` · ${formatCount(inv.rounds)} ${inv.rounds === 1 ? 'round' : 'rounds'} recorded`}
                     <Citation citations={citations} entityId={inv.id} />
                   </span>
                   {inv.slug && (inv.websiteUrl || inv.linkedinUrl) ? (

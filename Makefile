@@ -287,6 +287,14 @@ backfill-partner-provenance: ## Mark partner-only rows and partner-written field
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill-partner-provenance.js
 
+# Fills the industry and location the partner states on companies it matched
+# but did not create (enrichment used to skip both). Needs partner_stage loaded;
+# run before partner-stage-drop. Idempotent (a second run writes 0 rows).
+.PHONY: backfill-partner-company-facts
+backfill-partner-company-facts: ## Fill partner industry/location on matched companies left blank (needs partner_stage; no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-partner-company-facts.js
+
 .PHONY: purge-sbir-people
 purge-sbir-people: ## One-shot: delete SBIR person rows read from 'Contact Name' (federal program officers)
 	yarn workspace jobs build
@@ -318,6 +326,10 @@ ingest-partner-prod: ## [VPS] Import the partner snapshot inside the deployed jo
 .PHONY: backfill-partner-provenance-prod
 backfill-partner-provenance-prod: ## [VPS] Mark partner-only rows and partner-written fields inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-partner-provenance.js
+
+.PHONY: backfill-partner-company-facts-prod
+backfill-partner-company-facts-prod: ## [VPS] Fill partner industry/location on matched companies inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-partner-company-facts.js
 
 .PHONY: backfill-fund-slugs-prod
 backfill-fund-slugs-prod: ## [VPS] Give every fund a page slug inside the deployed jobs container
