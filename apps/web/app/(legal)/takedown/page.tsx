@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   ...canonical('/takedown'),
 };
 
-const LAST_UPDATED = '3 October 2026';
+const LAST_UPDATED = '1 November 2026';
 
 export default function TakedownPage() {
   return (
@@ -44,6 +44,11 @@ export default function TakedownPage() {
       <h2>2. What we remove</h2>
       <ul>
         <li>
+          <strong>Partner and other third-party data shown to be inaccurate, or that a rights
+          holder objects to.</strong> Tell us what is wrong and, if you can, link a source;
+          we correct it or take it down.
+        </li>
+        <li>
           <strong>Personal data about you, on request.</strong> If a person
           profile describes you, we will hide that profile. The underlying
           public records it was built from — regulatory filings, for example —
@@ -69,7 +74,8 @@ export default function TakedownPage() {
         facts is wrong or out of date, we <strong>correct</strong> it rather
         than delete it — please tell us what it should say and, if you can, link
         a source that shows it. See <Link href="/data">Data &amp; sources</Link>{' '}
-        for where our data comes from.
+        for where our data comes from. This applies to public records; partner data is handled
+        under section 2.
       </p>
 
       <h2>4. Response times</h2>

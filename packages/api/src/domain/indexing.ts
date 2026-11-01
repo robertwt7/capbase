@@ -3,8 +3,11 @@
 // bar on its own as data arrives. The API applies this; the web only reads
 // `indexable` off the detail response.
 //
-// An investor needs any one of: a public portfolio holding, a named fund, or an
-// officer on record — "at least one" needs no constant.
+// Every public-record company is indexable; a partner-only company needs a
+// non-empty oneLiner or description. An investor needs a non-empty description
+// (partner-only stubs included), or a public-record profile with at least one
+// portfolio holding, named fund, officer or commitment. People and funds use
+// the rules below.
 
 /** A person needs this many public roles — or a Wikidata identifier. */
 export const PERSON_INDEX_MIN_ROLES = 2;

@@ -7,7 +7,8 @@
 //      viewer, `contributors` shows nothing until unlocked. Full access is earned
 //      by an approved contribution and kept alive by a rolling window.
 //   2. By provenance — anything the licensed partner wrote is `members` at
-//      least (`partnerVisible`): a signed-out viewer never receives it.
+//      least (`partnerVisible`), except public company/firm prose (`oneLiner`,
+//      `description`), which every viewer receives.
 
 import type { Company, ReviewStatus } from './company';
 import type { ReviewableType } from './moderation';
@@ -56,7 +57,7 @@ export function gateLimit(section: GatedSection, access: ViewerAccess): number {
   return PREVIEW_LIMIT;
 }
 
-/** Partner data is `members` at minimum: hidden from signed-out viewers only. */
+/** Non-prose partner data is `members` at minimum: hidden signed out. */
 export const partnerVisible = (access: ViewerAccess): boolean => access.signedIn || access.unlocked;
 
 /** `ViewerAccess` plus the preview size, for a read that truncates sections. */
@@ -99,6 +100,9 @@ export interface FeaturedCompaniesResponse {
 }
 
 export interface CompanyDetailResponse {
+  /** Every public-record company, plus partner-only companies with non-empty
+   *  oneLiner or description. The sitemap uses the same rule. */
+  indexable: boolean;
   /** Sections are already truncated per `gateLimit` when access is locked. */
   company: Company;
   access: CompanyAccess;

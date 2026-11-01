@@ -9,6 +9,7 @@ const unlocked: ViewerAccess = { unlocked: true, signedIn: true, unlockedUntil: 
 
 const company = {
   slug: 'acme',
+  oneLiner: 'What the company does.',
   description: 'The partner wrote this.',
   totalRaisedUsd: 9_000_000,
   lastValuationUsd: 40_000_000,
@@ -20,23 +21,32 @@ describe('maskPartnerFields', () => {
   it('blanks partner fields for a signed-out viewer and lists them in `masked`', () => {
     const out = maskPartnerFields(
       company,
-      ['description', 'totalRaisedUsd', 'lastValuationUsd', 'industry', 'notOnTheEntity'],
+      ['hq', 'totalRaisedUsd', 'lastValuationUsd', 'industry', 'notOnTheEntity'],
       signedOut,
       COMPANY_BLANKS,
     );
-    expect(out).toMatchObject({ description: '', totalRaisedUsd: 0, lastValuationUsd: null, industry: [], hq: 'Oslo' });
+    expect(out).toMatchObject({ description: company.description, totalRaisedUsd: 0, lastValuationUsd: null, industry: [], hq: '' });
     expect((out as { masked?: string[] }).masked?.sort()).toEqual(
-      ['description', 'industry', 'lastValuationUsd', 'totalRaisedUsd'],
+      ['hq', 'industry', 'lastValuationUsd', 'totalRaisedUsd'],
     );
     // The input is never mutated.
-    expect(company.description).toBe('The partner wrote this.');
+    expect(company.hq).toBe('Oslo');
   });
 
   it.each([
     ['signed in, locked', locked],
     ['unlocked', unlocked],
   ])('is a no-op for a %s viewer', (_label, access) => {
-    expect(maskPartnerFields(company, ['description'], access, COMPANY_BLANKS)).toBe(company);
+    expect(maskPartnerFields(company, ['hq'], access, COMPANY_BLANKS)).toBe(company);
+  });
+
+  it('publishes partner prose while masking other partner fields', () => {
+    const out = maskPartnerFields(company, ['oneLiner', 'description', 'hq'], signedOut, COMPANY_BLANKS);
+    expect(out).toEqual({ ...company, hq: '', masked: ['hq'] });
+  });
+
+  it('returns prose-only entities untouched without a masked list', () => {
+    expect(maskPartnerFields(company, ['description'], signedOut, COMPANY_BLANKS)).toBe(company);
   });
 
   it('merges into an existing masked list', () => {

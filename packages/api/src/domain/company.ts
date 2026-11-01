@@ -332,7 +332,7 @@ export interface Company {
    *  so the web must check this before rendering one. */
   masked?: string[];
   /** Set (true) only for a signed-out viewer of a company that exists only
-   *  because of the partner: the payload is a stub — name, counts, nothing else. */
+   *  because of the partner: the payload is a stub — identity, public prose and counts. */
   partnerOnly?: boolean;
 }
 

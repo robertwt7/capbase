@@ -2,6 +2,7 @@
 export const COMPANY_DETAIL_SCHEMA = {
   type: 'object',
   properties: {
+    indexable: { type: 'boolean', description: 'Whether the profile qualifies for search indexing and the sitemap.' },
     company: {
       type: 'object',
       properties: {

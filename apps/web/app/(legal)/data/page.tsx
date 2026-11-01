@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   ...canonical('/data'),
 };
 
-const LAST_UPDATED = '26 October 2026';
+const LAST_UPDATED = '1 November 2026';
 
 // One entry per ingested source. Keep in step with apps/jobs/src/sources/ —
 // a new source is not live until it is listed here with its terms.
@@ -98,7 +98,7 @@ export default function DataPage() {
       <h2>Ingested sources</h2>
       <p>
         These are loaded automatically from official or open sources and published without manual
-        review.
+        review. We do not independently verify them; corrections go through the same report link.
       </p>
       {SOURCES.map((source) => (
         <section key={source.name} className="mt-6 border-t border-line pt-4">
@@ -153,10 +153,20 @@ export default function DataPage() {
         dash) and is not reviewed by a moderator.
       </p>
       <p>
-        Partner data is <strong>not</strong> covered by the CC BY-NC licence below. You may
-        read it on Capbase, but you may not copy, export or reuse it from Capbase. It is shown
-        only to signed-in visitors — a free account shows the first rows of each section, and an
-        approved contribution opens every profile in full.
+        Capbase does not independently verify partner data before publishing it, and it is
+        provided as is (see section 7 of the <Link href="/terms">Terms of Service</Link>).
+        If something is wrong, use the &ldquo;Report an issue&rdquo; link on the profile and we
+        will correct or remove it.
+      </p>
+      <p>
+        Company and investor-firm descriptions are shown to everyone. The rest of partner data
+        is shown only to signed-in visitors — a free account shows the first rows of each
+        section, and an approved contribution opens every profile in full.
+      </p>
+      <p>
+        Partner data is <strong>not</strong> covered by the CC BY-NC licence below — including
+        descriptions, even where they are shown to signed-out visitors. You may read it on
+        Capbase, but you may not copy, export or reuse it from Capbase.
       </p>
       <p>
         For people at investment firms, partners also provide professional contact details. We

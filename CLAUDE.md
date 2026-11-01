@@ -111,9 +111,10 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   API withheld (`entity.masked`, value blanked in the payload) as a mono "Sign in" chip; never
   render a maskable value without asking (a blank total reads as "$0"); `link={false}` inside an
   element that is already a link (directory rows). **`StubProfile`** is the signed-out page of a
-  `partnerOnly` company/investor/fund/person (name, public counts, one sign-in panel) — its
-  `generateMetadata` returns `noindex, follow`. JSON-LD, metadata descriptions and OG images skip
-  masked fields too.
+  `partnerOnly` company/investor/fund/person (name, public prose where available, counts,
+  one sign-in panel). Company/firm stubs with prose are indexable and in the sitemap;
+  bare stubs, funds and people stay `noindex, follow`. The API decides. JSON-LD, metadata
+  descriptions and OG images skip masked fields too.
 - **`Sheet`** (Radix Dialog) backs the small-screen nav drawer in `components/SiteNav.tsx`
   (`PrimaryNav` + `MobileNav`, both setting `aria-current`).
 - **`TurnstileField`** — the Cloudflare Turnstile challenge on register and every
@@ -407,7 +408,10 @@ sets `alternates.canonical` **and** `openGraph.url` together — Next merges met
 per key, and the root layout deliberately sets neither, so a page without it (auth, admin,
 404) emits no canonical rather than claiming to be `/`. Directory pages pass
 `directoryCanonical(base, searchParams)` (`lib/list-params.ts`): a bare `?page=N` is
-self-canonical, any filter collapses to the bare URL. Thin person/investor profiles render
+self-canonical, any filter collapses to the bare URL. Company/firm stubs with non-empty
+public prose are indexable and in the sitemap (`indexable` on `CompanyDetailResponse` /
+`InvestorDetailResponse`); bare stubs stay `noindex`. Signed-out directories and search
+still omit partner-only entities. Thin person/investor profiles render
 `noindex, follow` and leave the sitemap; the API owns that rule (`indexable` on the detail
 response, `PERSON_INDEX_MIN_ROLES` in `@repo/api`, the same filter in each `listSlugs`) — the
 web never re-derives it. `Company.founded` is `0` when unknown: render it through
@@ -536,14 +540,17 @@ the API** so a hidden value never reaches the browser:
    unlocked; 2 = `PREVIEW_LIMIT`). Company rounds, diversity, acquisitions and exits, investor LP
    commitments and fund commitments/metrics are `members`; fund terms `contributors`; the rest
    `open`. An approved contribution unlocks everything for `CONTRIBUTION_WINDOW_DAYS` (30).
-2. **By provenance.** Anything the licensed partner wrote is `members` at least —
+2. **By provenance.** Anything the licensed partner wrote is `members` at least, except
+   public prose: `PUBLIC_PARTNER_FIELDS` (`oneLiner`, `description`) is never masked —
    `partnerVisible(access)` is false only for a signed-out viewer: partner **rows**
    (`externalSource = 'PARTNER'`, and partner `RoundInvestor`s) are filtered out of every child
    query, partner **fields** (`partnerFields`) are blanked and listed in the entity's `masked`
    everywhere it renders (profile, directory rows, featured, search hits), and a **partner-only
-   entity** (`partnerOnly`; for people `identifierOnly`) is a stub (name and counts,
-   `partnerOnly: true`), always `noindex`, and absent from the sitemaps, the signed-out directories
-   and `/search`. Signed-in viewers see partner data inside the section limits.
+   entity** (`partnerOnly`; for people `identifierOnly`) is a stub (name, public prose and
+   counts, `partnerOnly: true`). Company/firm stubs with prose are indexable and in the
+   sitemap; bare stubs, funds and people stay `noindex`. Partner-only entities remain
+   absent from signed-out directories and `/search`. Signed-in viewers see partner data
+   inside the section limits.
 
 **Counts and market aggregates stay public**, partner rows included — a count says rows exist,
 not what they say, and it is the sign-in hook. Signed out, a directory filter on column `X` never

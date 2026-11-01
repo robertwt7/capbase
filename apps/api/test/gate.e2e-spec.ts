@@ -31,9 +31,14 @@ describe('Read gate (e2e)', () => {
   const tag = `e2e-gate-${stamp}`;
   const http = () => request(app.getHttpServer());
 
-  // Sentinels: each string appears in exactly one gated place.
+  // Sentinels distinguish public prose from fields and rows that stay gated.
   const S = {
     description: `partner-description-${stamp}`,
+    oneLiner: `partner-oneliner-${stamp}`,
+    hq: `partner-hq-${stamp}`,
+    firmHq: `partner-firm-hq-${stamp}`,
+    poOneLiner: `partner-only-oneliner-${stamp}`,
+    pfirmDescription: `partner-only-firm-description-${stamp}`,
     roundName: `partner-round-${stamp}`,
     correctedAmount: 271_828_271,
     roundInvestor: `partner-round-investor-${stamp}`,
@@ -50,6 +55,7 @@ describe('Read gate (e2e)', () => {
   const names = {
     publicCo: `Gate Public Co ${stamp}`,
     partnerCo: `Gate Partner Only Co ${stamp}`,
+    partnerCoBare: `Gate Partner Bare Co ${stamp}`,
     firm: `Gate ADV Firm ${stamp}`,
     partnerFirm: `Gate Partner Firm ${stamp}`,
     fund: `Gate SEC Fund ${stamp}`,
@@ -59,6 +65,7 @@ describe('Read gate (e2e)', () => {
   const slugs = {
     publicCo: `${tag}-pub`,
     partnerCo: `${tag}-po`,
+    partnerCoBare: `${tag}-po-bare`,
     firm: `${tag}-firm`,
     partnerFirm: `${tag}-pfirm`,
     fund: `${tag}-fund`,
@@ -97,7 +104,9 @@ describe('Read gate (e2e)', () => {
           slug: slugs.publicCo,
           name: names.publicCo,
           description: S.description,
-          partnerFields: ['description'],
+          oneLiner: S.oneLiner,
+          hq: S.hq,
+          partnerFields: ['hq', 'oneLiner', 'description'],
           externalSource: 'SEC_EDGAR',
           externalId: `${tag}-pub`,
         },
@@ -167,7 +176,8 @@ describe('Read gate (e2e)', () => {
           slug: slugs.partnerCo,
           name: names.partnerCo,
           description: S.poDescription,
-          partnerFields: ['description', 'stage'],
+          oneLiner: S.poOneLiner,
+          partnerFields: ['oneLiner', 'description', 'stage'],
           partnerOnly: true,
           externalSource: 'PARTNER',
           externalId: `${tag}-po`,
@@ -175,6 +185,11 @@ describe('Read gate (e2e)', () => {
         select: { id: true },
       })
     ).id;
+
+    ids.partnerCoBare = (await prisma.company.create({
+      data: { ...base, slug: slugs.partnerCoBare, name: names.partnerCoBare, partnerOnly: true },
+      select: { id: true },
+    })).id;
 
     // --- An ADV firm the partner enriched, with a partner officer and an LP commitment.
     ids.firm = (
@@ -184,7 +199,8 @@ describe('Read gate (e2e)', () => {
           name: names.firm,
           type: 'Venture',
           description: S.firmDescription,
-          partnerFields: ['description'],
+          hq: S.firmHq,
+          partnerFields: ['hq', 'description'],
           externalSource: 'SEC_ADV',
           externalId: `${tag}-firm`,
           moderationStatus: 'APPROVED',
@@ -198,7 +214,8 @@ describe('Read gate (e2e)', () => {
           slug: slugs.partnerFirm,
           name: names.partnerFirm,
           type: 'Pension fund',
-          partnerFields: ['type'],
+          description: S.pfirmDescription,
+          partnerFields: ['type', 'description'],
           partnerOnly: true,
           externalSource: 'PARTNER',
           externalId: `${tag}-pfirm`,
@@ -322,6 +339,7 @@ describe('Read gate (e2e)', () => {
     // Companies cascade rounds (and their investors), roles, holdings, revisions.
     if (ids.publicCo) await prisma.company.delete({ where: { id: ids.publicCo } });
     if (ids.partnerCo) await prisma.company.delete({ where: { id: ids.partnerCo } });
+    if (ids.partnerCoBare) await prisma.company.delete({ where: { id: ids.partnerCoBare } });
     await app.close();
   });
 
@@ -342,13 +360,16 @@ describe('Read gate (e2e)', () => {
       expect(body.company.rounds).toEqual([]);
       expect(body.company.people.map((p: { name: string }) => p.name)).toEqual(['Public Officer']);
       expect(body.company.investors.map((i: { name: string }) => i.name)).toEqual(['Public Holder']);
-      expect(body.company.masked).toEqual(['description']);
+      expect(body.company.masked).toEqual(['hq']);
+      expect(body.company.description).toBe(S.description);
+      expect(body.company.oneLiner).toBe(S.oneLiner);
+      expect(body.indexable).toBe(true);
       expect(body.access).toMatchObject({ unlocked: false, signedIn: false });
       expect(body.access.totals).toMatchObject({ rounds: 3, people: 2, investors: 2 });
       // Round 3 is public — only its amount is the partner's — so it leads the
       // summary line; round 2 (the partner's own) never does.
       expect(body.latestRound).toEqual({ stage: 'Round 3', date: '2020-03-01' });
-      expect(leaks(body, [S.description, S.roundName, S.correctedAmount, S.roundInvestor, S.role, S.holding])).toEqual([]);
+      expect(leaks(body, [S.hq, S.roundName, S.correctedAmount, S.roundInvestor, S.role, S.holding])).toEqual([]);
     });
 
     it('signed in: two rows of every section, partner rows included, partner fields shown', async () => {
@@ -372,12 +393,24 @@ describe('Read gate (e2e)', () => {
       const out = await get(`/companies/${slugs.partnerCo}`, 'signedOut');
       expect(out.body.company).toMatchObject({ name: names.partnerCo, partnerOnly: true, rounds: [] });
       expect(out.body.citations).toEqual([]);
-      expect(leaks(out.body, [S.poDescription])).toEqual([]);
+      expect(out.body.company).toMatchObject({ oneLiner: S.poOneLiner, description: S.poDescription, hq: '', stage: '', people: [], investors: [] });
+      expect(out.body.company.masked).toEqual(expect.arrayContaining(['hq', 'stage']));
+      expect(out.body.company.masked).not.toContain('description');
+      expect(out.body.company.masked).not.toContain('oneLiner');
+      expect(out.body.indexable).toBe(true);
+      expect(out.body.company.identifiers).toBeUndefined();
 
       const locked = await get(`/companies/${slugs.partnerCo}`, 'locked');
       expect(locked.body.company.partnerOnly).toBeUndefined();
       expect(locked.body.company.description).toBe(S.poDescription);
+      expect(locked.body.indexable).toBe(true);
     });
+  });
+
+  it('keeps a partner-only company without prose unindexable for every viewer', async () => {
+    for (const viewer of ['signedOut', 'locked'] as const) {
+      expect((await get(`/companies/${slugs.partnerCoBare}`, viewer)).body.indexable).toBe(false);
+    }
   });
 
   describe('company history', () => {
@@ -436,13 +469,14 @@ describe('Read gate (e2e)', () => {
   describe('investor profile', () => {
     it('signed out: partner fields masked, no partner people, no LP commitments', async () => {
       const { body } = await get(`/investors/${slugs.firm}`, 'signedOut');
-      expect(body.description).toBeNull();
-      expect(body.masked).toEqual(['description']);
+      expect(body.description).toBe(S.firmDescription);
+      expect(body.masked).toEqual(['hq']);
+      expect(body.indexable).toBe(true);
       expect(body.people).toEqual([]);
       expect(body.peopleCount).toBe(1);
       expect(body.funds.map((f: { slug: string }) => f.slug)).toEqual([slugs.fund]);
       expect(body.funds[0].status).toBeNull();
-      expect(leaks(body, [S.firmDescription, S.personTitle, S.fee])).toEqual([]);
+      expect(leaks(body, [S.firmHq, S.personTitle, S.fee])).toEqual([]);
     });
 
     it('signed in: partner people and values shown', async () => {
@@ -451,9 +485,10 @@ describe('Read gate (e2e)', () => {
       expect(text(body)).toContain(S.personTitle);
     });
 
-    it('a partner-only firm is a stub signed out, never indexable', async () => {
+    it('a partner-only firm is a stub signed out, indexable with a description', async () => {
       const out = await get(`/investors/${slugs.partnerFirm}`, 'signedOut');
-      expect(out.body).toMatchObject({ partnerOnly: true, indexable: false, commitments: [], commitmentCount: 1 });
+      expect(out.body).toMatchObject({ partnerOnly: true, indexable: true, description: S.pfirmDescription, type: '', commitments: [], commitmentCount: 1 });
+      expect(out.body.identifiers).toBeUndefined();
       const locked = await get(`/investors/${slugs.partnerFirm}`, 'locked');
       expect(locked.body.partnerOnly).toBeUndefined();
       expect(locked.body.commitments).toHaveLength(1);
@@ -515,12 +550,16 @@ describe('Read gate (e2e)', () => {
     it('signed out: no partner-only entity is listed, partner values are masked', async () => {
       const companies = await get(`/companies?q=${q}`, 'signedOut');
       expect(slugsOf(companies.body)).toEqual([slugs.publicCo]);
-      expect(companies.body.items[0].masked).toEqual(['description']);
-      expect(leaks(companies.body, [S.description, S.poDescription])).toEqual([]);
+      expect(companies.body.items[0].masked).toEqual(['hq']);
+      expect(companies.body.items[0].description).toBe(S.description);
+      expect(companies.body.items[0].oneLiner).toBe(S.oneLiner);
+      expect(leaks(companies.body, [S.hq, S.poDescription])).toEqual([]);
 
       const investors = await get(`/investors?q=${q}`, 'signedOut');
       expect(slugsOf(investors.body)).toEqual([slugs.firm]);
-      expect(leaks(investors.body, [S.firmDescription])).toEqual([]);
+      expect(investors.body.items[0].description).toBe(S.firmDescription);
+      expect(investors.body.items[0].masked).toEqual(['hq']);
+      expect(leaks(investors.body, [S.firmHq])).toEqual([]);
 
       const funds = await get(`/funds?q=${q}`, 'signedOut');
       expect(slugsOf(funds.body)).toEqual([slugs.fund]);
@@ -535,6 +574,11 @@ describe('Read gate (e2e)', () => {
       expect(search.body.people).toEqual([]);
     });
 
+    it('signed out: public partner prose can match the company search', async () => {
+      const { body } = await get(`/companies?q=${encodeURIComponent(S.oneLiner)}`, 'signedOut');
+      expect(slugsOf(body)).toEqual([slugs.publicCo]);
+    });
+
     it('signed out: a filter never matches a partner-written value', async () => {
       const { body } = await get(`/funds?q=${q}&status=Closed`, 'signedOut');
       // The status filter is ignored outright signed out (a partner-only column).
@@ -544,7 +588,7 @@ describe('Read gate (e2e)', () => {
 
     it('signed in: every entity listed, with partner values', async () => {
       const companies = await get(`/companies?q=${q}`, 'locked');
-      expect(slugsOf(companies.body)).toEqual([slugs.publicCo, slugs.partnerCo].sort());
+      expect(slugsOf(companies.body)).toEqual([slugs.publicCo, slugs.partnerCo, slugs.partnerCoBare].sort());
       const investors = await get(`/investors?q=${q}`, 'locked');
       expect(slugsOf(investors.body)).toEqual([slugs.firm, slugs.partnerFirm].sort());
       const funds = await get(`/funds?q=${q}`, 'locked');
@@ -557,22 +601,40 @@ describe('Read gate (e2e)', () => {
   });
 
   describe('sitemap', () => {
-    it(
-      'lists the public company and never the partner-only stub',
-      async () => {
-        // Both slugs share the tag, so they sit on the same page of the
-        // slug-ordered feed: the page holding the public one.
+    it('lists public companies and prose stubs, never a bare stub', async () => {
+      for (const slug of [slugs.publicCo, slugs.partnerCo, slugs.partnerCoBare]) {
         const before = await prisma.company.count({
-          where: { moderationStatus: 'APPROVED', mergedIntoId: null, partnerOnly: false, slug: { lt: slugs.publicCo } },
+          where: {
+            moderationStatus: 'APPROVED', mergedIntoId: null, slug: { lt: slug },
+            OR: [{ partnerOnly: false }, { oneLiner: { not: '' } }, { description: { not: '' } }],
+          },
         });
-        const page = Math.floor(before / SITEMAP_PAGE_SIZE);
-        const { body } = await get(`/companies/sitemap?page=${page}`, 'signedOut');
-        const listed = new Set((body as { slug: string }[]).map((e) => e.slug));
-        expect(listed.has(slugs.publicCo)).toBe(true);
-        expect(listed.has(slugs.partnerCo)).toBe(false);
-      },
-      SITEMAP_TIMEOUT_MS,
-    );
+        const { body } = await get(`/companies/sitemap?page=${Math.floor(before / SITEMAP_PAGE_SIZE)}`, 'signedOut');
+        expect(body.some((entry: { slug: string }) => entry.slug === slug)).toBe(slug !== slugs.partnerCoBare);
+      }
+    }, SITEMAP_TIMEOUT_MS);
+
+    it('lists a partner-only firm with prose', async () => {
+      const before = await prisma.investor.count({
+        where: {
+          moderationStatus: 'APPROVED', mergedIntoId: null, slug: { lt: slugs.partnerFirm },
+          OR: [
+            {
+              partnerOnly: false,
+              OR: [
+                { holdings: { some: { moderationStatus: 'APPROVED', company: { moderationStatus: 'APPROVED', mergedIntoId: null } } } },
+                { funds: { some: { moderationStatus: 'APPROVED' } } },
+                { people: { some: { moderationStatus: 'APPROVED' } } },
+                { commitments: { some: { moderationStatus: 'APPROVED', fund: { moderationStatus: 'APPROVED' } } } },
+              ],
+            },
+            { AND: [{ description: { not: null } }, { NOT: { description: '' } }] },
+          ],
+        },
+      });
+      const { body } = await get(`/investors/sitemap?page=${Math.floor(before / SITEMAP_PAGE_SIZE)}`, 'signedOut');
+      expect(body.some((entry: { slug: string }) => entry.slug === slugs.partnerFirm)).toBe(true);
+    }, SITEMAP_TIMEOUT_MS);
   });
 
   describe('retracting an approved edit', () => {
@@ -580,7 +642,7 @@ describe('Read gate (e2e)', () => {
       const proposal = await prisma.changeProposal.create({
         data: {
           companyId: ids.publicCo!,
-          changes: { description: `human-description-${stamp}` },
+          changes: { hq: `human-hq-${stamp}` },
           submittedById: ids['user-USER'],
         },
         select: { id: true },
@@ -595,17 +657,17 @@ describe('Read gate (e2e)', () => {
       // The approval replaced the partner's value with a human one: unmasked.
       await decide('APPROVED');
       const approved = await get(`/companies/${slugs.publicCo}`, 'signedOut');
-      expect(approved.body.company.description).toBe(`human-description-${stamp}`);
+      expect(approved.body.company.hq).toBe(`human-hq-${stamp}`);
       expect(approved.body.company.masked).toBeUndefined();
 
       // The retraction restores the partner's value — and its mark with it.
       const res = await decide('REJECTED');
-      expect(res.body).toMatchObject({ revertedFields: ['description'], skippedFields: [] });
+      expect(res.body).toMatchObject({ revertedFields: ['hq'], skippedFields: [] });
       const out = await get(`/companies/${slugs.publicCo}`, 'signedOut');
-      expect(out.body.company.masked).toEqual(['description']);
-      expect(leaks(out.body, [S.description])).toEqual([]);
+      expect(out.body.company.masked).toEqual(['hq']);
+      expect(leaks(out.body, [S.hq])).toEqual([]);
       const locked = await get(`/companies/${slugs.publicCo}`, 'locked');
-      expect(locked.body.company.description).toBe(S.description);
+      expect(locked.body.company.hq).toBe(S.hq);
     });
   });
 

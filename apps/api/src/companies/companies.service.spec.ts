@@ -334,10 +334,10 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
       const res = await service.getCompanyDetail('helia');
       const json = JSON.stringify(res);
 
-      expect(res.company.description).toBe('');
+      expect(res.company.description).toBe('PARTNER-DESCRIPTION');
       expect(res.company.totalRaisedUsd).toBe(0);
-      expect(res.company.masked?.sort()).toEqual(['description', 'totalRaisedUsd']);
-      expect(json).not.toContain('PARTNER-');
+      expect(res.company.masked?.sort()).toEqual(['totalRaisedUsd']);
+      for (const sentinel of ['PARTNER-ROUND', 'PARTNER-VC', 'PARTNER-PERSON']) expect(json).not.toContain(sentinel);
       expect(res.company.people?.map((p) => p.id)).toEqual(['p2', 'p3']);
       // Totals include the partner rows: a count is public.
       expect(res.access.totals).toMatchObject({ rounds: 3, people: 3 });
@@ -381,7 +381,7 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
         name: 'Helia',
         domain: 'helia.com',
         partnerOnly: true,
-        description: '',
+        description: 'PARTNER-DESCRIPTION',
         hq: '',
         rounds: [],
         people: [],
@@ -389,8 +389,20 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
       expect(res.company.identifiers).toBeUndefined();
       expect(res.citations).toEqual([]);
       expect(res.access.totals.people).toBe(3);
-      expect(JSON.stringify(res)).not.toContain('PARTNER-');
+      expect(res.indexable).toBe(true);
+      expect(res.company.masked).not.toContain('description');
+      expect(res.company.masked).not.toContain('oneLiner');
       expect(JSON.stringify(res)).not.toContain('Helia Payments');
+    });
+
+    it.each([
+      ['', '', false],
+      ['Only a lead', '', true],
+      ['', 'Only an about', true],
+    ])('indexes a partner stub by stored prose (%s, %s)', async (oneLiner, description, indexable) => {
+      build(dbCompany({ partnerOnly: true, oneLiner, description }));
+      expect((await service.getCompanyDetail('helia')).indexable).toBe(indexable);
+      expect((await service.getCompanyDetail('helia', user)).indexable).toBe(indexable);
     });
 
     it('never gives a signed-in viewer the stub', async () => {
@@ -399,6 +411,30 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
       expect(res.company.partnerOnly).toBeUndefined();
       expect(res.company.description).toBe('PARTNER-DESCRIPTION');
     });
+  });
+});
+
+describe('CompaniesService.findFeatured (partner prose)', () => {
+  it('publishes prose, masks HQ and excludes partner-only companies signed out', async () => {
+    const findMany = jest.fn(async () => [dbCompany({
+      oneLiner: 'Public partner lead', description: 'Public partner prose',
+      hq: 'PRIVATE-HQ', partnerFields: ['oneLiner', 'description', 'hq'],
+    })]);
+    const prisma = {
+      $queryRaw: jest.fn(async () => [
+        { id: 'c1', partnerOnly: false }, { id: 'partner-only', partnerOnly: true },
+      ]),
+      company: { findMany },
+    } as unknown as PrismaService;
+    const users = { accessFor: async () => ({ unlocked: false, signedIn: false, unlockedUntil: null }) } as unknown as UsersService;
+    const result = await new CompaniesService(prisma, users).findFeatured();
+    expect(findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['c1'] }, moderationStatus: 'APPROVED', mergedIntoId: null },
+    });
+    expect(result.items[0]).toMatchObject({
+      oneLiner: 'Public partner lead', description: 'Public partner prose', hq: '', masked: ['hq'],
+    });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE-HQ');
   });
 });
 
@@ -415,8 +451,8 @@ describe('CompaniesService.listSlugs (sitemap feed)', () => {
     const entries = await service.listSlugs();
 
     expect(findMany).toHaveBeenCalledWith({
-      // A partner-only company is a noindex stub: never in the sitemap.
-      where: { moderationStatus: 'APPROVED', mergedIntoId: null, partnerOnly: false },
+      // Partner-only companies with public prose are indexable too.
+      where: { moderationStatus: 'APPROVED', mergedIntoId: null, OR: [{ partnerOnly: false }, { oneLiner: { not: '' } }, { description: { not: '' } }] },
       select: { slug: true, updatedAt: true },
       orderBy: { slug: 'asc' },
       skip: 0,
@@ -739,7 +775,7 @@ describe('CompaniesService country filter and facet', () => {
     });
   });
 
-  it('never lists, matches or reveals partner data to a signed-out viewer', async () => {
+  it('keeps partner-only companies and gated facts out of signed-out directories', async () => {
     const findMany = jest.fn(async () => [
       { ...dbCompany(), countryCode: 'GB', description: 'PARTNER-PROSE', partnerFields: ['description', 'stage'] },
     ]);
@@ -759,14 +795,13 @@ describe('CompaniesService country filter and facet', () => {
         partnerOnly: false,
         OR: [
           { name: { contains: 'acme', mode: 'insensitive' } },
-          { oneLiner: { contains: 'acme', mode: 'insensitive' }, NOT: { partnerFields: { has: 'oneLiner' } } },
+          { oneLiner: { contains: 'acme', mode: 'insensitive' } },
         ],
         countryCode: 'GB',
         AND: [{ NOT: { partnerFields: { has: 'countryCode' } } }],
       },
     });
-    expect(page.items[0]).toMatchObject({ description: '', stage: '', masked: ['description', 'stage'] });
-    expect(JSON.stringify(page)).not.toContain('PARTNER-PROSE');
+    expect(page.items[0]).toMatchObject({ description: 'PARTNER-PROSE', stage: '', masked: ['stage'] });
   });
 
   it('counts public rows with a stated country only, most first, and caches the result', async () => {

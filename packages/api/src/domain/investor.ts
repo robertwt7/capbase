@@ -66,8 +66,8 @@ export interface InvestorDetailResponse extends InvestorSummary {
   /** Citations attesting the fund rows above. */
   citations: Citation[];
   /** Whether search engines should index this profile (`indexing.ts`). The
-   *  sitemap lists exactly the investors for whom this is true. Never for a
-   *  partner-only firm. */
+   *  sitemap lists exactly the investors for whom this is true, including a
+   *  partner-only firm with a non-empty description. */
   indexable: boolean;
   /** The viewer's gate: each section above holds `gateLimit` rows, while every
    *  count (`portfolioCount`, `peopleCount`, …) covers all of them. */

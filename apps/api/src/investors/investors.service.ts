@@ -37,6 +37,7 @@ import {
   FUND_BLANKS,
   INVESTOR_BLANKS,
   PARTNER_SOURCE,
+  PUBLIC_PARTNER_FIELDS,
   listAccess,
   maskFields,
   maskPartnerFields,
@@ -88,22 +89,27 @@ const PUBLIC_LP_COMMITMENTS = {
   fund: PUBLIC_FUNDS,
 } satisfies Prisma.FundCommitmentWhereInput;
 
-/**
- * Worth a search engine's time: the profile shows at least one portfolio
- * company, named fund or officer. Built from the SAME filters the detail read
- * counts with, so a firm can't be indexable on a row its page doesn't show —
- * and `findOne` derives `indexable` from those counts, so the sitemap and the
- * robots meta always agree.
- */
+/** A firm with non-empty public prose, matching Boolean(row.description). */
+const HAS_DESCRIPTION = {
+  AND: [{ description: { not: null } }, { NOT: { description: '' } }],
+} satisfies Prisma.InvestorWhereInput;
+
+/** Public prose makes any firm indexable, including a partner-only stub.
+ *  Otherwise a public-record firm needs a holding, fund, officer or commitment.
+ *  `findOne` uses the same description and relation counts for robots metadata. */
 const INDEXABLE_INVESTOR = {
   ...PUBLIC_INVESTOR,
-  // A partner-only firm is a stub for crawlers (who are signed out): noindex.
-  partnerOnly: false,
   OR: [
-    { holdings: { some: PUBLIC_HOLDINGS } },
-    { funds: { some: PUBLIC_FUNDS } },
-    { people: { some: PUBLIC_OFFICERS } },
-    { commitments: { some: PUBLIC_LP_COMMITMENTS } },
+    {
+      partnerOnly: false,
+      OR: [
+        { holdings: { some: PUBLIC_HOLDINGS } },
+        { funds: { some: PUBLIC_FUNDS } },
+        { people: { some: PUBLIC_OFFICERS } },
+        { commitments: { some: PUBLIC_LP_COMMITMENTS } },
+      ],
+    },
+    HAS_DESCRIPTION,
   ],
 } satisfies Prisma.InvestorWhereInput;
 
@@ -119,7 +125,7 @@ type SampleRow = { investorId: string; slug: string; name: string; domain: strin
 type SampleHolding = { company: Omit<SampleRow, 'investorId'> };
 
 /** Every Investor field a partner-only stub withholds: all but the identity
- *  (slug, name) and — unless the partner wrote it — the logo domain. */
+ *  (slug, name), public prose and — unless the partner wrote it — the logo domain. */
 const INVESTOR_STUB_HIDDEN = [
   'legalName',
   'type',
@@ -131,7 +137,7 @@ const INVESTOR_STUB_HIDDEN = [
   'fundCount',
   'assetsUsd',
   'foundedYear',
-];
+].filter((field) => !PUBLIC_PARTNER_FIELDS.includes(field));
 
 /** Holdings a viewer may see on a card or profile: no partner edge, and no
  *  partner-only company, for a signed-out viewer. */
@@ -401,7 +407,7 @@ export class InvestorsService {
         funds: [],
         namedFundCount: row._count.funds,
         citations: [],
-        indexable: false,
+        indexable: Boolean(row.description),
         access: gate,
       };
     }
@@ -461,11 +467,12 @@ export class InvestorsService {
       citations: await this.loadFundCitations(funds.map((f) => f.id)),
       // INDEXABLE_INVESTOR, read off the counts this response already carries.
       indexable:
-        !row.partnerOnly &&
-        (summary.portfolioCount > 0 ||
-          row._count.funds > 0 ||
-          row._count.people > 0 ||
-          row._count.commitments > 0),
+        Boolean(row.description) ||
+        (!row.partnerOnly &&
+          (summary.portfolioCount > 0 ||
+            row._count.funds > 0 ||
+            row._count.people > 0 ||
+            row._count.commitments > 0)),
       access: gate,
     };
   }
@@ -538,8 +545,8 @@ export class InvestorsService {
   /**
    * Every INDEXABLE investor slug, for the web sitemap. Most of the Form ADV
    * universe is a name and an address; those profiles stay public but
-   * `noindex`, and join the sitemap on their own once a holding, fund or
-   * officer arrives.
+   * `noindex`, and join the sitemap on their own once public prose, a holding, fund,
+   * officer or commitment arrives.
    */
   /** One `SITEMAP_PAGE_SIZE` page, by slug: a unique, stable order, so a row
    *  updated between two page reads can neither repeat nor go missing. */

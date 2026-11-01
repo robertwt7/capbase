@@ -42,6 +42,7 @@ import type { Company as DbCompany, Prisma } from '@repo/db';
 import {
   COMPANY_BLANKS,
   ROUND_BLANKS,
+  PUBLIC_PARTNER_FIELDS,
   listAccess,
   maskFields,
   maskPartnerFields,
@@ -120,7 +121,7 @@ function approvedChildren(access: ViewerAccess) {
 }
 
 /** Every Company field a partner-only stub withholds: all of them but the
- *  identity (slug, name) and — unless the partner wrote it — the logo domain. */
+ *  identity, public prose and — unless the partner wrote it — the logo domain. */
 const STUB_HIDDEN = [
   'websiteUrl',
   'linkedinUrl',
@@ -140,10 +141,11 @@ const STUB_HIDDEN = [
   'stage',
   'totalRaisedUsd',
   'lastValuationUsd',
-];
+].filter((field) => !PUBLIC_PARTNER_FIELDS.includes(field));
 
 /** What a signed-out viewer gets for a company only the partner knows: its
- *  name and (via `access.totals`) its counts — no facts, rows or citations. */
+ *  identity, public prose and (via `access.totals`) counts — no other facts,
+ *  rows or citations. */
 function companyStub(row: DbCompany): Company {
   const hidden = row.partnerFields.includes('domain') ? [...STUB_HIDDEN, 'domain'] : STUB_HIDDEN;
   const company = maskFields(toCompany(row), hidden, COMPANY_BLANKS);
@@ -191,9 +193,16 @@ const shuffled = <T>(items: readonly T[], random = Math.random): T[] => {
   return out;
 };
 
-/** The sitemap's companies: public, and not a partner-only stub (crawlers are
- *  signed out, and a stub is `noindex`). */
-const SITEMAP_COMPANY = { ...PUBLIC_COMPANY, partnerOnly: false } satisfies Prisma.CompanyWhereInput;
+/** Non-empty stored prose, matching the sitemap's SQL (ingest already trims it). */
+const hasProse = (row: { oneLiner: string; description: string }): boolean =>
+  row.oneLiner !== '' || row.description !== '';
+
+/** Every public-record company, plus partner-only companies with public prose.
+ *  The detail response's `indexable` applies the same rule. */
+const SITEMAP_COMPANY = {
+  ...PUBLIC_COMPANY,
+  OR: [{ partnerOnly: false }, { oneLiner: { not: '' } }, { description: { not: '' } }],
+} satisfies Prisma.CompanyWhereInput;
 
 @Injectable()
 export class CompaniesService {
@@ -292,9 +301,10 @@ export class CompaniesService {
 
   /**
    * One page of approved companies, filtered/sorted server-side. A signed-out
-   * viewer never sees a partner-only company, a partner-written value (masked)
-   * or a filter/search match on one. Sorting stays over the stored values — the
-   * rank of a partner-raised total is an accepted trade, never the value.
+   * viewer never sees a partner-only company, a gated partner-written value
+   * or a filter/search match on one. Partner prose is public. Sorting stays
+   * over stored values — the rank of a partner-raised total is an accepted
+   * trade, never the value.
    */
   async findAllApproved(
     query: CompanyListQuery = {},
@@ -314,7 +324,6 @@ export class CompaniesService {
           { name: { contains: query.q, mode: 'insensitive' as const } },
           {
             oneLiner: { contains: query.q, mode: 'insensitive' as const },
-            ...(signedOut && { NOT: { partnerFields: { has: 'oneLiner' } } }),
           },
         ],
       }),
@@ -422,7 +431,7 @@ export class CompaniesService {
       totals: await this.sectionTotals(row.id),
     };
     if (stubFor(row.partnerOnly, access)) {
-      return { company: companyStub(row), access: gate, latestRound: null, citations: [] };
+      return { company: companyStub(row), access: gate, latestRound: null, citations: [], indexable: hasProse(row) };
     }
 
     const company = maskPartnerFields(toCompany(row), row.partnerFields, access, COMPANY_BLANKS);
@@ -451,7 +460,7 @@ export class CompaniesService {
     ]);
     company.identifiers = identifiers;
 
-    return { company, access: gate, latestRound, citations };
+    return { company, access: gate, latestRound, citations, indexable: !row.partnerOnly || hasProse(row) };
   }
 
   /** Every approved row per section, partner rows included — six indexed

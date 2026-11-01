@@ -365,6 +365,11 @@ describe('InvestorsService', () => {
         expect((await service.findOne('sequoia-capital')).indexable).toBe(false);
       });
 
+      it.each([false, true])('indexes a description-only firm, partnerOnly=%s', async (partnerOnly) => {
+        findFirst.mockResolvedValue(investorRow({ description: 'Public prose', partnerOnly, partnerFields: ['description'] }));
+        expect((await service.findOne('sequoia-capital')).indexable).toBe(true);
+      });
+
       it('is true for a firm with only a holding', async () => {
         findFirst.mockResolvedValue(
           investorRow({
@@ -460,14 +465,15 @@ describe('InvestorsService', () => {
         accessFor: async () => access,
       } as unknown as UsersService);
 
-    it('keeps partner-only firms, partner values and partner holdings out of a signed-out list', async () => {
+    it('keeps partner-only firms and holdings out of signed-out lists while publishing prose', async () => {
       count.mockResolvedValue(1);
       findMany.mockResolvedValue([investorRow({ description: 'PARTNER-PROSE', partnerFields: ['description'] })]);
       const { items } = await service.findAll({ type: 'Venture' });
 
       const args = findMany.mock.calls[0]![0] as { where: Record<string, unknown> };
       expect(args.where).toMatchObject({ partnerOnly: false, type: 'Venture', AND: [{ NOT: { partnerFields: { has: 'type' } } }] });
-      expect(items[0]).toMatchObject({ description: null, masked: ['description'] });
+      expect(items[0]!.description).toBe('PARTNER-PROSE');
+      expect(items[0]!.masked).toBeUndefined();
 
       // The sample: no partner edge (as three index ranges), no partner-only
       // company, and a partner-written domain or sector blanked.
@@ -533,15 +539,16 @@ describe('InvestorsService', () => {
         hq: null,
         people: [],
         peopleCount: 12,
-        indexable: false,
+        indexable: true,
+        description: 'PARTNER-PROSE',
         citations: [],
       });
       expect(res.identifiers).toBeUndefined();
-      expect(JSON.stringify(res)).not.toContain('PARTNER-PROSE');
+      expect(res.masked).not.toContain('description');
       expect(JSON.stringify(res)).not.toContain('Menlo Park');
     });
 
-    it('is never indexable for a partner-only firm, whoever views it', async () => {
+    it('keeps a partner-only firm without prose unindexable even with holdings', async () => {
       findFirst.mockResolvedValue(investorRow({ partnerOnly: true, _count: { holdings: 5 } }));
       await expect(service.findOne('sequoia-capital')).resolves.toMatchObject({ indexable: false });
     });
@@ -557,7 +564,7 @@ describe('InvestorsService', () => {
         { slug: 'sequoia-capital', updatedAt: '2026-08-02T13:11:06.356Z' },
       ]);
       expect(findMany.mock.calls[0]![0]).toMatchObject({
-        where: { moderationStatus: 'APPROVED', mergedIntoId: null, partnerOnly: false },
+        where: { moderationStatus: 'APPROVED', mergedIntoId: null },
       });
     });
 
@@ -576,10 +583,16 @@ describe('InvestorsService', () => {
       };
       // A firm can't be indexable on a row its page doesn't show.
       expect(where.OR).toEqual([
-        { holdings: { some: counted(relationCounts.holdings, 'investorId') } },
-        { funds: { some: counted(relationCounts.funds, 'managerId') } },
-        { people: { some: counted(relationCounts.people, 'investorId') } },
-        { commitments: { some: counted(relationCounts.commitments, 'investorId') } },
+        {
+          partnerOnly: false,
+          OR: [
+            { holdings: { some: counted(relationCounts.holdings, 'investorId') } },
+            { funds: { some: counted(relationCounts.funds, 'managerId') } },
+            { people: { some: counted(relationCounts.people, 'investorId') } },
+            { commitments: { some: counted(relationCounts.commitments, 'investorId') } },
+          ],
+        },
+        { AND: [{ description: { not: null } }, { NOT: { description: '' } }] },
       ]);
     });
   });

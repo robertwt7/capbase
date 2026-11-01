@@ -30,8 +30,10 @@ export async function generateMetadata({
   // HTML-limited bots (Bingbot, link previewers) — this puts the noindex and
   // not-found title there rather than later in the body.
   if (!investor) notFound();
-  // A partner-only firm is a stub for a signed-out viewer: never indexed.
-  if (investor.partnerOnly) return { title: investor.name, robots: { index: false, follow: true } };
+  // Bare partner-only stubs stay out of the index; the API owns the rule.
+  if (investor.partnerOnly && !investor.indexable) {
+    return { title: investor.name, robots: { index: false, follow: true } };
+  }
 
   // Withheld facts are blank in the payload, and skipped here explicitly too.
   const shown = (field: string) => !isMasked(investor, field);
@@ -43,8 +45,9 @@ export async function generateMetadata({
   ]
     .filter(Boolean)
     .join(' · ');
+  const prose = investor.partnerOnly ? investor.description ?? '' : facts || investor.description || '';
   const description =
-    facts.length > DESCRIPTION_MAX ? `${facts.slice(0, DESCRIPTION_MAX - 1).trimEnd()}…` : facts;
+    prose.length > DESCRIPTION_MAX ? `${prose.slice(0, DESCRIPTION_MAX - 1).trimEnd()}…` : prose;
 
   return {
     title: `${investor.name} — Portfolio & Profile`,
@@ -63,19 +66,28 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   const path = `/investors/${investor.slug}`;
   if (investor.partnerOnly) {
     return (
-      <StubProfile
-        kind="Investor"
-        name={investor.name}
-        domain={investor.domain}
-        next={path}
-        back={{ href: '/investors', label: 'All investors' }}
-        counts={[
-          { label: 'Portfolio companies', value: investor.portfolioCount },
-          { label: 'Funds named', value: investor.namedFundCount },
-          { label: 'Fund commitments', value: investor.commitmentCount },
-          { label: 'People', value: investor.peopleCount },
-        ].filter((c) => c.value > 0)}
-      />
+      <>
+        {investor.indexable && (
+          <>
+            <JsonLd data={investorJsonLd(investor)} />
+            <JsonLd data={investorBreadcrumbJsonLd(investor)} />
+          </>
+        )}
+        <StubProfile
+          kind="Investor"
+          name={investor.name}
+          domain={investor.domain}
+          description={investor.description}
+          next={path}
+          back={{ href: '/investors', label: 'All investors' }}
+          counts={[
+            { label: 'Portfolio companies', value: investor.portfolioCount },
+            { label: 'Funds named', value: investor.namedFundCount },
+            { label: 'Fund commitments', value: investor.commitmentCount },
+            { label: 'People', value: investor.peopleCount },
+          ].filter((c) => c.value > 0)}
+        />
+      </>
     );
   }
   const country = countryName(investor.countryCode);

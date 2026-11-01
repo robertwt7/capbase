@@ -43,11 +43,13 @@ export function companyJsonLd(company: Company) {
   const sameAs = [has('linkedinUrl') && company.linkedinUrl, company.twitterUrl].filter(
     (u): u is string => Boolean(u),
   );
+  const description =
+    (has('oneLiner') && company.oneLiner) || (has('description') && company.description);
   return {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: company.name,
-    ...(has('oneLiner') && company.oneLiner && { description: company.oneLiner }),
+    ...(description && { description }),
     ...(has('websiteUrl') && company.websiteUrl && { url: company.websiteUrl }),
     // 0 means no source recorded the year; schema.org rejects "0".
     ...(has('founded') && company.founded > 0 && { foundingDate: String(company.founded) }),

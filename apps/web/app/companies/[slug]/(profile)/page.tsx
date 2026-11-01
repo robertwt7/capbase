@@ -49,16 +49,18 @@ export async function generateMetadata({
   // not-found title there rather than later in the body.
   if (!result) notFound();
   const { company } = result;
-  // A partner-only company is a stub for a signed-out viewer: never indexed.
-  if (company.partnerOnly) {
+  // Bare partner-only stubs stay out of the index; the API owns the rule.
+  if (company.partnerOnly && !result.indexable) {
     return { title: company.name, robots: { index: false, follow: true } };
   }
 
   // A withheld fact is blank in the payload; each one is skipped explicitly
   // anyway, so the description can never state a masked value.
   const shown = (field: string) => !isMasked(company, field);
+  const prose =
+    (shown('oneLiner') && company.oneLiner) || (shown('description') && company.description) || '';
   const facts = [
-    shown('oneLiner') && company.oneLiner.replace(/\.$/, ''),
+    prose.replace(/\.$/, ''),
     shown('founded') && foundedYear(company.founded) && `Founded ${company.founded}`,
     shown('hq') && company.hq,
     shown('totalRaisedUsd') && company.totalRaisedUsd > 0
@@ -74,6 +76,7 @@ export async function generateMetadata({
     title: `${company.name} — Funding, Investors & Profile`,
     description,
     ...canonical(`/companies/${slug}`),
+    ...(!result.indexable && { robots: { index: false, follow: true } }),
   };
 }
 
@@ -89,18 +92,28 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
   const path = `/companies/${company.slug}`;
   if (company.partnerOnly) {
     return (
-      <StubProfile
-        kind="Company"
-        name={company.name}
-        domain={company.domain}
-        next={path}
-        back={{ href: '/companies', label: 'All companies' }}
-        counts={[
-          { label: 'Funding rounds', value: access.totals.rounds },
-          { label: 'Investors', value: access.totals.investors },
-          { label: 'People', value: access.totals.people },
-        ].filter((c) => c.value > 0)}
-      />
+      <>
+        {result.indexable && (
+          <>
+            <JsonLd data={companyJsonLd(company)} />
+            <JsonLd data={companyBreadcrumbJsonLd(company)} />
+          </>
+        )}
+        <StubProfile
+          kind="Company"
+          name={company.name}
+          domain={company.domain}
+          oneLiner={company.oneLiner}
+          description={company.description}
+          next={path}
+          back={{ href: '/companies', label: 'All companies' }}
+          counts={[
+            { label: 'Funding rounds', value: access.totals.rounds },
+            { label: 'Investors', value: access.totals.investors },
+            { label: 'People', value: access.totals.people },
+          ].filter((c) => c.value > 0)}
+        />
+      </>
     );
   }
 

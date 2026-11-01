@@ -631,6 +631,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
     if (!company) return undefined;
     // Offline fallback renders the full mock profile (unlocked).
     return {
+      indexable: true,
       company,
       access: {
         unlocked: true,

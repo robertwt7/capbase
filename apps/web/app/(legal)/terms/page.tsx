@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   ...canonical('/terms'),
 };
 
-const LAST_UPDATED = '17 October 2026';
+const LAST_UPDATED = '1 November 2026';
 
 export default function TermsPage() {
   return (
@@ -91,9 +91,9 @@ export default function TermsPage() {
         indicate if you made changes. Where practical, link to the page you took the data from.
       </p>
       <p>
-        Data provided by partners is not covered by this licence and may not be
-        reused from Capbase. You may read it on the Service; you may not copy, export, scrape or
-        redistribute it.
+        Data provided by partners — including company and firm descriptions shown to every
+        visitor — is not covered by this licence and may not be reused from Capbase. You may
+        read it on the Service; you may not copy, export, scrape or redistribute it.
       </p>
       <p>
         Many individual facts on Capbase come from public-domain government records (SEC EDGAR,
@@ -120,7 +120,18 @@ export default function TermsPage() {
       <p>
         Information on Capbase is aggregated from public sources (including SEC EDGAR filings and
         Wikidata), data provided by partners, and community submissions, and is provided &ldquo;as is&rdquo; for general
-        information only. It is <strong>not</strong> financial, investment, or legal advice, and we
+        information only.
+      </p>
+      <p>
+        Data from public records, partners and other third parties is published automatically,
+        without manual review, and we do not independently verify it. Community submissions are
+        reviewed by a moderator for obvious problems, not verified for accuracy. Each source
+        remains responsible for the content it supplies; we will correct or remove information
+        shown to be inaccurate or unlawful once we are told about it (see our{' '}
+        <Link href="/takedown">takedown &amp; removal policy</Link>).
+      </p>
+      <p>
+        It is <strong>not</strong> financial, investment, or legal advice, and we
         make no warranty that it is accurate, complete, or current. Verify anything important
         against primary sources before relying on it. Corrections are welcome at{' '}
         <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
@@ -144,8 +155,9 @@ export default function TermsPage() {
       <h2>10. Liability</h2>
       <p>
         To the maximum extent permitted by law, we exclude all liability for any loss or damage
-        arising from your use of, or inability to use, the Service or its data. Nothing in these
-        terms excludes, restricts, or modifies any consumer guarantee, right, or remedy under the
+        arising from your use of, or inability to use, the Service or its data, including
+        information supplied by partners or other third parties as described in section 7. Nothing
+        in these terms excludes, restricts, or modifies any consumer guarantee, right, or remedy under the
         Australian Consumer Law or other legislation that cannot lawfully be excluded; to the
         extent such a guarantee applies and liability may be limited, our liability is limited, at
         our option, to resupplying the Service or paying the cost of having it resupplied.

@@ -4,7 +4,7 @@
  *
  * Two rules (the policy itself lives in `@repo/api` `contributions.ts`):
  *   - by section: `gateLimit(section, access)` rows per section;
- *   - by provenance: partner data never reaches a signed-out viewer — partner
+ *   - by provenance: partner data except public prose stays signed-in — partner
  *     ROWS are filtered out of child queries (`publicRowsWhere`), partner
  *     FIELDS are blanked on every entity (`maskPartnerFields`), and partner-only
  *     ENTITIES become stubs.
@@ -16,6 +16,9 @@ import { partnerVisible, type ViewerAccess } from '@repo/api';
 /** The ingest tag of the licensed partner. */
 export const PARTNER_SOURCE = 'PARTNER';
 
+/** Licensed for public display: what a company or firm is. Other partner fields stay gated. */
+export const PUBLIC_PARTNER_FIELDS: readonly string[] = ['oneLiner', 'description'];
+
 /**
  * Blanks for fields whose domain type is not nullable. Anything not listed is
  * blanked to null. A masked numeric field must never read as a real figure, so
@@ -23,8 +26,6 @@ export const PARTNER_SOURCE = 'PARTNER';
  */
 export const COMPANY_BLANKS: Record<string, unknown> = {
   domain: '',
-  oneLiner: '',
-  description: '',
   hq: '',
   founded: 0,
   headcount: 0,
@@ -38,7 +39,7 @@ export const ROUND_BLANKS: Record<string, unknown> = { name: '', date: '', amoun
 export const FUND_BLANKS: Record<string, unknown> = { currency: 'USD' };
 
 /**
- * Withhold every field in `partnerFields` that `entity` carries, when this
+ * Withhold non-public fields in `partnerFields` that `entity` carries, when this
  * viewer may not see partner data: the value is blanked and the field listed
  * in `masked`. A no-op (the same object, untouched) for a signed-in viewer.
  */
@@ -49,7 +50,8 @@ export function maskPartnerFields<T extends object>(
   blanks: Record<string, unknown> = {},
 ): T {
   if (partnerVisible(access) || !partnerFields?.length) return entity;
-  return maskFields(entity, partnerFields, blanks);
+  const gated = partnerFields.filter((field) => !PUBLIC_PARTNER_FIELDS.includes(field));
+  return gated.length ? maskFields(entity, gated, blanks) : entity;
 }
 
 /** Blank `fields` on `entity` unconditionally (the stub and the terms gate),
