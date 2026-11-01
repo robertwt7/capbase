@@ -639,6 +639,17 @@ describe('CompaniesService.getCompanyHistory', () => {
     expect(items.map((i) => i.actorName)).toEqual(['partner', 'automated']);
   });
 
+  it('passes an ownership correction through as REPAIR with its safe summary, never an empty UPDATE', async () => {
+    const summary = { kind: 'split-out', other: { name: 'Indigo', slug: 'indigo-723159' }, rounds: 1, holdings: 4 };
+    const { service } = makeService([
+      revision({ field: '', before: null, after: summary, action: 'REPAIR', actor: 'INGEST', actorSource: 'PARTNER', actorUser: null }),
+    ]);
+
+    const { items } = await service.getCompanyHistory('helia', 1, 20, contributor);
+
+    expect(items[0]).toMatchObject({ action: 'REPAIR', field: '', after: summary, actor: 'INGEST', actorName: 'partner' });
+  });
+
   it('denies anonymous service calls before company or revision queries', async () => {
     const { service, findFirst, findMany, count, users } = makeService([revision()]);
     await expect(service.getCompanyHistory('helia')).rejects.toThrow(UnauthorizedException);

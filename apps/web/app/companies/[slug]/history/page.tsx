@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { canViewCompanyHistory, type Revision } from '@repo/api';
+import { canViewCompanyHistory, type RepairSummary, type Revision } from '@repo/api';
 
 import { getSession, requireCompanyHistory } from '@/lib/auth';
 import { Button, EmptyState, Pagination, SectionHeader } from '@/components/ui';
@@ -157,6 +157,9 @@ function Entry({ item }: { item: Revision }) {
   // field of an edit, which carries a diff back to the value it replaced.
   const retracted = item.action === 'RETRACT' && item.field === '';
   const reverted = item.action === 'RETRACT' && item.field !== '';
+  // An ownership correction: records wrongly combined with this profile were
+  // separated. Never an empty-field UPDATE, never a fictional admin unmerge.
+  const repair = item.action === 'REPAIR' ? repairSummary(item.after) : null;
 
   return (
     <li className="grid grid-cols-[170px_1fr] items-baseline gap-x-6 border-t border-line py-4 max-md:grid-cols-1 max-md:gap-y-2">
@@ -170,6 +173,16 @@ function Entry({ item }: { item: Revision }) {
           <span className="font-display font-semibold">{item.entityLabel}</span>
           {item.action === 'CREATE' ? (
             <span className="text-graphite-700"> added</span>
+          ) : repair ? (
+            <span className="text-graphite-700">
+              {' '}
+              {repair.kind === 'split-out'
+                ? 'records separated to'
+                : repair.kind === 'split-from'
+                  ? 'separated from'
+                  : 'separation reversed with'}{' '}
+              <span className="font-mono text-[13px] text-ink">{repair.other.name || 'another record'}</span>
+            </span>
           ) : retracted ? (
             <span className="text-graphite-700"> retracted</span>
           ) : reverted ? (
@@ -218,9 +231,42 @@ function Entry({ item }: { item: Revision }) {
             A moderator withdrew its approval; it no longer shows on the profile.
           </p>
         ) : null}
+
+        {repair ? (
+          <p className="mt-1.5 text-[13px] text-graphite-500">
+            {repair.kind === 'reversed'
+              ? 'An earlier ownership correction was undone; the records are back where they were.'
+              : `Ingestion had combined two different companies. ${repairCounts(repair)} ${
+                  repair.kind === 'split-out' ? 'now sit on their own profile.' : 'moved here from the other profile.'
+                }`}
+          </p>
+        ) : null}
       </div>
     </li>
   );
+}
+
+/** A REPAIR revision's displayed payload, or null when it is not one. */
+function repairSummary(value: unknown): RepairSummary | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Partial<RepairSummary>;
+  if (v.kind !== 'split-out' && v.kind !== 'split-from' && v.kind !== 'reversed') return null;
+  return {
+    kind: v.kind,
+    other: { name: v.other?.name ?? '', slug: v.other?.slug ?? '' },
+    rounds: typeof v.rounds === 'number' ? v.rounds : 0,
+    holdings: typeof v.holdings === 'number' ? v.holdings : 0,
+  };
+}
+
+/** "2 funding rounds and 3 investor holdings". */
+function repairCounts(r: RepairSummary): string {
+  const part = (n: number, one: string, many: string) => `${formatCount(n)} ${n === 1 ? one : many}`;
+  const parts = [
+    r.rounds > 0 ? part(r.rounds, 'funding round', 'funding rounds') : '',
+    r.holdings > 0 ? part(r.holdings, 'investor holding', 'investor holdings') : '',
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(' and ')[0]!.toUpperCase()}${parts.join(' and ').slice(1)}` : 'Its records';
 }
 
 /** The other side of a merge, as recorded on the revision: `{ slug, name }`. */

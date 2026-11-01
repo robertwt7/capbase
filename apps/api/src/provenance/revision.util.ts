@@ -18,7 +18,7 @@ export interface RevisionInput {
   field: string;
   before: JsonColumnValue;
   after: JsonColumnValue;
-  action: 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT';
+  action: 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT' | 'REPAIR';
   actor: 'USER' | 'ADMIN' | 'INGEST';
   actorUserId?: string | null;
   actorSource?: string | null;

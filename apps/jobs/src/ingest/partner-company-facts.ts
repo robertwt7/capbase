@@ -9,6 +9,13 @@
  * writes a revision and a `partnerFields` mark, exactly as a fresh partner run
  * would — and never writes prose, name, stage, status or totals.
  *
+ * Only through a CERTIFIED association: the partner id must have a RESOLVED
+ * `CompanyIngestBinding` to this very company (written by the company-match
+ * repair's certification or by a structural ingest match). An alias attached by
+ * a name match — possibly to the wrong company — fills nothing until the repair
+ * audit has certified or separated it, so run `repair-company-matches` (and its
+ * BINDINGS batch) first.
+ *
  * Reads `partner_stage.company` (no network). Idempotent: a filled row no longer
  * qualifies, so a second run selects nothing that can change.
  */
@@ -70,8 +77,8 @@ export class PartnerCompanyFactsBackfill {
 
   /**
    * One page of approved, unmerged companies another source created that carry
-   * a partner identifier, are blank on industry or location, and whose staged
-   * partner row states the missing value. One staged row per company (the
+   * a CERTIFIED partner identifier, are blank on industry or location, and whose
+   * staged partner row states the missing value. One staged row per company (the
    * lowest partner id) — a merge can leave two, and enrichment would fill from
    * the first anyway.
    */
@@ -87,6 +94,10 @@ export class PartnerCompanyFactsBackfill {
        WHERE c.id > ${after}
          AND c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL
          AND c."externalSource" IS DISTINCT FROM 'PARTNER'
+         AND EXISTS (
+           SELECT 1 FROM "CompanyIngestBinding" b
+            WHERE b.source = 'PARTNER' AND b."sourceCompanyId" = e.value
+              AND b.status = 'RESOLVED' AND b."companyId" = c.id)
          AND (
            (cardinality(c.industry) = 0
              AND (btrim(coalesce(s.industry, '')) <> '' OR btrim(coalesce(s.verticals, '')) <> ''))

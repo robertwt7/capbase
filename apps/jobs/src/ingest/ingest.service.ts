@@ -28,6 +28,20 @@ import {
   type SourceIdentifier,
 } from '../sources/ingestion-source';
 import { kebab } from '../util/slug';
+import { suppliedCompanyFields } from './company-fields';
+import {
+  COMPANY_MATCH_POLICY_VERSION,
+  countriesCompatible,
+  NAME_CANDIDATE_LIMIT,
+  RECORD_ID_SCHEMES,
+  bindingEvidence,
+  companyIdentityKey,
+  decideCompanyMatch,
+  sha256,
+  type BindingView,
+  type CandidateEvidence,
+  type CompanyMatch,
+} from './company-matcher';
 import { uniqueFundSlug } from './fund-slug';
 import {
   emptyCounts,
@@ -60,12 +74,18 @@ interface MatchIndex {
   /** `${scheme}:${normalized value}` → company id. The strongest signal: an
    *  identifier is a statement by the publisher about which entity this is. */
   byIdentifier: Map<string, string>;
-  /** domain → company id (first wins). */
-  byDomain: Map<string, string>;
-  /** normalizeName(name) → every company id holding that name, in load order.
-   *  A list rather than first-wins, because the first holder may be in another
-   *  country: "Acme Ltd" (GB) must be able to skip "Acme Inc" (US). */
+  /** domain → EVERY live company holding it (the column or a DOMAIN
+   *  identifier), a bare string for the common single holder. Not first-wins:
+   *  a domain two rows share identifies neither (company-matcher.ts rule 6). */
+  domainHolders: Map<string, string | string[]>;
+  /** companyIdentityKey(name) → every company id holding that name. Names
+   *  never combine companies; they only propose a review candidate. */
   byName: Map<string, string | string[]>;
+  /** `${source}:${sourceCompanyId}` → its routing decision
+   *  (CompanyIngestBinding), the company survivor-resolved. */
+  bindings: Map<string, BindingView>;
+  /** Merge-tombstone resolution for ids read after the index was loaded. */
+  survivorOf: (id: string) => string | null;
   /** company id → its countryCode (null when no source has stated one). Kept
    *  beside byName rather than inside it so filling a blank country updates
    *  every name the row is listed under at once. */
@@ -79,6 +99,21 @@ interface MatchIndex {
   slugs: Set<string>;
   /** What this run's identifier writes did, reported once at the end. */
   identifiers: IdentifierCounts;
+}
+
+/** Records ingest declined to write because the identity evidence disagrees
+ *  or an association is not yet certified. Counts and a few sample keys only. */
+interface MatchStats {
+  held: Record<string, number>;
+  conflicts: Record<string, number>;
+  childOwnerClashes: number;
+  roundBindingConflicts: number;
+  nameCandidates: number;
+  samples: string[];
+}
+
+function emptyMatchStats(): MatchStats {
+  return { held: {}, conflicts: {}, childOwnerClashes: 0, roundBindingConflicts: 0, nameCandidates: 0, samples: [] };
 }
 
 /** Lookup tables for funds (one query per run). */
@@ -280,6 +315,8 @@ export class IngestService {
   private readonly recordRevisions: boolean;
   /** Edge counters for the current run (runs are serialized by the ingest lock). */
   private stats: EdgeStats = emptyEdgeStats();
+  /** What the company identity policy declined to write this run. */
+  private matchStats: MatchStats = emptyMatchStats();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -304,6 +341,7 @@ export class IngestService {
 
     const lazy = this.lazyIndexes(active.some((src) => SOURCE_RECORD_SCHEMES.has(src.name)));
     this.stats = emptyEdgeStats();
+    this.matchStats = emptyMatchStats();
     let processed = 0;
     let upserted = 0;
     let investors = 0;
@@ -425,6 +463,7 @@ export class IngestService {
         `${ids.skipped + inv.skipped + per.skipped} skipped (failed validation), ` +
         `${ids.conflict + inv.conflict + per.conflict} conflicts (merge candidates recorded)`,
     );
+    this.logMatchStats();
     const st = this.stats;
     if (Object.values(st).some((n) => n > 0)) {
       // Counts only — never a value. The contact count in particular is a
@@ -440,6 +479,27 @@ export class IngestService {
     }
     await this.refreshCounts();
     return { processed, upserted, investors, funds };
+  }
+
+  /** The identity policy's refusals, once per run: counts by reason and a few
+   *  record keys to start an investigation from (source ids, never content). */
+  private logMatchStats(): void {
+    const m = this.matchStats;
+    const total = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
+    const held = total(m.held);
+    const conflicts = total(m.conflicts);
+    if (held + conflicts + m.childOwnerClashes + m.roundBindingConflicts + m.nameCandidates === 0) return;
+    this.logger.log(
+      `Company identity: ${held} records held ${JSON.stringify(m.held)}, ${conflicts} conflicts ${JSON.stringify(m.conflicts)}, ` +
+        `${m.childOwnerClashes} held for a round/holding owned by another company, ` +
+        `${m.roundBindingConflicts} deals skipped (bound round gone), ${m.nameCandidates} name twins proposed for review`,
+    );
+    if (m.samples.length) this.logger.log(`Company identity samples: ${m.samples.join(', ')}`);
+  }
+
+  /** Counters for tests and the CLI. */
+  identityStats(): Readonly<MatchStats> {
+    return this.matchStats;
   }
 
   /**
@@ -729,8 +789,10 @@ export class IngestService {
     const index: MatchIndex = {
       byKey: new Map(),
       byIdentifier: await this.loadIdentifiers('company', survivorOf, recordSchemes),
-      byDomain: new Map(),
+      domainHolders: new Map(),
       byName: new Map(),
+      bindings: await this.loadBindings(survivorOf),
+      survivorOf,
       countryOf: new Map(),
       companyNumberOf: new Map(),
       slugs: new Set(),
@@ -739,6 +801,8 @@ export class IngestService {
     for (const [key, id] of index.byIdentifier) {
       if (key.startsWith(COMPANY_NUMBER_PREFIX)) {
         index.companyNumberOf.set(id, key.slice(COMPANY_NUMBER_PREFIX.length));
+      } else if (key.startsWith(DOMAIN_PREFIX)) {
+        addHolder(index.domainHolders, key.slice(DOMAIN_PREFIX.length), id);
       }
     }
     await this.eachPage(
@@ -768,12 +832,45 @@ export class IngestService {
           if (c.externalSource && c.externalId && wantKey(c.externalSource, recordSchemes)) {
             index.byKey.set(`${c.externalSource}:${c.externalId}`, target);
           }
-          if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, target);
-          addName(index, normalizeName(c.name), target);
+          if (c.domain) addHolder(index.domainHolders, c.domain, target);
+          addHolder(index.byName, companyIdentityKey(c.name), target);
         }
       },
     );
     return index;
+  }
+
+  /**
+   * Every CompanyIngestBinding, keyed `${source}:${sourceCompanyId}`, with its
+   * company resolved through the merge tombstones — so an admin merge or
+   * unmerge needs no binding rewrite: the binding follows the row the way
+   * `(externalSource, externalId)` does. Absent table (a database the
+   * migration has not reached yet) reads as no bindings: fail closed, since
+   * every legacy alias is then unconfirmed.
+   */
+  private async loadBindings(survivorOf: (id: string) => string | null): Promise<Map<string, BindingView>> {
+    const map = new Map<string, BindingView>();
+    const delegate = (this.prisma as unknown as { companyIngestBinding?: { findMany(a: unknown): Promise<unknown[]> } })
+      .companyIngestBinding;
+    if (!delegate) return map;
+    await this.eachPage(
+      (after, take) =>
+        delegate.findMany({
+          where: after ? { id: { gt: after } } : {},
+          orderBy: { id: 'asc' },
+          take,
+          select: { id: true, source: true, sourceCompanyId: true, companyId: true, status: true },
+        }) as Promise<{ id: string; source: string; sourceCompanyId: string; companyId: string | null; status: string }[]>,
+      (rows) => {
+        for (const b of rows) {
+          map.set(`${b.source}:${b.sourceCompanyId}`, {
+            companyId: b.companyId ? survivorOf(b.companyId) : null,
+            status: b.status === 'RESOLVED' ? 'RESOLVED' : 'REVIEW_REQUIRED',
+          });
+        }
+      },
+    );
+    return map;
   }
 
   /**
@@ -1101,7 +1198,9 @@ export class IngestService {
     investorIndex: InvestorIndex,
     personIndex: PersonIndex,
   ): Promise<void> {
-    const { id: companyId, matched, own } = await this.upsertCompany(r, index);
+    const placed = await this.upsertCompany(r, index);
+    if (!placed) return;
+    const { id: companyId, matched, own, decision } = placed;
 
     // Only a record that landed on ANOTHER source's company can duplicate that
     // source's rounds; a created or own-key company holds none.
@@ -1109,8 +1208,27 @@ export class IngestService {
       r.roundDedup && matched && r.rounds?.length
         ? await this.companyRounds(companyId, r.source)
         : { others: [], ownKeys: new Set<string>() };
+    // Where each deal already went on an earlier run. A bound pairing is
+    // reused, never re-derived from date/amount proximity.
+    const bound = r.roundDedup ? await this.roundBindings(r) : new Map<string, { roundId: string; method: string }>();
+    const boundDup = new Map<string, ExistingRound>();
+    const skipDeal = new Set<string>();
+    for (const round of r.rounds ?? []) {
+      const b = bound.get(round.externalId);
+      if (b?.method !== 'DEDUP') continue;
+      const target = held.others.find((x) => x.id === b.roundId);
+      if (target) boundDup.set(round.externalId, target);
+      else {
+        // The rung it was folded into is gone or elsewhere: an explicit
+        // decision is needed, not a silent re-pairing.
+        skipDeal.add(round.externalId);
+        this.matchStats.roundBindingConflicts++;
+      }
+    }
     // A round this source already wrote is updated in place, never re-paired.
-    const fresh = (r.rounds ?? []).map((round, i) => ({ round, i })).filter(({ round }) => !held.ownKeys.has(round.externalId));
+    const fresh = (r.rounds ?? [])
+      .map((round, i) => ({ round, i }))
+      .filter(({ round }) => !held.ownKeys.has(round.externalId) && !bound.has(round.externalId));
     const pairs = pairNearDuplicates(
       fresh.map(({ round }) => ({
         date: new Date(round.date),
@@ -1124,9 +1242,15 @@ export class IngestService {
       const hit = pairs.get(k);
       if (hit) dupOf.set(i, hit);
     });
+    for (const [i, round] of (r.rounds ?? []).entries()) {
+      const hit = boundDup.get(round.externalId);
+      if (hit) dupOf.set(i, hit);
+    }
+    const outcomes: { sourceRoundId: string; roundId: string; method: 'OWN' | 'DEDUP' }[] = [];
     let roundsChanged = false;
 
     for (const [i, round] of (r.rounds ?? []).entries()) {
+      if (skipDeal.has(round.externalId)) continue;
       const kind = round.kind ?? 'Equity';
       const date = new Date(round.date);
       const amountUsd = BigInt(Math.round(round.amountUsd));
@@ -1180,6 +1304,7 @@ export class IngestService {
       if (roundId && round.investors?.length) {
         await this.writeRoundInvestors(roundId, round.investors, r.source, investorIndex);
       }
+      if (roundId) outcomes.push({ sourceRoundId: round.externalId, roundId, method: dup ? 'DEDUP' : 'OWN' });
     }
 
     // A matched company now carries rounds its own source never reported, so
@@ -1267,6 +1392,66 @@ export class IngestService {
         update: { type: x.type, date: new Date(x.date), valueUsd, detail: x.detail },
       });
     }
+
+    // Last, so a record that failed part-way never carries a binding claiming
+    // its children were written.
+    if (r.roundDedup) await this.writeRoundBindings(r, outcomes, bound);
+    if (decision.kind === 'existing' && (decision.method === 'identifier' || decision.method === 'domain')) {
+      const key = `${r.source}:${r.companyExternalId}`;
+      const current = index.bindings.get(key);
+      if (!(current?.status === 'RESOLVED' && current.companyId === companyId)) {
+        const { evidence, hash } = bindingEvidence({ ...r.company, identifiers: r.company.identifiers });
+        await this.writeBinding({
+          source: r.source,
+          sourceCompanyId: r.companyExternalId,
+          companyId,
+          status: 'RESOLVED',
+          method: decision.method,
+          evidence: { ...evidence },
+          evidenceHash: hash,
+        });
+        index.bindings.set(key, { companyId, status: 'RESOLVED' });
+      }
+    }
+  }
+
+  /** This record's deals' recorded pairings (IngestRoundBinding). */
+  private async roundBindings(r: NormalizedRecord): Promise<Map<string, { roundId: string; method: string }>> {
+    const out = new Map<string, { roundId: string; method: string }>();
+    const delegate = (this.prisma as unknown as { ingestRoundBinding?: { findMany(a: unknown): Promise<unknown[]> } })
+      .ingestRoundBinding;
+    const ids = (r.rounds ?? []).map((x) => x.externalId);
+    if (!delegate || ids.length === 0) return out;
+    const rows = (await delegate.findMany({
+      where: { source: r.source, sourceRoundId: { in: ids } },
+      select: { sourceRoundId: true, roundId: true, method: true },
+    })) as { sourceRoundId: string; roundId: string; method: string }[];
+    for (const b of rows) out.set(b.sourceRoundId, { roundId: b.roundId, method: b.method });
+    return out;
+  }
+
+  /** Record each deal's canonical round the first time it is placed. */
+  private async writeRoundBindings(
+    r: NormalizedRecord,
+    outcomes: { sourceRoundId: string; roundId: string; method: 'OWN' | 'DEDUP' }[],
+    bound: Map<string, { roundId: string; method: string }>,
+  ): Promise<void> {
+    const delegate = (this.prisma as unknown as { ingestRoundBinding?: { createMany(a: unknown): Promise<unknown> } })
+      .ingestRoundBinding;
+    const fresh = outcomes.filter((o) => !bound.has(o.sourceRoundId));
+    if (!delegate || fresh.length === 0) return;
+    await delegate.createMany({
+      data: fresh.map((o) => ({
+        source: r.source,
+        sourceRoundId: o.sourceRoundId,
+        sourceCompanyId: r.companyExternalId,
+        roundId: o.roundId,
+        method: o.method,
+        policyVersion: COMPANY_MATCH_POLICY_VERSION,
+        evidenceHash: sha256(`${r.source}:${r.companyExternalId}:${o.sourceRoundId}:${o.method}:${o.roundId}`),
+      })),
+      skipDuplicates: true,
+    });
   }
 
   /** A company's approved rounds, split into other sources' (dedup targets)
@@ -1882,6 +2067,7 @@ export class IngestService {
       byIdentifier: Map<string, string>;
       identifiers: IdentifierCounts;
       companyNumberOf?: Map<string, string>;
+      domainHolders?: Map<string, string | string[]>;
     },
   ): Promise<void> {
     const all: SourceIdentifier[] = [
@@ -1901,6 +2087,7 @@ export class IngestService {
       if (outcome === 'written') {
         const normalized = normalizeIdentifier(scheme, value);
         if (normalized) index.byIdentifier.set(`${scheme}:${normalized}`, entityId);
+        if (normalized && scheme === 'DOMAIN' && index.domainHolders) addHolder(index.domainHolders, normalized, entityId);
       }
       // 'conflict' too: the row now claims this number even though another
       // row holds it in the crosswalk, and must not attract a third.
@@ -1913,17 +2100,198 @@ export class IngestService {
     }
   }
 
-  /** Resolve the record to a company row: update its own provenance-keyed row,
-   *  enrich a domain/name match, or create a new row. Returns the company id. */
+  /**
+   * Gather the evidence for one record and let the identity policy decide
+   * (company-matcher.ts). Reads only the handful of candidate rows the
+   * indexes point at, never the whole table.
+   */
+  private async matchCompany(r: NormalizedRecord, index: MatchIndex): Promise<CompanyMatch> {
+    const c = r.company;
+    const ownKey = `${r.source}:${r.companyExternalId}`;
+    const legalHits = new Map<string, string>();
+    const recordHits = new Map<string, string>();
+    for (const { scheme, value } of c.identifiers ?? []) {
+      const normalized = normalizeIdentifier(scheme, value);
+      if (!normalized) continue;
+      const hit = index.byIdentifier.get(`${scheme}:${normalized}`);
+      if (!hit) continue;
+      (RECORD_ID_SCHEMES.has(scheme) ? recordHits : legalHits).set(`${scheme}:${normalized}`, hit);
+    }
+    const domainHolders = c.domain ? holdersOf(index.domainHolders, c.domain) : [];
+    const binding = index.bindings.get(ownKey) ?? null;
+    const ownCompanyId = index.byKey.get(ownKey) ?? null;
+    const ids = new Set<string>([...legalHits.values(), ...recordHits.values(), ...domainHolders]);
+    if (binding?.companyId) ids.add(binding.companyId);
+    const candidates = ownCompanyId && binding?.status !== 'REVIEW_REQUIRED' ? new Map() : await this.candidateEvidence([...ids], index);
+    return decideCompanyMatch({
+      source: r.source,
+      sourceCompanyId: r.companyExternalId,
+      ownCompanyId,
+      binding,
+      legalHits,
+      recordHits,
+      domainHolders,
+      companyNumber: recordCompanyNumber(c.identifiers),
+      candidates,
+    });
+  }
+
+  /** What the policy needs to know about each candidate company. */
+  private async candidateEvidence(ids: string[], index: MatchIndex): Promise<Map<string, CandidateEvidence>> {
+    const out = new Map<string, CandidateEvidence>();
+    if (ids.length === 0) return out;
+    const [rows, idents] = await Promise.all([
+      this.prisma.company.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, externalSource: true, externalId: true, mergedIntoId: true, countryCode: true },
+      }),
+      this.prisma.entityIdentifier.findMany({
+        where: {
+          entityType: 'company',
+          entityId: { in: ids },
+          scheme: { in: [...RECORD_ID_SCHEMES, 'COMPANIES_HOUSE'] },
+        },
+        select: { entityId: true, scheme: true, value: true },
+      }),
+    ]);
+    for (const row of rows) {
+      const mine = idents.filter((i) => i.entityId === row.id);
+      const recordIds = mine.filter((i) => RECORD_ID_SCHEMES.has(i.scheme)).map((i) => `${i.scheme}:${i.value}`);
+      const own = row.externalSource && row.externalId ? `${row.externalSource}:${row.externalId}` : null;
+      const unresolvedAliases = recordIds.filter((k) => {
+        if (k === own) return false;
+        const b = index.bindings.get(k);
+        return !(b?.status === 'RESOLVED' && b.companyId === row.id);
+      });
+      out.set(row.id, {
+        id: row.id,
+        live: !row.mergedIntoId,
+        externalSource: row.externalSource,
+        externalId: row.externalId,
+        recordIds,
+        unresolvedAliases,
+        companyNumber:
+          mine.find((i) => i.scheme === 'COMPANIES_HOUSE')?.value ?? index.companyNumberOf.get(row.id) ?? null,
+        countryCode: row.countryCode ?? null,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Whether any round or holding this record would write by its own key
+   * already sits on a DIFFERENT company. Ordinary ingest never moves one —
+   * reassigning an owner is the explicit, journaled repair's job — so such a
+   * record is held whole rather than written half on each company.
+   */
+  private async childOwnerClash(r: NormalizedRecord, companyId: string | null): Promise<boolean> {
+    const roundIds = (r.rounds ?? []).map((x) => x.externalId);
+    const holdingIds = (r.investors ?? []).map((x) => x.externalId);
+    const [rounds, holdings] = await Promise.all([
+      roundIds.length
+        ? this.prisma.fundingRound.findMany({
+            where: { externalSource: r.source, externalId: { in: roundIds } },
+            select: { companyId: true },
+          })
+        : [],
+      holdingIds.length
+        ? this.prisma.investorHolding.findMany({
+            where: { externalSource: r.source, externalId: { in: holdingIds } },
+            select: { companyId: true },
+          })
+        : [],
+    ]);
+    return [...rounds, ...holdings].some((row) => row.companyId !== companyId);
+  }
+
+  /** A conflict is durable: a private REVIEW_REQUIRED binding (never public),
+   *  plus the merge candidate the identifier collision has always recorded. */
+  private async recordConflict(r: NormalizedRecord, m: Extract<CompanyMatch, { kind: 'conflict' }>, index: MatchIndex) {
+    const key = `${r.source}:${r.companyExternalId}`;
+    const { evidence, hash } = bindingEvidence({ ...r.company, identifiers: r.company.identifiers });
+    await this.writeBinding({
+      source: r.source,
+      sourceCompanyId: r.companyExternalId,
+      companyId: null,
+      status: 'REVIEW_REQUIRED',
+      method: `conflict:${m.reason}`,
+      evidence: { ...evidence, candidates: m.companyIds },
+      evidenceHash: hash,
+    });
+    index.bindings.set(key, { companyId: null, status: 'REVIEW_REQUIRED' });
+    for (let i = 1; i < m.companyIds.length; i++) {
+      await recordCandidate(this.prisma as unknown as IdentifierWriterClient, {
+        entityType: 'company',
+        aId: m.companyIds[0]!,
+        bId: m.companyIds[i]!,
+        signal: 'identifier',
+        evidence: `${r.source} record ${r.companyExternalId}`,
+      });
+    }
+  }
+
+  /** Upsert one binding row; a no-op when the table is not there yet. */
+  private async writeBinding(b: {
+    source: string;
+    sourceCompanyId: string;
+    companyId: string | null;
+    status: 'RESOLVED' | 'REVIEW_REQUIRED';
+    method: string;
+    evidence: Record<string, unknown>;
+    evidenceHash: string;
+  }): Promise<void> {
+    const delegate = (this.prisma as unknown as { companyIngestBinding?: { upsert(a: unknown): Promise<unknown> } })
+      .companyIngestBinding;
+    if (!delegate) return;
+    const data = {
+      companyId: b.companyId,
+      status: b.status,
+      method: b.method,
+      policyVersion: COMPANY_MATCH_POLICY_VERSION,
+      evidence: b.evidence,
+      evidenceHash: b.evidenceHash,
+    };
+    await delegate.upsert({
+      where: { source_sourceCompanyId: { source: b.source, sourceCompanyId: b.sourceCompanyId } },
+      create: { source: b.source, sourceCompanyId: b.sourceCompanyId, ...data },
+      update: data,
+    });
+  }
+
+  /** Resolve the record to a company row per the identity policy: update its
+   *  own provenance-keyed row, enrich a structurally matched row, or create a
+   *  new one. `null` means the record was held or in conflict and nothing was
+   *  written. */
   private async upsertCompany(
     r: NormalizedRecord,
     index: MatchIndex,
-  ): Promise<{ id: string; matched: 'identifier' | 'domain' | 'name' | 'record' | null; own: boolean }> {
+  ): Promise<{
+    id: string;
+    matched: 'identifier' | 'domain' | 'record' | 'binding' | null;
+    own: boolean;
+    decision: CompanyMatch;
+  } | null> {
     const key = `${r.source}:${r.companyExternalId}`;
     const c = r.company;
+    const decision = await this.matchCompany(r, index);
 
-    const ownId = index.byKey.get(key);
-    if (ownId) {
+    if (decision.kind === 'conflict' || decision.kind === 'hold') {
+      const bucket = decision.kind === 'conflict' ? this.matchStats.conflicts : this.matchStats.held;
+      bucket[decision.reason] = (bucket[decision.reason] ?? 0) + 1;
+      if (this.matchStats.samples.length < 10) this.matchStats.samples.push(`${decision.kind}:${decision.reason}:${key}`);
+      if (decision.kind === 'conflict') await this.recordConflict(r, decision, index);
+      return null;
+    }
+
+    const target = decision.kind === 'existing' ? decision.companyId : null;
+    if (await this.childOwnerClash(r, target)) {
+      this.matchStats.childOwnerClashes++;
+      if (this.matchStats.samples.length < 10) this.matchStats.samples.push(`hold:child-owner:${key}`);
+      return null;
+    }
+
+    if (decision.kind === 'existing' && decision.method === 'own') {
+      const ownId = decision.companyId;
       // Our own row: the source is authoritative, but these are published
       // figures, so the timeline records whichever of them actually move.
       await this.writeCompany(ownId, r.source, {
@@ -1943,42 +2311,19 @@ export class IngestService {
       });
       if (c.countryCode) index.countryOf.set(ownId, c.countryCode);
       await this.writeIdentifiers('company', ownId, r.source, c.identifiers, c.domain, index);
-      return { id: ownId, matched: null, own: true };
+      return { id: ownId, matched: null, own: true, decision };
     }
 
-    // Identifier first: a CIK or a QID is a statement by the publisher about
-    // which entity this is. A shared domain is a strong inference and a shared
-    // name a weak one, so both stay behind it — and the name match alone is
-    // scoped by country, since it is the only one that is an inference about a
-    // *different* publisher's row rather than a statement about this one.
-    const number = recordCompanyNumber(c.identifiers);
-    const byDomain = c.domain ? index.byDomain.get(c.domain) : undefined;
-    const byIdentifier = await this.matchByIdentifier('company', c.identifiers, index);
-    const byDomainAllowed = byDomain && sameEntityAllowed(index, byDomain, number) ? byDomain : undefined;
-    const matchId =
-      byIdentifier ?? byDomainAllowed ?? matchName(index, normalizeName(c.name), c.countryCode ?? null, number);
-    // How strong the match is, for what a source may then do to the row's
-    // data: an identifier the record carries in someone else's scheme, or a
-    // shared domain, is strong; a hit on the source's own record id ('record')
-    // only repeats an earlier match of unknown strength; a name is weak.
-    const hitScheme = byIdentifier
-      ? c.identifiers?.find((i) => {
-          const v = normalizeIdentifier(i.scheme, i.value);
-          return v !== null && index.byIdentifier.get(`${i.scheme}:${v}`) === byIdentifier;
-        })?.scheme
-      : undefined;
-    const matchedBy = byIdentifier
-      ? hitScheme && SOURCE_RECORD_SCHEMES.has(hitScheme)
-        ? 'record'
-        : 'identifier'
-      : byDomainAllowed
-        ? 'domain'
-        : 'name';
-    if (matchId) {
+    if (decision.kind === 'existing') {
+      const matchId = decision.companyId;
       await this.enrich(matchId, r);
       if (c.countryCode && !index.countryOf.get(matchId)) index.countryOf.set(matchId, c.countryCode);
       await this.writeIdentifiers('company', matchId, r.source, c.identifiers, c.domain, index);
-      return { id: matchId, matched: matchedBy, own: false };
+      // How strong the match is, for what a source may then do to the row's
+      // data: a legal identifier or a unique domain is strong; a binding or a
+      // record alias repeats an earlier decision.
+      const matched = decision.method === 'own' ? null : decision.method;
+      return { id: matchId, matched, own: false, decision };
     }
 
     const slug = this.uniqueSlug(c.name, r.companyExternalId, index);
@@ -2010,12 +2355,31 @@ export class IngestService {
       },
     });
 
+    // An equal name is a reason to ask, never to combine: propose the pair for
+    // review when the name is rare enough to mean anything.
+    const nameKey = companyIdentityKey(c.name);
+    const twins = holdersOf(index.byName, nameKey).filter((id) =>
+      countriesCompatible(c.countryCode ?? null, index.countryOf.get(id) ?? null),
+    );
+    if (twins.length > 0 && twins.length <= NAME_CANDIDATE_LIMIT) {
+      for (const twin of twins) {
+        await recordCandidate(this.prisma as unknown as IdentifierWriterClient, {
+          entityType: 'company',
+          aId: twin,
+          bId: created.id,
+          signal: 'name',
+          evidence: nameKey,
+        });
+        this.matchStats.nameCandidates++;
+      }
+    }
+
     index.byKey.set(key, created.id);
-    if (c.domain && !index.byDomain.has(c.domain)) index.byDomain.set(c.domain, created.id);
+    if (c.domain) addHolder(index.domainHolders, c.domain, created.id);
     index.countryOf.set(created.id, c.countryCode ?? null);
-    addName(index, normalizeName(c.name), created.id);
+    addHolder(index.byName, nameKey, created.id);
     await this.writeIdentifiers('company', created.id, r.source, c.identifiers, c.domain, index);
-    return { id: created.id, matched: null, own: false };
+    return { id: created.id, matched: null, own: false, decision };
   }
 
   /** Fill blank fields on a matched row — including an empty industry list and
@@ -2171,39 +2535,22 @@ function fundByName(index: FundIndex, norm: string, managerId?: string): string 
   return parsed.every((h) => h.managerId === parsed[0]!.managerId) ? parsed[0]!.fundId : undefined;
 }
 
-/** Add one name → id entry, once. A single holder is stored as a bare string:
- *  most names have one, and an array per name is tens of MB on the full table. */
-function addName(index: MatchIndex, norm: string, id: string): void {
-  if (!norm) return;
-  const held = index.byName.get(norm);
-  if (held === undefined) index.byName.set(norm, id);
+/** Add one key → id entry, once. A single holder is stored as a bare string:
+ *  most keys have one, and an array per key is tens of MB on the full table. */
+function addHolder(map: Map<string, string | string[]>, key: string, id: string): void {
+  if (!key) return;
+  const held = map.get(key);
+  if (held === undefined) map.set(key, id);
   else if (typeof held === 'string') {
-    if (held !== id) index.byName.set(norm, [held, id]);
+    if (held !== id) map.set(key, [held, id]);
   } else if (!held.includes(id)) held.push(id);
 }
 
-/**
- * The first row holding this name whose country is compatible with the
- * record's: equal, or unknown on either side. A known-and-different country
- * never matches — a UK "Acme Ltd" is not a US "Acme Inc", and a name is too weak
- * a signal to merge across a border on. Unknown stays permissive because most
- * contributed and S-1 rows have no country, and refusing those would recreate
- * every one of them.
- */
-function matchName(
-  index: MatchIndex,
-  norm: string,
-  country: string | null,
-  companyNumber: string | null,
-): string | undefined {
-  if (!norm) return undefined;
-  const held = index.byName.get(norm);
-  if (held === undefined) return undefined;
-  return (typeof held === 'string' ? [held] : held).find(
-      (id) =>
-        countriesCompatible(country, index.countryOf.get(id) ?? null) &&
-        sameEntityAllowed(index, id, companyNumber),
-    );
+/** Every id holding `key`. */
+function holdersOf(map: Map<string, string | string[]>, key: string): string[] {
+  if (!key) return [];
+  const held = map.get(key);
+  return held === undefined ? [] : typeof held === 'string' ? [held] : [...held];
 }
 
 /** An empty or `Undisclosed` location — what a create writes when a source
@@ -2213,6 +2560,7 @@ function isUndisclosedPlace(hq: string | null | undefined): boolean {
 }
 
 const COMPANY_NUMBER_PREFIX = 'COMPANIES_HOUSE:';
+const DOMAIN_PREFIX = 'DOMAIN:';
 
 /** The record's own Companies House number, normalized, or null. */
 function recordCompanyNumber(identifiers: SourceIdentifier[] | undefined): string | null {
@@ -2220,19 +2568,8 @@ function recordCompanyNumber(identifiers: SourceIdentifier[] | undefined): strin
   return raw ? normalizeIdentifier('COMPANIES_HOUSE', raw) : null;
 }
 
-/** Whether an inferred match (domain or name) may land on `id`: not when the
- *  row already holds a different Companies House number than the record. The
- *  pair is left for the merge detector to propose instead. */
-function sameEntityAllowed(index: MatchIndex, id: string, companyNumber: string | null): boolean {
-  if (!companyNumber) return true;
-  const held = index.companyNumberOf.get(id);
-  return !held || held === companyNumber;
-}
-
-/** The compatibility rule shared by ingest matching and the merge detector. */
-export function countriesCompatible(a: string | null, b: string | null): boolean {
-  return !a || !b || a === b;
-}
+// Re-exported: the merge detector imports the rule from here.
+export { countriesCompatible } from './company-matcher';
 
 /** Companies House numbers already held, read off the identifier index. */
 function knownCompanyNumbers(index: MatchIndex): Set<string> {
@@ -2281,9 +2618,12 @@ const LEGAL_SUFFIXES = new Set([
   'nv',
 ]);
 
-/** Company-name key for dedupe matching: accents folded, lowercase,
- *  punctuation stripped (so "L.L.C." → "llc"), trailing legal suffixes
- *  dropped, whitespace collapsed. */
+/** The BROAD company-name key: accents folded, lowercase, punctuation stripped
+ *  (so "L.L.C." → "llc"), every trailing legal-looking suffix dropped — `ag`
+ *  included, which turns "Indigo Ag Inc." into "indigo". Never an identity
+ *  decision: ingest combines companies on identifiers and unique domains only
+ *  (company-matcher.ts) and proposes name twins on `companyIdentityKey`. Kept
+ *  for review suggestions and the tests that pin its behaviour. */
 export function normalizeName(name: string): string {
   const tokens = foldAccents(name)
     .toLowerCase()
@@ -2460,31 +2800,4 @@ function createdProvenance(
 ): { partnerOnly?: true; partnerFields?: string[] } {
   if (!PARTNER_SOURCES.has(source)) return {};
   return { partnerOnly: true, partnerFields: [...new Set(fields.filter((f) => f !== 'name'))] };
-}
-
-/** The company columns a record actually states (the create's own defaults —
- *  'Private', 'Undisclosed', 0, the SEC placeholder copy — are not statements). */
-function suppliedCompanyFields(c: NormalizedRecord['company']): string[] {
-  const stated: Record<string, unknown> = {
-    domain: c.domain,
-    websiteUrl: c.websiteUrl,
-    linkedinUrl: c.linkedinUrl,
-    legalName: c.legalName,
-    operatingStatus: c.operatingStatus,
-    companyType: c.companyType,
-    primarySector: c.primarySector,
-    countryCode: c.countryCode,
-    oneLiner: c.oneLiner,
-    description: c.description,
-    hq: c.hq,
-    founded: c.foundedYear,
-    headcount: c.headcount,
-    industry: c.industry,
-    status: c.status,
-    stage: c.stage,
-    totalRaisedUsd: c.totalRaisedUsd,
-  };
-  return Object.entries(stated)
-    .filter(([, v]) => v != null && v !== '' && v !== 0 && !(Array.isArray(v) && v.length === 0))
-    .map(([k]) => k);
 }

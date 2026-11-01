@@ -719,6 +719,12 @@ count live (cheap), so there a stale key only misorders; investor cards show `ho
 there a stale key also shows as a wrong number until the next refresh. `make backfill-directory-counts` (`-prod`) fills
 or re-runs it by hand.
 
+**Ingestion routing and repair tables** (migration `company_repair`, additive, private — never
+served by any API): `CompanyIngestBinding` (`(source, sourceCompanyId)` → company or a hold, with
+whitelisted evidence and policy version), `IngestRoundBinding` (deal → canonical round, OWN/DEDUP),
+`CompanyRepairRun` (unique `(databaseFingerprint, manifestHash)`, so repeating an apply resumes the
+same run) and `CompanyRepairGroup` (the journal). Plain-id columns, no FKs to `Company`.
+
 **Two-factor tables** (migration `mfa_passkeys`, additive): `User.mfaEnabledAt` (denormalised
 "has a factor", so `JwtStrategy` enforces from the row it already reads), `totpSecret` (sealed),
 `totpEnabledAt`, `totpLastStep`; `WebAuthnCredential` (passkeys: `credentialId` unique,
@@ -775,7 +781,11 @@ stays narrow.
   Rejecting a PENDING row writes nothing; it never became public. Rejecting an **APPROVED** one
   is a retraction and writes `RETRACT` entries (`field: ''` with the row as `before` and a
   JsonNull `after`; or, for an edit, one per restored field with the proposal's value → the
-  restored one), rendered "retracted" / "<field> reverted" on the history page.
+  restored one), rendered "retracted" / "<field> reverted" on the history page. A
+  `company-match-repair` ownership correction writes `REPAIR` entries (`field: ''`, `after` a
+  `RepairSummary`: `split-out` / `split-from` / `reversed`, the other company's name + slug and
+  counts — never row ids), rendered "records separated to …" / "separated from …"; total or field
+  corrections it proves are ordinary `UPDATE`s with `actorSource: 'PARTNER'`.
 - Values entering `before`/`after` must go through **`toJsonValue`** (`@repo/db`):
   `BigInt` → `Number` (money columns would throw in `JSON.stringify`), `Date` → ISO, and a
   genuine null → `Prisma.JsonNull`, never bare `null` (which means SQL NULL, i.e. "not
@@ -1104,7 +1114,7 @@ dates and sizes them). All ingested rows — companies, rounds, the child entiti
 (people/investors/acquisitions/exits), standalone investor firms and funds —
 upsert keyed on `(externalSource, externalId)` and are **auto-APPROVED** (trusted
 sources). `IngestService` also **matches & enriches**: a
-record whose company matches an existing row by domain or normalized name fills
+record whose company matches an existing row *structurally* (below) fills
 that row's blank fields instead of creating a duplicate (never overwriting
 name/stage/status or human-written copy — with one exception: a `Bootstrapped` row takes the
 record's stage when the record carries an `Equity` round with a positive amount, since a filed
@@ -1113,13 +1123,39 @@ investor firms, keyed on domain then `normalizeInvestorName` (which strips legal
 suffixes only — "Greylock Partners" and "Greylock Capital Management" are
 different firms). Both name keys fold accents first ("Société Générale" → `societe generale`).
 
-**A company name match is scoped by country, and never crosses a registry number.** Identifier
-and domain matches are statements about the entity and stay global; the *name* match only lands
-on a row whose country is compatible (`countriesCompatible`: equal, or either side null — a UK
-"Acme Ltd" never enriches a US "Acme Inc"). And no inferred match (domain or name) may land on a
-row that already holds a **different** `COMPANIES_HOUSE` number — Costain Limited 00610201 and
-01393773 are two legal entities. Such pairs are left to the merge detector, whose name sweep
-applies the same country rule (`sweep(…, { scopeByCountry: true })`); its domain sweep does not.
+**A name never combines two companies.** The company identity policy is
+`ingest/company-matcher.ts` (`decideCompanyMatch`, pure; policy version on every binding it
+writes), strongest first: a private hold (`CompanyIngestBinding` REVIEW_REQUIRED) skips the record
+whole; the record's own provenance key; a RESOLVED binding; legal identifiers, which must all name
+one row (two rows → **conflict**: the record is skipped, a REVIEW_REQUIRED binding and an
+`identifier` merge candidate recorded — never a first-target pick); a hit on the source's own
+record-id scheme (`PARTNER`) that no binding confirms is a legacy alias that cannot vouch for
+itself → **held**; a domain held by **exactly one** live row (column or DOMAIN identifier — not
+first-wins) associates unless that row holds a different record of the same source, a different
+`COMPANIES_HOUSE` number, or an uncertified partner alias (held); otherwise **create**. A name
+match is only a review proposal: `companyIdentityKey` (strips at most one unambiguous legal form —
+it keeps "Ag", so "Indigo Ag Inc." ≠ "Indigo"), country-compatible (`countriesCompatible`), at most
+`NAME_CANDIDATE_LIMIT` holders → `name` merge candidates. The broad `normalizeName` survives for
+review suggestions only. A structural match writes a RESOLVED binding (bindings resolve through
+merge tombstones at index load, so admin merge/unmerge needs no binding rewrite). Ingest never moves
+an owner: a record whose round/holding key already sits on another company is held
+(`childOwnerClash`). `roundDedup` sources record each deal's canonical round in
+`IngestRoundBinding` (OWN/DEDUP) and reuse it — a bound pairing is never re-derived from proximity,
+and one whose rung is gone is skipped. Refusals are logged once per run ("Company identity: …").
+
+**Repairing old mistakes: `company-match-repair`** (`src/company-match-repair.ts`,
+`src/repair/`; runbook `docs/DATA_REBUILD.md` → "Repairing wrongly combined companies"). It reads a
+private offline bundle (`scripts/prepare-company-repair-snapshot.py`: company/deal/deal_investor/firm
+identity only, hashed, never people), groups every partner association into connected components
+and plans **typed, allowlisted operations** (create a source-owned company, move rounds/holdings/
+identifiers/child revisions by id, set a proved total or field, upsert bindings, append revisions —
+no deletes of pre-existing rows, no SQL in the plan). audit/plan/verify use server-enforced
+read-only `pg` sessions and boot no Nest context; apply/rollback need `EXPECT_DB` + `CONFIRM=yes`,
+hold the ingest lock (75 if busy), take the owning-company `FOR UPDATE` locks, refuse a stale group,
+and journal forward + inverse ops in `CompanyRepairRun`/`CompanyRepairGroup` in the same
+transaction. Rollback refuses a group edited since. Make: `fix`/`fix-prod` (audit only),
+`repair-company-matches[-prod] MODE=…`, `prepare-company-repair-snapshot`, `test-company-repair`,
+`test-company-repair-integration` (task-owned throwaway DB), `check-company-repair`.
 
 **Domains are a match key, so they must identify the entity.** `src/util/domain.ts`
 classifies a URL host as identifying, social, or platform; sources publish a

@@ -295,6 +295,46 @@ backfill-partner-company-facts: ## Fill partner industry/location on matched com
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill-partner-company-facts.js
 
+# Company-match repair: separates companies ingestion wrongly combined, from the
+# partner's original identities, with a journaled, reversible apply. Runbook:
+# docs/DATA_REBUILD.md → "Repairing wrongly combined companies". `fix` only ever
+# audits. Writes need MODE=apply|rollback, the exact EXPECT_DB fingerprint and
+# CONFIRM=yes. Results (OUT=) are private files under backups/ (gitignored).
+REPAIR_CLI = node --env-file-if-exists=apps/jobs/.env apps/jobs/dist/company-match-repair.js
+REPAIR_ARGS = --snapshot "$(SNAPSHOT)" --out "$(OUT)" --plan "$(PLAN)" --run "$(RUN)" --expect-db "$(EXPECT_DB)" \
+	--confirm "$(CONFIRM)" --slug "$(SLUG)" --limit-groups "$(LIMIT_GROUPS)" --bindings "$(or $(BINDINGS),none)" \
+	--limit-binding-batches "$(LIMIT_BINDING_BATCHES)" --label "$(LABEL)"
+
+.PHONY: prepare-company-repair-snapshot
+prepare-company-repair-snapshot: ## Build the private repair source bundle OFFLINE from the stage file (FILE=… OUT=…; no database)
+	@test -n "$(FILE)" && test -n "$(OUT)" || { echo "usage: make prepare-company-repair-snapshot FILE=stage.sql.gz OUT=dir [EXPECT_SHA256=…]"; exit 2; }
+	python3 -I scripts/prepare-company-repair-snapshot.py --input "$(FILE)" --out "$(OUT)" $(if $(EXPECT_SHA256),--expect-sha256 "$(EXPECT_SHA256)")
+
+.PHONY: fix
+fix: ## Read-only company-match audit (SNAPSHOT=bundle OUT=dir) — never writes
+	yarn workspace jobs build
+	$(REPAIR_CLI) audit --snapshot "$(SNAPSHOT)" --out "$(OUT)"
+
+.PHONY: repair-company-matches
+repair-company-matches: ## Company-match repair, explicit MODE=plan|apply|verify|rollback|fingerprint (see docs/DATA_REBUILD.md)
+	@test -n "$(MODE)" || { echo "MODE is required: audit | plan | apply | verify | rollback | fingerprint"; exit 2; }
+	yarn workspace jobs build
+	$(REPAIR_CLI) "$(MODE)" $(REPAIR_ARGS)
+
+.PHONY: test-company-repair
+test-company-repair: ## Focused unit tests: identity policy, ingest, merge detector, repair planner, snapshot preparer
+	python3 -m unittest discover -s scripts/tests
+	cd apps/jobs && npx jest --coverage=false src/ingest/company-matcher src/ingest/ingest.service src/ingest/merge-detector src/repair src/sources/partner
+
+.PHONY: test-company-repair-integration
+test-company-repair-integration: ## Real-PostgreSQL repair suite in a task-owned throwaway database (dropped after)
+	@scripts/test-company-repair-integration.sh
+
+.PHONY: check-company-repair
+check-company-repair: test-company-repair test-company-repair-integration ## Every required company-repair check (+ jobs lint, whitespace)
+	yarn workspace jobs lint
+	git diff --check
+
 .PHONY: purge-sbir-people
 purge-sbir-people: ## One-shot: delete SBIR person rows read from 'Contact Name' (federal program officers)
 	yarn workspace jobs build
@@ -330,6 +370,19 @@ backfill-partner-provenance-prod: ## [VPS] Mark partner-only rows and partner-wr
 .PHONY: backfill-partner-company-facts-prod
 backfill-partner-company-facts-prod: ## [VPS] Fill partner industry/location on matched companies inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-partner-company-facts.js
+
+# Company-match repair on the VPS: the CLI in the already deployed jobs image,
+# bundle/plan mounted read-only, results to OUT (0700, owned by you). Needs
+# REPAIR_TARGET_ID (or REPAIR_TARGET_ID_FILE) provisioned for the production DB.
+.PHONY: fix-prod
+fix-prod: ## [VPS] Read-only company-match audit inside the deployed jobs image (SNAPSHOT=… OUT=…)
+	@MODE=audit COMPOSE_STACK='$(COMPOSE_STACK)' SNAPSHOT="$(SNAPSHOT)" OUT="$(OUT)" scripts/company-repair-prod.sh
+
+.PHONY: repair-company-matches-prod
+repair-company-matches-prod: ## [VPS] Company-match repair inside the deployed jobs image (explicit MODE=…; writes need EXPECT_DB + CONFIRM=yes)
+	@MODE="$(MODE)" COMPOSE_STACK='$(COMPOSE_STACK)' SNAPSHOT="$(SNAPSHOT)" OUT="$(OUT)" PLAN="$(PLAN)" RUN="$(RUN)" \
+	  EXPECT_DB="$(EXPECT_DB)" CONFIRM="$(CONFIRM)" SLUG="$(SLUG)" LIMIT_GROUPS="$(LIMIT_GROUPS)" BINDINGS="$(BINDINGS)" \
+	  LIMIT_BINDING_BATCHES="$(LIMIT_BINDING_BATCHES)" LABEL="$(LABEL)" scripts/company-repair-prod.sh
 
 .PHONY: backfill-fund-slugs-prod
 backfill-fund-slugs-prod: ## [VPS] Give every fund a page slug inside the deployed jobs container

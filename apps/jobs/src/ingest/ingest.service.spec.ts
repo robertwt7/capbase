@@ -122,15 +122,18 @@ type CandidateWhere = {
   where: { entityType_leftId_rightId: { entityType: string; leftId: string; rightId: string } };
 };
 
-function mockPrisma(
+function mockPrismaBase(
   existing: ReturnType<typeof companyRow>[] = [],
   existingInvestors: ReturnType<typeof investorRow>[] = [],
   existingFunds: ReturnType<typeof fundRow>[] = [],
   seedIdentifiers: IdentifierRow[] = [],
   existingPeople: ReturnType<typeof personRow>[] = [],
   existingRounds: Record<string, unknown>[] = [],
+  seedBindings: Record<string, unknown>[] = [],
 ) {
   let created = 0;
+  const bindings: Record<string, unknown>[] = seedBindings.map((b, i) => ({ id: `b-${i}`, ...b }));
+  const roundBindings: Record<string, unknown>[] = [];
   let fundsCreated = 0;
   let peopleCreated = 0;
   const identifiers: IdentifierRow[] = [...seedIdentifiers];
@@ -138,6 +141,34 @@ function mockPrisma(
   return {
     identifiers,
     candidates,
+    bindings,
+    roundBindings,
+    companyIngestBinding: {
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) => {
+        const after = (args as { where?: { id?: { gt?: string } } })?.where?.id?.gt;
+        return after ? [] : bindings;
+      }),
+      upsert: jest.fn<(args: { where: { source_sourceCompanyId: { source: string; sourceCompanyId: string } }; create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>>(
+        async (args) => {
+          const k = args.where.source_sourceCompanyId;
+          const hit = bindings.find((b) => b.source === k.source && b.sourceCompanyId === k.sourceCompanyId);
+          if (hit) Object.assign(hit, args.update);
+          else bindings.push({ id: `b-${bindings.length}`, ...args.create });
+          return {};
+        },
+      ),
+    },
+    ingestRoundBinding: {
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) =>
+        roundBindings.filter((b) => matchesWhere(b, (args as { where?: Record<string, unknown> }).where)),
+      ),
+      createMany: jest.fn<(args: { data: Record<string, unknown>[] }) => Promise<unknown>>(async (args) => {
+        for (const row of args.data) {
+          if (!roundBindings.some((b) => b.source === row.source && b.sourceRoundId === row.sourceRoundId)) roundBindings.push(row);
+        }
+        return {};
+      }),
+    },
     fund: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingFunds),
       findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
@@ -163,7 +194,12 @@ function mockPrisma(
       ),
     },
     company: {
-      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existing),
+      // Honours `where.id.in` (the matcher's candidate read); the paged index
+      // load passes no id filter and gets every row.
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) => {
+        const ids = (args as { where?: { id?: { in?: string[] } } } | undefined)?.where?.id?.in;
+        return ids ? existing.filter((c) => ids.includes(c.id)) : existing;
+      }),
       findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
         async (args) => existing.find((c) => c.id === args.where.id) ?? null,
       ),
@@ -178,7 +214,10 @@ function mockPrisma(
       upsert: jest.fn<(args: unknown) => Promise<unknown>>(async (args) => ({
         id: `r-${(args as { where: { externalSource_externalId: { externalId: string } } }).where.externalSource_externalId.externalId}`,
       })),
-      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingRounds),
+      // Filters on companyId / externalSource / externalId.in as the real one would.
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) =>
+        existingRounds.filter((r) => matchesWhere(r, (args as { where?: Record<string, unknown> })?.where)),
+      ),
       update: jest.fn<(args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>>(
         async (args) => ({ id: args.where.id }),
       ),
@@ -214,6 +253,7 @@ function mockPrisma(
     },
     investorHolding: {
       upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => []),
     },
     acquisitionDeal: {
       upsert: jest.fn<(args: unknown) => Promise<unknown>>(async () => ({})),
@@ -229,10 +269,9 @@ function mockPrisma(
     // In-memory stand-ins that enforce the real unique keys, so the identifier
     // match and the collision path are exercised rather than mocked away.
     entityIdentifier: {
-      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) => {
-        const where = (args as { where: { entityType: string } }).where;
-        return identifiers.filter((r) => r.entityType === where.entityType);
-      }),
+      findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async (args) =>
+        identifiers.filter((r) => matchesWhere(r, (args as { where?: Record<string, unknown> }).where)),
+      ),
       findUnique: jest.fn<(args: IdentifierWhere) => Promise<{ entityId: string } | null>>(
         async (args) => {
           const k = args.where.scheme_value_entityType;
@@ -284,6 +323,28 @@ function mockPrisma(
       Promise.all(ops),
     ),
   };
+}
+
+const mockPrisma = mockPrismaBase;
+
+/** A tiny Prisma `where` evaluator for the mocks: equality, `{ in }`,
+ *  `{ notIn }`, `{ gt }` and `{ not }` on top-level columns. */
+function matchesWhere(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
+  if (!where) return true;
+  return Object.entries(where).every(([col, cond]) => {
+    // A fixture that never set the column is not filtered on it.
+    if (!(col in row)) return true;
+    const v = row[col];
+    if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
+      const c = cond as { in?: unknown[]; notIn?: unknown[]; gt?: string; not?: unknown };
+      if (c.in && !c.in.includes(v)) return false;
+      if (c.notIn && c.notIn.includes(v)) return false;
+      if (c.gt !== undefined && !(typeof v === 'string' && v > c.gt)) return false;
+      if ('not' in c && v === c.not) return false;
+      return true;
+    }
+    return v === cond;
+  });
 }
 
 /** ConfigService stand-in: `env` supplies the vars the service reads. */
@@ -340,13 +401,15 @@ function record(overrides: Partial<NormalizedRecord> = {}): NormalizedRecord {
   };
 }
 
-function serviceWith(
+function serviceWithBase(
   prisma: ReturnType<typeof mockPrisma>,
   records: NormalizedRecord[],
   env: Record<string, string> = {},
 ) {
   return new IngestService(prisma as unknown as PrismaService, [stubSource(records)], config(env));
 }
+
+const serviceWith = serviceWithBase;
 
 const RUN = { days: 7, limit: 100 };
 
@@ -583,7 +646,25 @@ describe('IngestService.run', () => {
   });
 });
 
+/** The record half of a structural match: Wikidata Q42, which the matched-row
+ *  mocks below seed on `c-sec`. Since names stopped combining companies, every
+ *  enrichment needs an identifier or a unique domain to reach its row. */
+const Q42 = { scheme: 'WIKIDATA' as const, value: 'Q42' };
+const withQ42 = (r: NormalizedRecord): NormalizedRecord => ({
+  ...r,
+  company: { ...r.company, identifiers: [...(r.company.identifiers ?? []), Q42] },
+});
+const Q42_SEED: IdentifierRow = { scheme: 'WIKIDATA', value: 'Q42', entityType: 'company', entityId: 'c-sec', source: 'X' };
+
 describe('IngestService match-&-enrich', () => {
+  // Shadowed for this block: rows are reachable by Q42, records carry it.
+  const mockPrisma = (...args: Parameters<typeof mockPrismaBase>) => {
+    const [rows, inv, funds, seeds, ...rest] = args;
+    return mockPrismaBase(rows, inv, funds, [...(seeds ?? []), Q42_SEED], ...rest);
+  };
+  const serviceWith = (prisma: ReturnType<typeof mockPrisma>, records: NormalizedRecord[], env?: Record<string, string>) =>
+    serviceWithBase(prisma, records.map(withQ42), env);
+
   it('enriches a same-name row: fills blanks, replaces placeholder copy, never touches identity fields', async () => {
     const prisma = mockPrisma([companyRow()]);
     const r = record({
@@ -1647,7 +1728,7 @@ describe('normalizeName', () => {
   });
 });
 
-describe('IngestService country-scoped name matching', () => {
+describe('IngestService name twins and countries', () => {
   function uk(company: Partial<NormalizedRecord['company']> = {}): NormalizedRecord {
     return record({
       source: 'COMPANIES_HOUSE',
@@ -1675,29 +1756,30 @@ describe('IngestService country-scoped name matching', () => {
     expect(prisma.company.create.mock.calls[0]![0].data).toMatchObject({ countryCode: 'GB' });
   });
 
-  it('enriches a same-name row whose country is unknown, filling the country', async () => {
+  it('creates a separate row for a same-name, unknown-country row and proposes the pair for review', async () => {
     const prisma = mockPrisma([companyRow({ id: 'c-any', name: 'Acme', countryCode: null })]);
     await serviceWith(prisma, [uk()]).run(RUN);
 
-    expect(prisma.company.create).not.toHaveBeenCalled();
-    const update = prisma.company.update.mock.calls[0]![0] as unknown as {
-      where: { id: string };
-      data: Record<string, unknown>;
-    };
-    expect(update.where.id).toBe('c-any');
-    expect(update.data).toMatchObject({ countryCode: 'GB' });
+    // A name is a reason to ask, never to combine.
+    expect(prisma.company.update).not.toHaveBeenCalled();
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+    expect(prisma.candidates).toEqual([
+      expect.objectContaining({ entityType: 'company', signal: 'name', evidence: 'acme' }),
+    ]);
+    const pair = [prisma.candidates[0]!.leftId, prisma.candidates[0]!.rightId].sort();
+    expect(pair).toEqual(['c-any', 'c-new']);
   });
 
-  it('skips the foreign holder of a name and enriches the compatible one behind it', async () => {
+  it('proposes only the country-compatible namesake', async () => {
     const prisma = mockPrisma([
       companyRow({ id: 'c-us', name: 'Acme Inc', countryCode: 'US' }),
       companyRow({ id: 'c-gb', name: 'ACME LIMITED', countryCode: 'GB', externalSource: 'X', externalId: '9' }),
     ]);
     await serviceWith(prisma, [uk()]).run(RUN);
 
-    expect(prisma.company.create).not.toHaveBeenCalled();
-    const update = prisma.company.update.mock.calls[0]![0] as unknown as { where: { id: string } };
-    expect(update.where.id).toBe('c-gb');
+    expect(prisma.company.update).not.toHaveBeenCalled();
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+    expect(prisma.candidates.map((c) => [c.leftId, c.rightId].sort())).toEqual([['c-gb', 'c-new']]);
   });
 
   it('still matches across countries on an identifier', async () => {
@@ -1768,10 +1850,19 @@ describe('IngestService country-scoped name matching', () => {
     expect(prisma.company.create).toHaveBeenCalledTimes(2);
   });
 
-  it('still name-matches a row whose number is the record’s own, or that has none', async () => {
+  it('never combines on a name, even when the row holds no conflicting number', async () => {
     const prisma = mockPrisma([companyRow({ id: 'c-gb', name: 'Acme Limited', countryCode: 'GB' })]);
     await serviceWith(prisma, [uk({ identifiers: [{ scheme: 'COMPANIES_HOUSE', value: '05002194' }] })]).run(RUN);
-    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+    expect(prisma.candidates).toHaveLength(1);
+  });
+
+  it('proposes nothing for a name too common to mean anything', async () => {
+    const rows = [1, 2, 3, 4].map((n) => companyRow({ id: `c-${n}`, slug: `acme-${n}`, name: 'Acme', countryCode: null }));
+    const prisma = mockPrisma(rows);
+    await serviceWith(prisma, [uk()]).run(RUN);
+    expect(prisma.company.create).toHaveBeenCalledTimes(1);
+    expect(prisma.candidates).toHaveLength(0);
   });
 
   it('passes the Companies House numbers already held to every source', async () => {
@@ -1987,12 +2078,15 @@ describe('IngestService identifier matching', () => {
       }),
     ]).run(RUN);
 
-    // The first hit still wins — refusing to match would create a THIRD row for
-    // the same entity — but the disagreement is queued for a human.
+    // Neither hit wins: the record is held whole (no company or child write)
+    // behind a private REVIEW_REQUIRED binding, and the pair is queued.
     expect(prisma.company.create).not.toHaveBeenCalled();
-    expect(prisma.company.update.mock.calls[0]![0].where).toEqual({ id: 'c-a' });
+    expect(prisma.company.update).not.toHaveBeenCalled();
     expect(prisma.candidates).toHaveLength(1);
     expect(prisma.candidates[0]).toMatchObject({ leftId: 'c-a', rightId: 'c-b', signal: 'identifier' });
+    expect(prisma.bindings).toEqual([
+      expect.objectContaining({ status: 'REVIEW_REQUIRED', method: 'conflict:identifiers-disagree', companyId: null }),
+    ]);
   });
 
   it('matches an investor firm on its CRD ahead of domain and name', async () => {
@@ -2475,6 +2569,8 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
       amountLocal: null,
       externalSource: 'SEC_EDGAR',
       externalId: '0001-22-000001',
+      companyId: 'c-sec',
+      moderationStatus: 'APPROVED',
       ...over,
     });
     const partnerRecord = (over: Partial<NormalizedRecord> = {}) =>
@@ -2557,11 +2653,12 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
       expect(updates.some((u) => 'totalRaisedUsd' in u.data)).toBe(false);
     });
 
-    it('never rewrites a round on a company matched by name alone — it only skips the duplicate', async () => {
+    it('never pairs with a namesake: a name-only twin gets its own company and its own round', async () => {
       const prisma = mockPrisma([companyRow()], [], [], [], [], [formD()]);
-      // companyRow has no domain and no identifier: this record matches by name.
+      // companyRow has no domain and no identifier: only the name is shared.
       await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
-      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.company.create).toHaveBeenCalledTimes(1);
+      expect(prisma.fundingRound.upsert).toHaveBeenCalledTimes(1);
       expect(prisma.fundingRound.update).not.toHaveBeenCalled();
     });
 
@@ -2573,7 +2670,14 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
     });
 
     it('never modifies a human contribution, but still does not duplicate it', async () => {
-      const prisma = mockPrisma([companyRow()], [], [], [], [], [formD({ externalSource: null, externalId: null })]);
+      const prisma = mockPrisma(
+        [companyRow({ domain: 'acme.example' })],
+        [],
+        [],
+        [],
+        [],
+        [formD({ externalSource: null, externalId: null })],
+      );
       await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
       expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
       expect(prisma.fundingRound.update).not.toHaveBeenCalled();
@@ -2581,7 +2685,7 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
 
     it('updates its own round in place on a re-run instead of re-pairing it', async () => {
       const prisma = mockPrisma(
-        [companyRow()],
+        [companyRow({ domain: 'acme.example' })],
         [],
         [],
         [],
@@ -2594,10 +2698,35 @@ describe('IngestService streaming sources (Phase 2 seams)', () => {
     });
 
     it('does nothing of the sort without roundDedup — every round is written', async () => {
-      const prisma = mockPrisma([companyRow()], [], [], [], [], [formD()]);
+      const prisma = mockPrisma([companyRow({ domain: 'acme.example' })], [], [], [], [], [formD()]);
       await serviceFor(prisma, [{ records: [partnerRecord({ roundDedup: undefined })] }]).run(RUN);
-      expect(prisma.fundingRound.findMany).not.toHaveBeenCalled();
+      // Only the own-key ownership check reads rounds; the company's rungs are never compared.
+      const wheres = prisma.fundingRound.findMany.mock.calls.map((c) => (c[0] as { where: Record<string, unknown> }).where);
+      expect(wheres.some((w) => 'companyId' in w)).toBe(false);
       expect(prisma.fundingRound.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('records each deal’s canonical round and reuses a DEDUP pairing on the next run', async () => {
+      const prisma = mockPrisma([companyRow({ domain: 'acme.example' })], [], [], [], [], [formD()]);
+      await serviceFor(prisma, [{ records: [partnerRecord()] }]).run(RUN);
+      expect(prisma.roundBindings).toEqual([
+        expect.objectContaining({ source: 'PARTNER', sourceRoundId: 'D1', roundId: 'r-formd', method: 'DEDUP' }),
+      ]);
+      // A later run whose deal no longer looks near the rung still lands on it.
+      const moved = partnerRecord();
+      moved.rounds = [{ ...moved.rounds![0]!, date: '2019-01-01', amountUsd: 1 }];
+      await serviceFor(prisma, [{ records: [moved] }]).run(RUN);
+      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+    });
+
+    it('skips a bound deal whose rung has gone, rather than re-pairing it', async () => {
+      const prisma = mockPrisma([companyRow({ domain: 'acme.example' })], [], [], [], [], [formD()]);
+      prisma.roundBindings.push({ source: 'PARTNER', sourceRoundId: 'D1', roundId: 'r-gone', method: 'DEDUP' });
+      const svc = serviceFor(prisma, [{ records: [partnerRecord()] }]);
+      await svc.run(RUN);
+      expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.fundingRound.update).not.toHaveBeenCalled();
+      expect(svc.identityStats().roundBindingConflicts).toBe(1);
     });
 
     it('raises a stale company total to the sum of its rounds, never lowers it', async () => {
@@ -2856,5 +2985,202 @@ describe('IngestService partner provenance', () => {
       Array.isArray(c[0]) ? (c[0] as string[]).join('?') : (c[0] as unknown as { sql: string }).sql,
     );
     expect(sql.some((q) => q.includes('"partnerFields" &&'))).toBe(true);
+  });
+});
+
+describe('IngestService company identity policy', () => {
+  type Row = ReturnType<typeof companyRow>;
+
+  /** A mock whose creates and round writes persist, so later records — in the
+   *  same run or the next — see them exactly as the database would. */
+  function stateful(seed: Row[] = [], idents: IdentifierRow[] = [], bindings: Record<string, unknown>[] = []) {
+    const rows: Row[] = [...seed];
+    const rounds: Record<string, unknown>[] = [];
+    const prisma = mockPrisma(rows, [], [], idents, [], rounds, bindings);
+    let n = 0;
+    prisma.company.create.mockImplementation(async (args) => {
+      const row = companyRow({ id: `c-${++n}`, ...(args.data as Record<string, unknown>) });
+      rows.push(row);
+      return { id: row.id };
+    });
+    prisma.fundingRound.upsert.mockImplementation(async (args) => {
+      const a = args as { where: { externalSource_externalId: { externalSource: string; externalId: string } }; create: Record<string, unknown> };
+      const k = a.where.externalSource_externalId;
+      let row = rounds.find((r) => r.externalSource === k.externalSource && r.externalId === k.externalId);
+      if (!row) {
+        row = { id: `r-${k.externalId}`, ...a.create, moderationStatus: 'APPROVED' };
+        rounds.push(row);
+      }
+      return { id: row.id as string };
+    });
+    return { prisma, rows, rounds };
+  }
+
+  const partnerService = (prisma: ReturnType<typeof mockPrisma>, records: NormalizedRecord[]) =>
+    new IngestService(
+      prisma as unknown as PrismaService,
+      [
+        {
+          name: 'PARTNER',
+          explicitOnly: true,
+          fetch: async () => [],
+          stream: async function* () {
+            yield { records };
+          },
+        },
+      ],
+      config(),
+    );
+  const RUN_PARTNER = { ...RUN, sources: ['PARTNER'] };
+
+  const indigo = (id: string, name: string, domain: string, deal: string, amountUsd: number): NormalizedRecord => ({
+    source: 'PARTNER',
+    companyExternalId: id,
+    roundDedup: 'enrich',
+    company: {
+      name,
+      hq: 'United States',
+      foundedYear: 0,
+      industry: [],
+      stage: 'Seed',
+      totalRaisedUsd: amountUsd,
+      domain,
+      websiteUrl: `https://${domain}`,
+      countryCode: 'US',
+      identifiers: [{ scheme: 'PARTNER', value: id }],
+    },
+    rounds: [{ externalId: deal, name: 'Seed', date: '2025-01-23', amountUsd }],
+  });
+  const AG = indigo('155553', 'Indigo Ag Inc.', 'indigoag.com', 'V100001', 100_000_000);
+  const RE = indigo('723159', 'Indigo', 'useindigo.com', 'V407056', 8_000_000);
+  const MED = indigo('787691', 'Indigo', 'getindigo.com', 'V444915', 50_000_000);
+
+  const permutations = <T>(xs: T[]): T[][] =>
+    xs.length <= 1 ? [xs] : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p]));
+
+  it.each(permutations([AG, RE, MED]).map((p) => [p.map((r) => r.companyExternalId).join(' → '), p]))(
+    'keeps the three Indigo identities apart in one run: %s',
+    async (_label, order) => {
+      const { prisma, rows, rounds } = stateful();
+      await partnerService(prisma, order as NormalizedRecord[]).run(RUN_PARTNER);
+
+      expect(rows.map((r) => r.externalId).sort()).toEqual(['155553', '723159', '787691']);
+      const ownerOf = (deal: string) => rows.find((r) => r.id === rounds.find((x) => x.externalId === deal)?.companyId)?.externalId;
+      expect(ownerOf('V100001')).toBe('155553');
+      expect(ownerOf('V407056')).toBe('723159');
+      expect(ownerOf('V444915')).toBe('787691');
+      expect(prisma.company.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps them apart across separate runs, and a re-run changes no owner', async () => {
+    const { prisma, rows, rounds } = stateful();
+    for (const r of [AG, RE, MED, AG, MED, RE]) await partnerService(prisma, [r]).run(RUN_PARTNER);
+    expect(rows).toHaveLength(3);
+    expect(new Set(rounds.map((r) => r.companyId)).size).toBe(3);
+  });
+
+  it('a second partner id on the same domain is still a separate company', async () => {
+    const { prisma, rows } = stateful();
+    const dup = indigo('999999', 'Indigo Agriculture', 'indigoag.com', 'V999', 1);
+    await partnerService(prisma, [AG, dup]).run(RUN_PARTNER);
+    expect(rows).toHaveLength(2);
+  });
+
+  it('only the rare, same-country name twin is proposed for review', async () => {
+    const { prisma } = stateful();
+    await partnerService(prisma, [AG, RE, MED]).run(RUN_PARTNER);
+    // "Indigo" and "Indigo" share a key; "Indigo Ag" does not.
+    expect(prisma.candidates).toHaveLength(1);
+    expect(prisma.candidates[0]).toMatchObject({ signal: 'name', evidence: 'indigo' });
+  });
+
+  it('holds a record that only reaches a row through an uncertified alias: zero mutation', async () => {
+    const ag = companyRow({ id: 'c-ag', slug: 'indigo-ag-inc', name: 'Indigo Ag Inc.', externalSource: 'PARTNER', externalId: '155553', domain: 'indigoag.com' });
+    const { prisma, rounds } = stateful(
+      [ag],
+      [
+        { scheme: 'PARTNER', value: '155553', entityType: 'company', entityId: 'c-ag', source: 'PARTNER' },
+        { scheme: 'PARTNER', value: '723159', entityType: 'company', entityId: 'c-ag', source: 'PARTNER' },
+      ],
+    );
+    rounds.push({ id: 'r-V407056', externalSource: 'PARTNER', externalId: 'V407056', companyId: 'c-ag', moderationStatus: 'APPROVED' });
+    const svc = partnerService(prisma, [RE]);
+    await svc.run(RUN_PARTNER);
+
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update).not.toHaveBeenCalled();
+    expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+    expect(prisma.entityIdentifier.create).not.toHaveBeenCalled();
+    expect(svc.identityStats().held).toEqual({ 'unbound-record-alias': 1 });
+  });
+
+  it('routes a certified alias through its binding', async () => {
+    const pub = companyRow({ id: 'c-pub', domain: 'acme.example' });
+    const { prisma } = stateful(
+      [pub],
+      [{ scheme: 'PARTNER', value: '723159', entityType: 'company', entityId: 'c-pub', source: 'PARTNER' }],
+      [{ source: 'PARTNER', sourceCompanyId: '723159', companyId: 'c-pub', status: 'RESOLVED' }],
+    );
+    await partnerService(prisma, [{ ...RE, rounds: [] }]).run(RUN_PARTNER);
+    expect(prisma.company.create).not.toHaveBeenCalled();
+  });
+
+  it('follows a binding through a merge tombstone, and back out after an unmerge', async () => {
+    const loser = companyRow({ id: 'c-lose', slug: 'lose', mergedIntoId: 'c-win' });
+    const winner = companyRow({ id: 'c-win', slug: 'win' });
+    const binding = { source: 'PARTNER', sourceCompanyId: '723159', companyId: 'c-lose', status: 'RESOLVED' };
+    const merged = stateful([loser, winner], [], [binding]);
+    await partnerService(merged.prisma, [{ ...RE, rounds: [] }]).run(RUN_PARTNER);
+    expect(merged.prisma.company.create).not.toHaveBeenCalled();
+    expect((merged.prisma.company.findUnique.mock.calls.at(-1)?.[0] as { where: { id: string } }).where.id).toBe('c-win');
+
+    const unmerged = stateful([{ ...loser, mergedIntoId: null }, winner], [], [binding]);
+    await partnerService(unmerged.prisma, [{ ...RE, rounds: [] }]).run(RUN_PARTNER);
+    expect((unmerged.prisma.company.findUnique.mock.calls.at(-1)?.[0] as { where: { id: string } }).where.id).toBe('c-lose');
+  });
+
+  it('holds a record whose round already sits on another company — ingest never moves an owner', async () => {
+    const other = companyRow({ id: 'c-other', slug: 'other' });
+    const { prisma, rounds } = stateful([other]);
+    rounds.push({ id: 'r-V407056', externalSource: 'PARTNER', externalId: 'V407056', companyId: 'c-other', moderationStatus: 'APPROVED' });
+    const svc = partnerService(prisma, [RE]);
+    await svc.run(RUN_PARTNER);
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.fundingRound.upsert).not.toHaveBeenCalled();
+    expect(svc.identityStats().childOwnerClashes).toBe(1);
+  });
+
+  it('holds a public record whose unique domain lands on a company with an uncertified alias', async () => {
+    const tainted = companyRow({ id: 'c-pub', domain: 'acme.example', externalSource: 'COMPANIES_HOUSE', externalId: '01' });
+    const { prisma } = stateful(
+      [tainted],
+      [{ scheme: 'PARTNER', value: '723159', entityType: 'company', entityId: 'c-pub', source: 'PARTNER' }],
+    );
+    const svc = serviceWith(prisma, [record({ company: { ...record().company, domain: 'acme.example' } })]);
+    await svc.run(RUN);
+    expect(prisma.company.create).not.toHaveBeenCalled();
+    expect(prisma.company.update).not.toHaveBeenCalled();
+    expect(svc.identityStats().held).toEqual({ 'domain-on-unresolved-company': 1 });
+  });
+
+  it('writes a RESOLVED binding for a structural match, once', async () => {
+    const pub = companyRow({ id: 'c-pub', domain: 'acme.example' });
+    const { prisma } = stateful([pub]);
+    const r = record({ company: { ...record().company, domain: 'acme.example' } });
+    await serviceWith(prisma, [r]).run(RUN);
+    expect(prisma.bindings).toEqual([
+      expect.objectContaining({ source: 'STUB', sourceCompanyId: 'X1', companyId: 'c-pub', status: 'RESOLVED', method: 'domain' }),
+    ]);
+    await serviceWith(prisma, [r]).run(RUN);
+    expect(prisma.companyIngestBinding.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('a rejected pair stays rejected when ingest meets it again', async () => {
+    const { prisma } = stateful([companyRow({ id: 'c-a', name: 'Indigo', countryCode: 'US' })]);
+    prisma.candidates.push({ id: 'cand-x', entityType: 'company', leftId: 'c-1', rightId: 'c-a', signal: 'name', evidence: 'indigo', status: 'REJECTED' });
+    await partnerService(prisma, [RE]).run(RUN_PARTNER);
+    expect(prisma.candidates).toHaveLength(1);
+    expect(prisma.candidates[0]!.status).toBe('REJECTED');
   });
 });

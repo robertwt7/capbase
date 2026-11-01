@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 
+import { companyIdentityKey } from './company-matcher';
 import { normalizeName } from './ingest.service';
 import { detectorNameKey, sweep, type DetectRow } from './merge-detector';
 
@@ -121,5 +122,22 @@ describe('detectorNameKey', () => {
 
   it('strips legal suffixes so one spelling of a suffix is not a difference', () => {
     expect(detectorNameKey('Acme Robotics, Inc.')).toBe(detectorNameKey('Acme Robotics LLC'));
+  });
+
+  it('proposes, for a human, the pairs ingest now deliberately keeps apart', () => {
+    // Ingest never combines on a name, and its own key keeps "Ag" — so these
+    // two arrive as separate rows. The detector's looser key still pairs them,
+    // which is the point: a moderator decides, nothing merges by itself.
+    expect(companyIdentityKey('Indigo Ag Inc.')).not.toBe(companyIdentityKey('Indigo'));
+    const { pairs } = sweep(
+      [
+        { id: 'ag', name: 'Indigo Ag Inc.', domain: 'indigoag.com', countryCode: 'US' },
+        { id: 're', name: 'Indigo', domain: 'useindigo.com', countryCode: 'US' },
+      ],
+      (r) => detectorNameKey(r.name),
+      8,
+      { scopeByCountry: true },
+    );
+    expect(pairs).toEqual([{ aId: 'ag', bId: 're', evidence: 'indigo' }]);
   });
 });

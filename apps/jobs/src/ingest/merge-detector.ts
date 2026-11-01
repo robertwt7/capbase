@@ -9,21 +9,21 @@
 import { countriesCompatible, normalizeInvestorName } from './ingest.service';
 
 /**
- * The detector's name key — deliberately LOOSER than the company matcher's.
+ * The detector's name key — deliberately LOOSE: it proposes, never decides.
  *
- * A sweep keyed on `normalizeName`, the function `upsertCompany` matches on, is
- * dead code: any pair it could find, ingest would already have merged at write
- * time. Measured on the live corpus, it finds 0 groups. The value is entirely
- * in the gap between the two: `normalizeName` DELETES punctuation, so
- * "HeavyTech,Inc." becomes "heavytechinc" and never meets "HeavyTech, Inc." →
- * "heavytech". This key replaces punctuation with a space instead, and the same
- * corpus yields 5 groups over 10 rows — including that pair.
+ * Ingest no longer combines companies on a name at all (company-matcher.ts):
+ * two records that share only a name now land as two rows, and turning that
+ * pair into one is a moderator's decision. So equal names legitimately survive
+ * ingestion, and this sweep is where they surface. Ingest proposes the rare
+ * twins it meets on its conservative `companyIdentityKey`; this key is broader
+ * — punctuation becomes a space ("HeavyTech,Inc." meets "HeavyTech, Inc."),
+ * and every legal suffix, `ag` and `sa` included, is stripped — so it also
+ * finds what that stricter key keeps apart, for a human to check.
  *
  * It is `normalizeInvestorName` because that function already does exactly
- * this, is already tested, and its extra legal suffixes (lp, gmbh, bv, …) are
- * legal suffixes on a company too. For investors it IS the matcher's key, so
- * that sweep finds nothing today; it stays as a cheap safety net for rows
- * renamed after creation, which the matcher cannot catch.
+ * this and is already tested. For investors it IS the matcher's key, so that
+ * sweep finds nothing today; it stays as a cheap safety net for rows renamed
+ * after creation, which the matcher cannot catch.
  */
 export const detectorNameKey = normalizeInvestorName;
 

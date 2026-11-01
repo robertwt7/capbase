@@ -635,6 +635,18 @@ export function companyStage(deals: DealRow[]): Stage {
  *  completed, dated deal of primary capital. */
 const KEPT_COMPANY_STATUS = new Set(['Active', 'Realised']);
 
+/** Whether a deal becomes a round at all: completed, dated, primary capital.
+ *  The one eligibility rule — `toRound` and the company-match repair audit
+ *  (which must account for every deal ingest would have written) share it. */
+export function dealEligible(deal: Pick<DealRow, 'status' | 'deal_date' | 'stage'>): boolean {
+  return deal.status === 'Completed' && !!deal.deal_date && roundFor(deal.stage) !== null && !!isoDay(deal.deal_date);
+}
+
+/** Whether a company is imported at all (its record also needs a round). */
+export function companyKept(status: string | null): boolean {
+  return !!status && KEPT_COMPANY_STATUS.has(status);
+}
+
 /** The round for one completed deal, or null when it is not one. */
 export function toRound(
   deal: DealRow,
@@ -642,12 +654,9 @@ export function toRound(
   keptFirms: ReadonlyMap<string, KeptFirm>,
   fx: FxTable,
 ): NormalizedRound | null {
-  if (deal.status !== 'Completed' || !deal.deal_date) return null;
-  const shape = roundFor(deal.stage);
-  if (!shape) return null;
-
-  const date = isoDay(deal.deal_date);
-  if (!date) return null;
+  if (!dealEligible(deal)) return null;
+  const shape = roundFor(deal.stage)!;
+  const date = isoDay(deal.deal_date)!;
   const sizeUsd = positive(deal.size_usd);
   const local = positive(deal.size_local);
   // A blank currency with a USD figure is a USD deal.

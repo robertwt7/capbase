@@ -116,12 +116,15 @@ and it simply enriches fewer rows; nothing breaks. About 4k grantee numbers are
 dissolved companies the live register no longer lists, so they keep only what
 Innovate UK said about them.
 
-**A name match never crosses a border or a registry number.** UK rows bring ~128k
-names into a corpus that was US-only, so the company name match is country-scoped
-(a GB "Acme Ltd" never enriches a US "Acme Inc") and may not land on a row that
-already holds a different Companies House number. Two same-named UK companies with
-different numbers become two rows and a merge candidate, never one silently merged
-row.
+**A name never combines two companies.** Ingest associates a record with an
+existing company only through structure (`apps/jobs/src/ingest/company-matcher.ts`):
+its own provenance key, a recorded binding, legal identifiers that all name one
+row, or a domain exactly one row holds. Two rows that share only a name stay two
+rows, and the rare same-name, compatible-country pair (at most three holders) is
+proposed to `/admin/merges` instead. A legal identifier on a row holding a
+*different* Companies House number is a conflict, not a match — Costain Limited
+00610201 and 01393773 stay apart. Expect more separate profiles than the old
+name-matching rebuild produced; that is the price of never folding a namesake in.
 
 **Grants in pounds, compared in dollars.** An Innovate UK award keeps its published
 amount in `FundingRound.amountLocal` with `currency: 'GBP'`; `amountUsd` is that
@@ -250,12 +253,12 @@ the table and there is nothing for a scan to find — `writeIdentifier` records
 those candidates at the instant the write fails, which is the only moment they
 are visible.
 
-The name key is **looser than the one ingest matches on**, and has to be. A
-sweep keyed on `normalizeName` can only find pairs `upsertCompany` would already
-have merged, and measured on the live corpus it finds zero. The detector's key
-replaces punctuation with a space where the matcher deletes it, so
-`HeavyTech,Inc.` and `HeavyTech, Inc.` meet here and nowhere else: 5 groups over
-10 rows today.
+Ingest no longer combines companies on a name at all, so equal names now
+legitimately survive ingestion and this sweep is where they surface. Its key is
+deliberately **loose**: punctuation becomes a space (`HeavyTech,Inc.` meets
+`HeavyTech, Inc.`) and every legal suffix — `ag` and `sa` included — is
+stripped, so it proposes, for a human, pairs ingest's conservative
+`companyIdentityKey` keeps apart ("Indigo Ag Inc." / "Indigo").
 
 Groups larger than 8 rows are skipped and logged rather than queued — a name
 shared by nine rows is a generic string, and one such group would put 36 pairs
@@ -357,6 +360,120 @@ page for links rather than constructing a URL from a date.
 
 `SEC_EDGAR` is pinned by its `DAYS` window; `WIKIDATA` is live and cannot be
 pinned — it reflects Wikidata at the moment of the run.
+
+## Repairing wrongly combined companies
+
+Until the identity policy above, a name match could fold one company into
+another, and the partner's company ids and domains were then recorded on the
+wrong row, which made every later run trust the mistake. Indigo Ag Inc.
+(`155553`) absorbed two unrelated "Indigo" companies (`723159`, `787691`) this
+way: their rounds, holdings and USD 58M of raised total sat on its profile. The
+`company-match-repair` CLI separates such companies from the partner's original
+identities **in place**: rows move, nothing is deleted, and every group is
+journaled and reversible. **Never restore a dump to undo or redo a repair**
+(`deploy-restore` replaces every live user and contribution); use the rollback
+below.
+
+**Modes** (`node apps/jobs/dist/company-match-repair.js <mode>`, wrapped by make):
+
+| Mode | Writes? | What it does |
+|---|---|---|
+| `audit` (`make fix`, `make fix-prod`) | never | Groups every partner company association (provenance key, PARTNER identifier, the source's own rounds and holdings, bindings) into connected components and classifies them: `consistent`, `repairable`, `review_required`, `source_missing`. |
+| `plan` | never | The audit plus an immutable `plan.json` of typed operations, bound to this database's fingerprint and the bundle hash. `SLUG=` plans one group; `LIMIT_GROUPS=` the first N; `BINDINGS=certify\|hold\|all` adds binding batches. |
+| `apply` | yes | One SERIALIZABLE transaction per group, journaled in `CompanyRepairGroup`. Needs `PLAN=`, `EXPECT_DB=` (the fingerprint) and `CONFIRM=yes`. Re-running it resumes; an applied group is skipped. |
+| `verify` | never | Re-checks every applied group from the journal (owners, slugs, identifiers, citations, bindings; with `PLAN=`, conservation and totals). Nonzero exit on an integrity failure. |
+| `rollback` | yes | Exact inverse operations, newest group first, refusing any group edited since. History is kept; a "reversed" entry is appended. |
+| `fingerprint` | never | Prints the target fingerprint for `EXPECT_DB`. |
+
+Exit codes: `0` ok, `1` error or integrity failure, `2` usage, `3` conflicts or
+refusals (the rest committed), `75` the ingest lock is busy (nothing done).
+
+Read sessions are read-only at the server (`default_transaction_read_only`),
+and the CLI boots no Nest context: no scheduler, no provider client, no error
+reporter. Writes hold the ingest advisory lock (the cron skips while they run),
+lock the group's company rows and children `FOR UPDATE` (so an API approval or a
+child insert waits), re-read the group and refuse it if anything changed since
+the plan, then compare-and-set every row.
+
+**What a repair does to a repairable group.** The incumbent keeps its id, slug,
+prose and its anchor identity's rounds. Each other source identity gets a new
+partner-only company (`<name>-<source id>`, its own sanitized prose and facts)
+and its rounds, holdings, PARTNER/DOMAIN identifiers and child revisions move to
+it by id — round investors and citations follow the unchanged round ids. The
+incumbent's total drops by exactly the moved raises (never below what remains
+itemised) when the partner provably wrote it; history gets `REPAIR` entries
+(names, slugs and counts only). Same-domain aliases, aliases without a website,
+human edits or children, other sources' children, reviewed merges, totals another
+writer touched, deals that were folded into a public round (never reconstructed
+from date/amount proximity), and identities absent from the bundle all stay
+`review_required` or `source_missing`, and their aliases get a private hold so
+the next partner run cannot write through them. Ingest also refuses, rather
+than moves, a round or holding whose key already sits on another company.
+
+**The source bundle.** The repair reads the partner's original identities from
+a private, hashed bundle built offline from the stage file — never by loading the
+stage into production:
+
+```bash
+make prepare-company-repair-snapshot \
+  FILE=$HOME/capbase-partner-data/partner-stage-20261014.sql.gz \
+  EXPECT_SHA256=e9d52121804c42f5372ed33055273adf847070539139528e0303df9ddb4e14bc \
+  OUT=backups/company-repair/source-20261014
+```
+
+It keeps companies, deals, deal investors and firm identities only (people,
+contacts, funds and firm prose are skipped in the stream), takes ~40 s and
+~400 MB on disk, and is byte-identical on every run. The raw-dump fallback
+(`--raw-tar … --builder …`) runs the original builder in a throwaway PostgreSQL
+17 container; `--compare` against the stage-built bundle must report identical
+tables.
+
+**Rehearsal (local, on a clone — never the dev database).**
+
+```bash
+docker exec capbase-postgres psql -U capbase -d postgres -c \
+  'CREATE DATABASE capbase_repair_rehearsal TEMPLATE capbase'   # needs no open connections
+export DATABASE_URL=postgresql://capbase:capbase@localhost:5433/capbase_repair_rehearsal
+export REPAIR_TARGET_ID=rehearsal-<uuid>                         # a new one for every clone
+S=backups/company-repair/source-20261014 R=backups/company-repair/rehearsal
+make fix SNAPSHOT=$S OUT=$R/audit
+make repair-company-matches MODE=plan SNAPSHOT=$S OUT=$R/plan-indigo SLUG=indigo-ag-inc
+FP=$(make -s repair-company-matches MODE=fingerprint | tail -1)
+make repair-company-matches MODE=apply PLAN=$R/plan-indigo/plan.json EXPECT_DB=$FP CONFIRM=yes OUT=$R/apply
+make repair-company-matches MODE=verify RUN=<run id from apply> PLAN=$R/plan-indigo/plan.json OUT=$R/verify
+```
+
+Measured on the full local dataset (2026-11-02): 198,463 groups, 190,144 clean
+partner anchors after the repair, 613 repairable groups (1,236 rounds and 2,514
+holdings moved to 665 new companies), 7,377 certified single associations, 1,582
+left for review. The plan peaks at ~400 MB RSS under `--max-old-space-size=540`
+and takes ~85 s; applying everything took ~65 s, ~350 MB of WAL and ~14 MB of
+database growth; rolling it all back took ~45 s. Round, holding, round-investor,
+citation and identifier counts and the total of every round amount were
+unchanged, a second audit found 0 repairable groups, and a 10,000-company partner
+re-ingest afterwards changed no repaired owner, total or identifier (it held the
+37 records under review).
+
+**Production.** The repair is owner-gated: deploy, back up, audit, then canary,
+then batches — the order and the stage-file steps are in the private operations
+note. On the VPS the targets run the CLI in the deployed jobs image with the
+bundle and plan mounted read-only (`scripts/company-repair-prod.sh`):
+
+```bash
+export REPAIR_TARGET_ID=<the production target id, kept outside the database>
+make fix-prod SNAPSHOT=~/repair/source-20261014 OUT=~/repair/audit
+make repair-company-matches-prod MODE=plan SNAPSHOT=… OUT=~/repair/canary SLUG=indigo-ag-inc
+make repair-company-matches-prod MODE=fingerprint
+make repair-company-matches-prod MODE=apply PLAN=~/repair/canary/plan.json EXPECT_DB=<fp> CONFIRM=yes OUT=~/repair/apply
+make repair-company-matches-prod MODE=verify RUN=<id> PLAN=~/repair/canary/plan.json OUT=~/repair/verify
+# then: MODE=plan LIMIT_GROUPS=25 → apply → verify, repeated from the new state;
+# finally MODE=plan BINDINGS=all → apply → verify for the certifications and holds.
+make repair-company-matches-prod MODE=rollback RUN=<id> EXPECT_DB=<fp> CONFIRM=yes   # only if needed
+```
+
+A plan made on a clone never applies to production: its fingerprint differs.
+Plan from production's own state. Keep partner re-imports off until the bindings
+batch has run, and never apply two overlapping plans at once.
 
 ## Shipping the local dataset to production
 

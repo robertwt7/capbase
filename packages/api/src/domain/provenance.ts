@@ -67,7 +67,21 @@ export interface Citation {
  *  into another, or split back out. The timeline renders them separately. */
 /** RETRACT: an admin rejected a row that was already approved — `field: ''` takes the whole row
  *  off the profile, a named field is a proposal's value being restored to what it replaced. */
-export type RevisionAction = 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT';
+/** REPAIR: an ownership correction — records ingest had wrongly combined were
+ *  separated (or a separation reversed). `field: ''`; `before`/`after` carry only
+ *  a safe summary (`RepairSummary`), never row ids or private evidence. */
+export type RevisionAction = 'CREATE' | 'UPDATE' | 'MERGE' | 'UNMERGE' | 'RETRACT' | 'REPAIR';
+
+/** The displayed payload of a REPAIR revision. */
+export interface RepairSummary {
+  /** `split-out`: records moved from this profile to `other`. `split-from`:
+   *  this profile was created from records moved off `other`. `reversed`: an
+   *  earlier separation was undone. */
+  kind: 'split-out' | 'split-from' | 'reversed';
+  other: { name: string; slug: string };
+  rounds: number;
+  holdings: number;
+}
 
 export type RevisionActor = 'USER' | 'ADMIN' | 'INGEST';
 

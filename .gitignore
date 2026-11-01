@@ -86,3 +86,5 @@ apps/api/.mail-preview/
 thoughts/
 
 exports
+# Python bytecode (scripts/tests import the repair snapshot preparer)
+__pycache__/

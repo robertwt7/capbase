@@ -1234,3 +1234,102 @@ model EnrichmentCursor {
   key      String @id
   cursorId String?
 }
+
+// --- Company ingestion routing and match repair (private; never served) -------
+//
+// Plain-id columns (no foreign keys) like `reviewedById`: a binding names a
+// company that a merge can retire, so readers resolve it through the merge
+// tombstones exactly as they resolve `(externalSource, externalId)`.
+
+/// One source company record's routing decision. Distinguishes an association
+/// ingest (or a reviewed repair) actually established from a legacy crosswalk
+/// alias, and records a private hold where the evidence disagrees. Whitelisted
+/// evidence only: names, domain, country, validated legal identifiers.
+model CompanyIngestBinding {
+  id              String   @id @default(cuid())
+  source          String
+  sourceCompanyId String
+  /// Null while REVIEW_REQUIRED without a resolved owner.
+  companyId       String?
+  /// RESOLVED | REVIEW_REQUIRED
+  status          String
+  /// How it was decided: identifier | domain | certified | repair-anchor |
+  /// repair-split | conflict:<reason> | hold:<reason>
+  method          String
+  policyVersion   Int
+  evidence        Json
+  evidenceHash    String
+  /// Repair run/group (`<runId>/<groupKey>`) or adjudication note that set it.
+  reference       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([source, sourceCompanyId])
+  @@index([companyId])
+  @@index([status])
+}
+
+/// A source deal's canonical round: its own row (OWN) or another source's rung
+/// it was folded into (DEDUP). Recorded prospectively, so a later repair never
+/// has to reconstruct a pairing from date/amount proximity.
+model IngestRoundBinding {
+  id              String   @id @default(cuid())
+  source          String
+  sourceRoundId   String
+  sourceCompanyId String
+  roundId         String
+  /// OWN | DEDUP
+  method          String
+  policyVersion   Int
+  evidenceHash    String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([source, sourceRoundId])
+  @@index([roundId])
+}
+
+/// One `repair-company-matches` apply run against one target database.
+model CompanyRepairRun {
+  id                  String   @id @default(cuid())
+  databaseFingerprint String
+  manifestHash        String
+  sourceHash          String
+  toolVersion         String
+  policyVersion       Int
+  /// RUNNING | APPLIED | PARTIAL | ROLLED_BACK
+  status              String
+  label               String?
+  summary             Json
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  finishedAt          DateTime?
+  groups              CompanyRepairGroup[]
+
+  @@unique([databaseFingerprint, manifestHash])
+}
+
+/// One committed (or rolled-back) group of a repair run: the forward and
+/// inverse operations, committed in the same transaction as the data they
+/// describe — the checkpoint a resume or rollback reads.
+model CompanyRepairGroup {
+  id          String           @id @default(cuid())
+  runId       String
+  run         CompanyRepairRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  groupKey    String
+  groupHash   String
+  companyIds  String[]
+  sourceIds   String[]         @default([])
+  /// APPLIED | ROLLED_BACK
+  status      String
+  operations  Json
+  inverse     Json
+  beforeHash  String
+  afterHash   String
+  createdIds  String[]         @default([])
+  appliedAt   DateTime         @default(now())
+  rolledBackAt DateTime?
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([runId, groupKey])
+}
