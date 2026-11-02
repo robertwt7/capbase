@@ -27,6 +27,7 @@ import type {
   NormalizedFundMetric,
   NormalizedInvestor,
   NormalizedInvestorFirm,
+  NormalizedInvestorFocus,
   NormalizedPerson,
   NormalizedRecord,
   NormalizedRound,
@@ -139,6 +140,49 @@ export interface MetricRow {
   manager_id: string;
   fund_currency: string | null;
 }
+
+/**
+ * One firm's reported investment focus in one role (stage v2,
+ * `partner_stage.firm_focus`). Labels are split with each field's own
+ * delimiter but otherwise raw; amounts are in MILLIONS as published (0,
+ * negative and absurd values included — the parser decides).
+ */
+export interface FirmFocusRow {
+  firm_id: string;
+  role: 'manager' | 'lp';
+  /** `YYYY-MM-DD`. */
+  reported_on: string | null;
+  stages: string[] | null;
+  main_strategy: string | null;
+  strategies: string[] | null;
+  industries: string[] | null;
+  verticals: string[] | null;
+  geographies: string[] | null;
+  range_min_usd_mn: number | null;
+  range_max_usd_mn: number | null;
+  range_min_local_mn: number | null;
+  range_max_local_mn: number | null;
+  range_currency: string | null;
+}
+
+/** The stage v2 contract for `partner_stage.firm_focus` — what the preflight
+ *  checks before any write. */
+export const FIRM_FOCUS_COLUMNS = [
+  'firm_id',
+  'role',
+  'reported_on',
+  'stages',
+  'main_strategy',
+  'strategies',
+  'industries',
+  'verticals',
+  'geographies',
+  'range_min_usd_mn',
+  'range_max_usd_mn',
+  'range_min_local_mn',
+  'range_max_local_mn',
+  'range_currency',
+] as const satisfies readonly (keyof FirmFocusRow)[];
 
 /** A firm that survived the type mapping, as edges need it. */
 export interface KeptFirm {
@@ -375,14 +419,18 @@ export function toPerson(row: PersonRow, sinceYear: number): NormalizedPerson | 
 
 // --- Firms ----------------------------------------------------------------------
 
+/** `focus`: the firm's normalized focus roles (`toFirmFocusList`); set on the
+ *  firm only when there is at least one. */
 export function toInvestorFirm(
   firm: FirmRow,
   type: InvestorType,
   people: PersonRow[],
   sinceYear: number,
+  focus: readonly NormalizedInvestorFocus[] = [],
 ): NormalizedInvestorFirm {
   const site = websiteUrl(firm.website);
   return {
+    ...(focus.length > 0 ? { focus: [...focus] } : {}),
     externalId: firm.firm_id,
     name: firm.name.trim(),
     type,
@@ -503,6 +551,175 @@ export function toUsd(
   if (amountLocal == null || !currency) return null;
   const rate = fx.usdPer(currency, isoDate);
   return rate == null ? null : amountLocal * rate;
+}
+
+// --- Investor focus (stage v2) ---------------------------------------------------
+
+/** Above this a reported cheque or commitment is a unit error, not a range
+ *  (one $23M firm reports a $5.7tn maximum). */
+export const FOCUS_RANGE_MAX_USD = 10_000_000_000;
+
+/** Labels longer than this are not a vocabulary entry (none today; the longest
+ *  is 53 characters). */
+const FOCUS_LABEL_MAX = 80;
+
+/** Placeholder labels: not a statement of focus. Compared lowercased. */
+const JUNK_LABELS = new Set(['unknown', 'other', 'others', 'n/a', 'none', 'not specified']);
+
+export type FocusIssue = 'amount-invalid' | 'range-implausible' | 'range-inverted' | 'labels-dropped';
+export const FOCUS_ISSUES: readonly FocusIssue[] = [
+  'amount-invalid',
+  'range-implausible',
+  'range-inverted',
+  'labels-dropped',
+];
+export type FocusIssueCounts = Record<FocusIssue, number>;
+export const emptyFocusIssues = (): FocusIssueCounts => ({
+  'amount-invalid': 0,
+  'range-implausible': 0,
+  'range-inverted': 0,
+  'labels-dropped': 0,
+});
+
+function cleanLabels(raw: readonly (string | null)[] | null): { labels: string[]; dropped: number } {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  let dropped = 0;
+  for (const r of raw ?? []) {
+    const v = r?.replace(/\s+/g, ' ').trim() ?? '';
+    const key = v.toLowerCase();
+    if (!v || /^[-–—_.\s]+$/.test(v) || JUNK_LABELS.has(key) || v.length > FOCUS_LABEL_MAX) {
+      dropped++;
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(v);
+  }
+  return { labels, dropped };
+}
+
+/** Trim, drop blanks and junk (`Unknown`, `Other`, `N/A`, `None`, dashes —
+ *  case-insensitive), de-duplicate case-insensitively keeping the first
+ *  spelling, keep source order. Labels over 80 chars are dropped (none today). */
+export function focusLabels(raw: readonly (string | null)[] | null): string[] {
+  return cleanLabels(raw).labels;
+}
+
+/** One bound in whole units: millions × 1e6, exactly once, rounded. 0 → absent
+ *  ("no bound"); negative / non-finite → invalid. */
+export function millionsToUnits(mn: number | null): { value: number | null; invalid: boolean } {
+  if (mn == null) return { value: null, invalid: false };
+  if (!Number.isFinite(mn) || mn < 0) return { value: null, invalid: true };
+  if (mn === 0) return { value: null, invalid: false };
+  return { value: Math.round(mn * 1_000_000), invalid: false };
+}
+
+export interface NormalizedRange {
+  minUsd: number | null;
+  maxUsd: number | null;
+  currency: string;
+  minLocal: number | null;
+  maxLocal: number | null;
+}
+
+/** The range, or null with the reason it was dropped. Both bounds go when either
+ *  is invalid or above FOCUS_RANGE_MAX_USD, or when min > max. Native bounds are
+ *  kept only for a valid non-USD currency (`currencyCode`) whose own bounds are
+ *  present for exactly the USD bounds present; otherwise USD-only, currency 'USD'.
+ *  A USD-reporting firm keeps no local bounds. */
+export function focusRange(row: FirmFocusRow): { range: NormalizedRange | null; issue?: FocusIssue } {
+  const min = millionsToUnits(row.range_min_usd_mn);
+  const max = millionsToUnits(row.range_max_usd_mn);
+  if (min.invalid || max.invalid) return { range: null, issue: 'amount-invalid' };
+  if (min.value == null && max.value == null) return { range: null };
+  if ((min.value ?? 0) > FOCUS_RANGE_MAX_USD || (max.value ?? 0) > FOCUS_RANGE_MAX_USD) {
+    return { range: null, issue: 'range-implausible' };
+  }
+  if (min.value != null && max.value != null && min.value > max.value) {
+    return { range: null, issue: 'range-inverted' };
+  }
+  const usdOnly: NormalizedRange = { minUsd: min.value, maxUsd: max.value, currency: 'USD', minLocal: null, maxLocal: null };
+
+  const currency = currencyCode(row.range_currency);
+  if (!currency || currency === 'USD') return { range: usdOnly };
+  const lmin = millionsToUnits(row.range_min_local_mn);
+  const lmax = millionsToUnits(row.range_max_local_mn);
+  const linesUp =
+    !lmin.invalid &&
+    !lmax.invalid &&
+    (lmin.value != null) === (min.value != null) &&
+    (lmax.value != null) === (max.value != null) &&
+    !(lmin.value != null && lmax.value != null && lmin.value > lmax.value);
+  if (!linesUp) return { range: usdOnly };
+  return { range: { ...usdOnly, currency, minLocal: lmin.value, maxLocal: lmax.value } };
+}
+
+/** One role's normalized focus, or null when it states nothing usable. An LP
+ *  row's stages and main strategy are ignored (the publisher reports neither
+ *  for LPs). */
+export function toFirmFocus(
+  row: FirmFocusRow,
+  snapshotDate: string,
+): { focus: NormalizedInvestorFocus | null; issues: FocusIssue[] } {
+  const issues: FocusIssue[] = [];
+  const manager = row.role === 'manager';
+  let dropped = 0;
+  const take = (raw: readonly (string | null)[] | null) => {
+    const r = cleanLabels(raw);
+    dropped += r.dropped;
+    return r.labels;
+  };
+  const stages = manager ? take(row.stages) : [];
+  const mainStrategy = manager ? (take(row.main_strategy == null ? null : [row.main_strategy])[0] ?? null) : null;
+  const strategies = take(row.strategies);
+  const industries = take(row.industries);
+  const verticals = take(row.verticals);
+  const geographies = take(row.geographies);
+  if (dropped > 0) issues.push('labels-dropped');
+
+  const { range, issue } = focusRange(row);
+  if (issue) issues.push(issue);
+
+  const empty =
+    stages.length + strategies.length + industries.length + verticals.length + geographies.length === 0 &&
+    mainStrategy == null &&
+    range == null;
+  if (empty) return { focus: null, issues };
+  return {
+    focus: {
+      role: row.role,
+      stages,
+      mainStrategy,
+      strategies,
+      industries,
+      verticals,
+      geographies,
+      rangeMinUsd: range?.minUsd ?? null,
+      rangeMaxUsd: range?.maxUsd ?? null,
+      rangeCurrency: range?.currency ?? 'USD',
+      rangeMinLocal: range?.minLocal ?? null,
+      rangeMaxLocal: range?.maxLocal ?? null,
+      reportedOn: isoDay(row.reported_on) ?? snapshotDate,
+      snapshotDate,
+    },
+    issues,
+  };
+}
+
+/** A firm's focus rows → its usable roles, tallying every issue into `tally`. */
+export function toFirmFocusList(
+  rows: readonly FirmFocusRow[],
+  snapshotDate: string,
+  tally: FocusIssueCounts,
+): NormalizedInvestorFocus[] {
+  const out: NormalizedInvestorFocus[] = [];
+  for (const row of rows) {
+    const { focus, issues } = toFirmFocus(row, snapshotDate);
+    for (const i of issues) tally[i]++;
+    if (focus) out.push(focus);
+  }
+  return out;
 }
 
 // --- Companies and deals ---------------------------------------------------------

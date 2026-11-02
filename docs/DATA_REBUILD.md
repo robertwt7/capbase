@@ -475,6 +475,29 @@ A plan made on a clone never applies to production: its fingerprint differs.
 Plan from production's own state. Keep partner re-imports off until the bindings
 batch has run, and never apply two overlapping plans at once.
 
+## Partner investor focus (stage v2)
+
+The firms' reported investment focus (stages, strategies, industries, verticals,
+geography, initial-equity / typical-commitment ranges) needs a **v2** partner
+stage — one with `partner_stage.meta` (version 2) and `partner_stage.firm_focus`.
+`make partner-stage-status` prints the version and the focus rows per role. A v1
+stage still runs every other partner stage and backfill (v2 is a superset).
+
+Run it after the firms stage and before `partner-stage-drop`. It does not re-run
+the firms stage, so people and private contacts are never touched:
+
+```bash
+make partner-stage-load FILE=…/partner-stage-<date>-v2.sql.zst
+make backfill-partner-investor-focus        # -prod on the VPS
+make backfill-partner-investor-focus        # again: expect "written 0"
+```
+
+The summary counts `written / unchanged / stale / weak / unresolved` roles and
+firms, plus the parser's issues (`amount-invalid`, `range-implausible`,
+`range-inverted`, `labels-dropped`). `weak` is a firm the partner reached only by
+name — deliberately left without focus. To undo it:
+`DELETE FROM "InvestorFocus" WHERE "externalSource" = 'PARTNER'` (no other writer).
+
 ## Shipping the local dataset to production
 
 Re-ingesting on prod (above) is the canonical path — every row is reproducible, and

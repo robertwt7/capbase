@@ -1,15 +1,34 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import type {
-  CommitmentRow,
-  CompanyRow,
-  DealRow,
-  FirmRow,
-  FundRow,
-  MetricRow,
-  PersonRow,
+import {
+  FIRM_FOCUS_COLUMNS,
+  type CommitmentRow,
+  type CompanyRow,
+  type DealRow,
+  type FirmFocusRow,
+  type FirmRow,
+  type FundRow,
+  type MetricRow,
+  type PersonRow,
 } from './partner.parser';
+
+/** A staged focus row with what the targeted backfill needs of its firm: the
+ *  website (the domain association rule) and the type columns (`firmType`).
+ *  `firm_role` is the firm's own role (`manager` | `lp` | `both`); `role` is
+ *  the focus row's. */
+export type FirmFocusPageRow = FirmFocusRow &
+  Pick<FirmRow, 'name' | 'website' | 'manager_firm_type' | 'lp_firm_type' | 'vc_fund_share' | 'deal_count'> & {
+    firm_role: FirmRow['role'];
+  };
+
+/** The stage's own version marker. A stage without `partner_stage.meta` is v1
+ *  (no investor focus). */
+export interface StageContract {
+  version: number;
+  /** `YYYY-MM-DD`; null on a v1 stage. */
+  snapshotDate: string | null;
+}
 
 /**
  * Reads the partner snapshot from the `partner_stage` schema.
@@ -34,6 +53,71 @@ export class PartnerClient {
     const rows = await this.prisma.$queryRaw<{ loaded: boolean }[]>`
       SELECT to_regclass('partner_stage.firm') IS NOT NULL AS loaded`;
     return rows[0]?.loaded === true;
+  }
+
+  /** The stage version and snapshot date (`partner_stage.meta`), v1 when absent. */
+  async stageContract(): Promise<StageContract> {
+    const [has] = await this.prisma.$queryRaw<{ present: boolean }[]>`
+      SELECT to_regclass('partner_stage.meta') IS NOT NULL AS present`;
+    if (!has?.present) return { version: 1, snapshotDate: null };
+    const [row] = await this.prisma.$queryRaw<{ version: number | null; snapshot_date: string | null }[]>`
+      SELECT stage_version::int AS version, to_char(snapshot_date, 'YYYY-MM-DD') AS snapshot_date
+        FROM partner_stage.meta
+       LIMIT 1`;
+    return { version: row?.version ?? 1, snapshotDate: row?.snapshot_date ?? null };
+  }
+
+  /** Throws, naming every missing column, unless `partner_stage.firm_focus`
+   *  carries the whole v2 contract (`FIRM_FOCUS_COLUMNS`). Run before any write. */
+  async requireFocusColumns(): Promise<void> {
+    const rows = await this.prisma.$queryRaw<{ column_name: string }[]>`
+      SELECT column_name::text AS column_name
+        FROM information_schema.columns
+       WHERE table_schema = 'partner_stage' AND table_name = 'firm_focus'`;
+    const have = new Set(rows.map((r) => r.column_name));
+    const missing = FIRM_FOCUS_COLUMNS.filter((c) => !have.has(c));
+    if (missing.length === FIRM_FOCUS_COLUMNS.length) {
+      throw new Error('partner_stage.firm_focus is missing (load a v2 stage: make partner-stage-status)');
+    }
+    if (missing.length > 0) {
+      throw new Error(`partner_stage.firm_focus is missing column(s): ${missing.join(', ')}`);
+    }
+  }
+
+  /** The focus rows of one page of firms (the firms stage). */
+  async firmFocus(firmIds: string[]): Promise<FirmFocusRow[]> {
+    if (firmIds.length === 0) return [];
+    return this.prisma.$queryRaw<FirmFocusRow[]>`
+      SELECT firm_id, role, to_char(reported_on, 'YYYY-MM-DD') AS reported_on,
+             stages::text[] AS stages, main_strategy, strategies::text[] AS strategies,
+             industries::text[] AS industries, verticals::text[] AS verticals,
+             geographies::text[] AS geographies,
+             range_min_usd_mn::float8 AS range_min_usd_mn, range_max_usd_mn::float8 AS range_max_usd_mn,
+             range_min_local_mn::float8 AS range_min_local_mn, range_max_local_mn::float8 AS range_max_local_mn,
+             range_currency
+        FROM partner_stage.firm_focus
+       WHERE firm_id = ANY(${firmIds})
+       ORDER BY firm_id, role`;
+  }
+
+  /** Every focus row, keyset-paged on `(firm_id, role)`, with its firm (the
+   *  targeted backfill). */
+  async firmFocusPage(after: [string, string], limit: number): Promise<FirmFocusPageRow[]> {
+    return this.prisma.$queryRaw<FirmFocusPageRow[]>`
+      SELECT x.firm_id, x.role, to_char(x.reported_on, 'YYYY-MM-DD') AS reported_on,
+             x.stages::text[] AS stages, x.main_strategy, x.strategies::text[] AS strategies,
+             x.industries::text[] AS industries, x.verticals::text[] AS verticals,
+             x.geographies::text[] AS geographies,
+             x.range_min_usd_mn::float8 AS range_min_usd_mn, x.range_max_usd_mn::float8 AS range_max_usd_mn,
+             x.range_min_local_mn::float8 AS range_min_local_mn, x.range_max_local_mn::float8 AS range_max_local_mn,
+             x.range_currency,
+             f.name, f.website, f.role AS firm_role, f.manager_firm_type, f.lp_firm_type,
+             f.vc_fund_share::float8 AS vc_fund_share, f.deal_count::int AS deal_count
+        FROM partner_stage.firm_focus x
+        JOIN partner_stage.firm f ON f.firm_id = x.firm_id
+       WHERE (x.firm_id, x.role) > (${after[0]}, ${after[1]})
+       ORDER BY x.firm_id, x.role
+       LIMIT ${limit}`;
   }
 
   async allFirms(): Promise<FirmRow[]> {

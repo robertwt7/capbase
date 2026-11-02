@@ -291,7 +291,18 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   largest by capital raised; count and sectors cover the whole portfolio), the firm's people
   (capped at `INVESTOR_PEOPLE_PREVIEW`, "N of M named"), or an empty state inviting a
   contribution. Every section is also capped by the gate (`gateLimit`; LP commitments are
-  `members`) with a `LockedSection` against the public count. The detail read counts each relation with its own indexed `count()` — never
+  `members`) with a `LockedSection` against the public count. Between the metric strip and Funds
+  sits **Investment focus** (`components/InvestorFocusSection.tsx`, partner data, `members`): one
+  labelled `<dl>` grid per role — as a fund manager (Stages, Main strategy, Strategies,
+  Industries, Verticals, Geographic exposure, Initial equity investment) and as a limited partner
+  (Strategy preferences, Industries, Verticals, Geographic preferences, Typical fund commitment),
+  with role subheadings only when both exist — each label list a `FocusLabels` disclosure (8
+  shown, "Show all N", `aria-expanded`), ranges through `formatMoneyRange` ("From $1M", "Up to
+  $10M"; a non-USD range in its own currency then a muted `≈ $…`), and a "Reported as of …" line
+  per role. No focus on record → no section (never an `EmptyState`); withheld (`focus: null`,
+  `focusCount > 0`) → a `LockedSection` with `tier="members"` (sign-in alone opens it). Never in
+  metadata, JSON-LD, OG, directories or search. `make investor-focus-fixture` (`-remove`) loads
+  synthetic focus on four local firms for checking the display. The detail read counts each relation with its own indexed `count()` — never
   Prisma's `_count`, which GROUP BYs the whole child table (~500 ms per profile at this size).
   The same rule holds for **lists**, a relation-count `orderBy` included: sorting `/people` on
   `roles: { _count }` cost 12.6 s a page at 578k roles. Sort on a stored column and count the
@@ -544,7 +555,8 @@ the API** so a hidden value never reaches the browser:
    section a tier, and `gateLimit(section, access)` the rows a viewer gets: `open` 2 / 2 / all,
    `members` 0 / 2 / all, `contributors` 0 / 0 / all (signed out / signed in but locked /
    unlocked; 2 = `PREVIEW_LIMIT`). Company rounds, diversity, acquisitions and exits, investor LP
-   commitments and fund commitments/metrics are `members`; fund terms `contributors`; the rest
+   commitments, investor focus (`investorFocus`, ≤ 2 role rows: signed in sees all of it) and
+   fund commitments/metrics are `members`; fund terms `contributors`; the rest
    `open`. An approved contribution unlocks everything for `CONTRIBUTION_WINDOW_DAYS` (30).
 2. **By provenance.** Anything the licensed partner wrote is `members` at least, except
    public prose: `PUBLIC_PARTNER_FIELDS` (`oneLiner`, `description`) is never masked —
@@ -886,6 +898,21 @@ currency plus an ECB-converted `amountUsd`) and `FundMetric` (one per fund per a
 ingest-only and write no revisions; `FundCommitment` has **no** `(fundId, investorId)` unique,
 so an investor merge keeps both rows (the `InvestorHolding` rule) and stays reversible.
 
+**`InvestorFocus`** (migration `investor_focus`, additive) is what a firm **reports** it invests
+in, one row per firm per role (`INVESTOR_FOCUS_ROLES`: `manager` | `lp`) — a historical statement
+as of `reportedOn`, not a promise it is investing. The roles are different facts: a manager's
+`geographies` are where it HAS invested (exposure, `geographicExposure` in the API), an LP's where
+it WANTS to commit (`geographicPreferences`); a manager's range is its initial equity cheque, an
+LP's its typical fund commitment. Labels are kept as published (cleaned, never mapped onto
+`SECTORS`/`STAGES`/`InvestorType`; portfolio `sectors` stays a separate fact). Money is whole units
+(`rangeMinUsd`/`rangeMaxUsd`, plus `rangeCurrency` + `rangeMinLocal`/`rangeMaxLocal` for a non-USD
+firm), converted from the publisher's millions exactly once, in the parser; a null bound was not
+reported, never 0. Partner-only, ingest-only, no `moderationStatus` (the parent firm and
+`externalSource` decide visibility), no Revision, no Citation, no `partnerFields`. Ingest never
+deletes a role a later snapshot lacks, and an older `reportedOn` never replaces a newer one. It is
+an `INVESTOR_CHILDREN` merge entry: both firms' rows survive a merge (the detail read takes the
+newest per role) and an unmerge restores them.
+
 Controlled vocabularies are TS string-literal unions + a `readonly` const array in `@repo/api`
 (`domain/company.ts`), stored as plain `String` columns and validated in DTOs with `@IsIn([...])`
 — not Prisma enums. `InvestorType` covers `Venture`/`Growth`/`Angel`/`Corporate`/`Private equity`/
@@ -1082,6 +1109,22 @@ last one clobber `totalRaisedUsd`:
   values to what the partner stated, failing closed: an equal public value is marked too), is
   idempotent (a second run changes 0 rows), and must run before any further partner stage and
   before `partner-stage-drop`.
+  **Stage versions.** `partner_stage.meta(stage_version, snapshot_date, built_at)` marks a stage;
+  none means v1. v2 adds `partner_stage.firm_focus` (one row per firm per role, amounts in
+  millions as published); `PartnerClient.stageContract()` reads the version and
+  `requireFocusColumns()` checks every `FIRM_FOCUS_COLUMNS` column **before any write** (the firms
+  stage throws on a v2 stage missing one; a v1 stage logs "investor focus not staged" and runs as
+  before). The parser (`toFirmFocus`) drops junk labels, `0` bounds ("no bound"), and the whole
+  range when a bound is negative, above `FOCUS_RANGE_MAX_USD` ($10bn — unit errors) or inverted.
+  **Focus association** (`focusAssociation` / `IngestService.writeInvestorFocus`): only the
+  partner's OWN firm row (looked up by provenance key) or a firm with the same identifying domain
+  receives focus — checked on the row, never on the path that found it, because an identifier the
+  partner attached through an earlier name match would otherwise vouch for itself. A name-only
+  association writes nothing (`weak`); admin merges are followed to the survivor. **`make
+  backfill-partner-investor-focus`** (`-prod`; `ingest/partner-investor-focus.ts`) writes focus
+  from a loaded v2 stage **without a firms re-run** (no firm column, person or contact touched),
+  under the ingest lock, idempotently (a second run writes 0); it refuses a v1 stage (exit 1).
+  `make test-investor-focus-integration` is its real-Postgres suite.
   **Index memory** (the 1 GB jobs container, ~549 MB heap): `IngestService` loads its four
   match indexes **lazily** (a stream batch loads only what it writes against), **paged**
   (`eachPage`, 20k rows; tombstones resolve from the merged rows alone), and leaves a record

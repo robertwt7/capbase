@@ -4,9 +4,11 @@
 # creates capbase_repair_test_<pid> in the local Postgres container, applies every
 # migration to it (and only it), runs the integration suite, and drops it — on
 # success, failure or Ctrl-C. Never touches DATABASE_URL's database, never runs
-# migrate dev/reset, and refuses any other database name.
+# migrate dev/reset, and refuses any other database name. It also runs the
+# investor-focus suite (make test-investor-focus-integration); arguments are a
+# jest path filter.
 #
-# Usage: make test-company-repair-integration
+# Usage: make test-company-repair-integration | make test-investor-focus-integration
 set -euo pipefail
 
 CONTAINER="${PG_CONTAINER:-capbase-postgres}"

@@ -43,6 +43,54 @@ export interface InvestorSummary extends Investor {
   companies: { slug: string; name: string; domain: string }[];
 }
 
+export const INVESTOR_FOCUS_ROLES = ['manager', 'lp'] as const;
+export type InvestorFocusRole = (typeof INVESTOR_FOCUS_ROLES)[number];
+
+/** A reported min/max. USD is what the firm reported in USD; `currency` with
+ *  `minLocal`/`maxLocal` is its own currency (null bounds when USD). A null
+ *  bound was not reported — never 0. */
+export interface ReportedRange {
+  minUsd: number | null;
+  maxUsd: number | null;
+  currency: string;
+  minLocal: number | null;
+  maxLocal: number | null;
+}
+
+/** What a firm reports it invests in as a fund manager (its own initial equity
+ *  cheques). Labels are the publisher's own, never mapped onto `SECTORS`. */
+export interface ManagerFocus {
+  stages: string[];
+  mainStrategy: string | null;
+  strategies: string[];
+  industries: string[];
+  verticals: string[];
+  /** Where the firm HAS invested. */
+  geographicExposure: string[];
+  initialEquityInvestment: ReportedRange | null;
+  /** `YYYY-MM-DD`. */
+  reportedOn: string;
+}
+
+/** What a firm reports it wants as a limited partner (commitments to funds). */
+export interface LpFocus {
+  strategyPreferences: string[];
+  industries: string[];
+  verticals: string[];
+  /** Where the LP WANTS to commit. */
+  geographicPreferences: string[];
+  typicalCommitment: ReportedRange | null;
+  /** `YYYY-MM-DD`. */
+  reportedOn: string;
+}
+
+/** A firm's reported investment focus, per role. A historical statement as of
+ *  each block's `reportedOn`, not a promise the firm is investing. */
+export interface InvestorFocus {
+  manager: ManagerFocus | null;
+  lp: LpFocus | null;
+}
+
 /** Full investor profile. `companies` is the largest `INVESTOR_PORTFOLIO_PREVIEW`
  *  of the portfolio (by capital raised); `portfolioCount` and `sectors` cover all of it. */
 export interface InvestorDetailResponse extends InvestorSummary {
@@ -65,6 +113,11 @@ export interface InvestorDetailResponse extends InvestorSummary {
   namedFundCount: number;
   /** Citations attesting the fund rows above. */
   citations: Citation[];
+  /** Reported investment focus (partner data): null when this viewer may not
+   *  see it or the firm has none. Detail read only. */
+  focus: InvestorFocus | null;
+  /** Roles with a focus on record (0–2), public like every count. */
+  focusCount: number;
   /** Whether search engines should index this profile (`indexing.ts`). The
    *  sitemap lists exactly the investors for whom this is true, including a
    *  partner-only firm with a non-empty description. */

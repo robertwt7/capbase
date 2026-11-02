@@ -83,6 +83,9 @@ describe('InvestorsService', () => {
   /** What the sample query returns. */
   let sample: unknown[];
   let relationCounts: Record<'holdings' | 'funds' | 'people' | 'commitments', jest.Mock>;
+  /** The focus reads: the public role probe (`distinct`) and the gated rows. */
+  let focusFindMany: jest.Mock<(args: { distinct?: string[] }) => Promise<unknown[]>>;
+  let focusStored: Record<string, unknown>[];
 
   beforeEach(() => {
     findMany = jest.fn();
@@ -118,7 +121,12 @@ describe('InvestorsService', () => {
       people: countOf('people'),
       commitments: countOf('commitments'),
     };
+    focusStored = [];
+    focusFindMany = jest.fn(async (args: { distinct?: string[] }) =>
+      args.distinct ? [...new Set(focusStored.map((r) => r.role))].map((role) => ({ role })) : focusStored,
+    );
     const prisma = {
+      investorFocus: { findMany: focusFindMany },
       // findUnique backs the miss path: is this slug a tombstone, or nothing?
       investor: { findMany, count, findFirst, findUnique: jest.fn(async () => null) },
       investorHolding: { count: relationCounts.holdings, groupBy: holdingGroupBy },
@@ -546,6 +554,55 @@ describe('InvestorsService', () => {
       expect(res.identifiers).toBeUndefined();
       expect(res.masked).not.toContain('description');
       expect(JSON.stringify(res)).not.toContain('Menlo Park');
+    });
+
+    const focusRow = (role: string) => ({
+      id: `foc-${role}`,
+      investorId: 'i-1',
+      role,
+      stages: ['FOCUS-SENTINEL'],
+      mainStrategy: null,
+      strategies: [],
+      industries: ['FOCUS-SENTINEL'],
+      verticals: [],
+      geographies: [],
+      rangeMinUsd: 1_000_000n,
+      rangeMaxUsd: null,
+      rangeCurrency: 'USD',
+      rangeMinLocal: null,
+      rangeMaxLocal: null,
+      reportedOn: new Date('2025-06-30T00:00:00.000Z'),
+      snapshotDate: new Date('2026-10-14T00:00:00.000Z'),
+      externalSource: 'PARTNER',
+      externalId: `P1:${role}`,
+    });
+
+    it('never loads the focus rows signed out, but counts the roles', async () => {
+      focusStored = [focusRow('manager'), focusRow('lp')];
+      findFirst.mockResolvedValue(investorRow());
+      const res = await as(signedOut).findOne('sequoia-capital');
+      expect(focusFindMany).toHaveBeenCalledTimes(1);
+      expect(focusFindMany.mock.calls[0]![0]).toMatchObject({ distinct: ['role'] });
+      expect(res.focus).toBeNull();
+      expect(res.focusCount).toBe(2);
+      expect(JSON.stringify(res, (_k, v: unknown) => (typeof v === 'bigint' ? String(v) : v))).not.toContain('FOCUS-SENTINEL');
+    });
+
+    it('gives a signed-in locked viewer the whole focus block', async () => {
+      focusStored = [focusRow('manager'), focusRow('lp')];
+      findFirst.mockResolvedValue(investorRow());
+      const res = await as(locked).findOne('sequoia-capital');
+      expect(focusFindMany).toHaveBeenCalledTimes(2);
+      expect(res.focusCount).toBe(2);
+      expect(res.focus?.manager).toMatchObject({ stages: ['FOCUS-SENTINEL'], initialEquityInvestment: { minUsd: 1_000_000, maxUsd: null } });
+      expect(res.focus?.lp).toMatchObject({ industries: ['FOCUS-SENTINEL'] });
+    });
+
+    it('a stub carries focus: null and the public count', async () => {
+      focusStored = [focusRow('manager')];
+      findFirst.mockResolvedValue(investorRow({ partnerOnly: true, partnerFields: [] }));
+      const res = await as(signedOut).findOne('sequoia-capital');
+      expect(res).toMatchObject({ partnerOnly: true, focus: null, focusCount: 1 });
     });
 
     it('keeps a partner-only firm without prose unindexable even with holdings', async () => {

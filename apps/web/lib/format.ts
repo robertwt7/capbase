@@ -4,14 +4,16 @@ import { countryName as isoCountryName } from '@repo/api';
 
 const symbols = new Map<string, string>();
 
-/** The currency's narrow symbol ($, £, €), or "CODE " when the locale has
- *  none — never a guess. Cached: Intl formatters are not free to build. */
+/** The currency's unambiguous symbol ($, £, €, CA$, CN¥), or "CODE " when the
+ *  locale has none — never a guess. Not the narrow symbol: that prints CAD, AUD
+ *  and HKD all as "$" and CNY as JPY's "¥", which beside a "≈ $…" figure reads
+ *  as US dollars. Cached: Intl formatters are not free to build. */
 function currencySymbol(currency: string): string {
   const code = currency.toUpperCase();
   let symbol = symbols.get(code);
   if (symbol === undefined) {
     try {
-      const part = new Intl.NumberFormat('en', { style: 'currency', currency: code, currencyDisplay: 'narrowSymbol' })
+      const part = new Intl.NumberFormat('en', { style: 'currency', currency: code, currencyDisplay: 'symbol' })
         .formatToParts(0)
         .find((p) => p.type === 'currency')?.value;
       symbol = part && part !== code ? part : `${code} `;
@@ -42,6 +44,17 @@ export function formatMoney(amount: number | null, currency = 'USD'): string {
 
 export function formatUsd(amount: number | null): string {
   return formatMoney(amount, 'USD');
+}
+
+/** A reported range in its own currency: "$1M–$10M", "From $1M", "Up to $10M",
+ *  "$5M" (equal bounds), or null when neither bound was reported. */
+export function formatMoneyRange(min: number | null, max: number | null, currency = 'USD'): string | null {
+  if (min !== null && max !== null) {
+    return min === max ? formatMoney(min, currency) : `${formatMoney(min, currency)}–${formatMoney(max, currency)}`;
+  }
+  if (min !== null) return `From ${formatMoney(min, currency)}`;
+  if (max !== null) return `Up to ${formatMoney(max, currency)}`;
+  return null;
 }
 
 /** English name for an ISO alpha-2 code ("GB" → "United Kingdom"), or null. */

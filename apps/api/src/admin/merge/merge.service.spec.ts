@@ -109,6 +109,11 @@ function fixture() {
       { id: 'fc-1', fundId: 'f-1', investorId: 'i-lose' },
       { id: 'fc-2', fundId: 'f-1', investorId: 'i-keep' },
     ]),
+    // Both firms carry a reported focus for the same role: both rows survive.
+    investorFocus: table([
+      { id: 'foc-1', investorId: 'i-lose', role: 'manager' },
+      { id: 'foc-2', investorId: 'i-keep', role: 'manager' },
+    ]),
     // Private contact details hang off the human; a merge moves them by id.
     personContact: table([{ id: 'pc-1', personId: 'h-lose', roleId: 'pr-3' }]),
     savedCompany: table([
@@ -481,6 +486,16 @@ describe('MergeService investor merge', () => {
 
     expect(db.fundCommitment.rows.find((r) => r.id === 'fc-1')!.investorId).toBe('i-lose');
     expect(db.fundCommitment.rows.find((r) => r.id === 'fc-2')!.investorId).toBe('i-keep');
+  });
+
+  it('remaps the reported focus on merge and restores it on unmerge', async () => {
+    const { db, service } = fixture();
+    const { mergeRecordId } = await service.merge('investor', 'i-keep', 'i-lose', 'admin-1');
+    expect(db.investorFocus.rows.map((r) => r.investorId)).toEqual(['i-keep', 'i-keep']);
+
+    await service.unmerge(mergeRecordId, 'admin-1');
+    expect(db.investorFocus.rows.find((r) => r.id === 'foc-1')!.investorId).toBe('i-lose');
+    expect(db.investorFocus.rows.find((r) => r.id === 'foc-2')!.investorId).toBe('i-keep');
   });
 
   it("moves the firm's own identifiers", async () => {

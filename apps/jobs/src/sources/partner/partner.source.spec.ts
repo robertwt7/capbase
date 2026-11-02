@@ -24,8 +24,10 @@ const firm = (firm_id: string, over: Partial<FirmRow> = {}): FirmRow => ({
   ...over,
 });
 
+type Contract = { version: number; snapshotDate: string | null; missing?: string[] };
+
 /** A fake client over tiny in-memory stage tables, keyset-paged like the real one. */
-function fakeClient(loaded = true): PartnerClient {
+function fakeClient(loaded = true, contract: Contract = { version: 1, snapshotDate: null }): PartnerClient {
   const funds = [
     { fund_id: 'F1', manager_id: '501', name: 'Fund I', status: 'Closed', asset_class: 'Venture Capital' },
     { fund_id: 'F2', manager_id: 'law', name: 'Fund L', status: 'Closed', asset_class: 'Venture Capital' },
@@ -34,6 +36,29 @@ function fakeClient(loaded = true): PartnerClient {
     rows.filter((r) => key(r) > after).slice(0, limit);
   return {
     stageLoaded: async () => loaded,
+    stageContract: async () => ({ version: contract.version, snapshotDate: contract.snapshotDate }),
+    requireFocusColumns: async () => {
+      if (contract.missing?.length) throw new Error(`partner_stage.firm_focus is missing column(s): ${contract.missing.join(', ')}`);
+    },
+    firmFocus: async (ids: string[]) =>
+      [
+        {
+          firm_id: '501',
+          role: 'manager',
+          reported_on: '2025-06-30',
+          stages: ['Seed'],
+          main_strategy: null,
+          strategies: null,
+          industries: ['Software'],
+          verticals: null,
+          geographies: ['US'],
+          range_min_usd_mn: 1,
+          range_max_usd_mn: 5,
+          range_min_local_mn: null,
+          range_max_local_mn: null,
+          range_currency: 'USD',
+        },
+      ].filter((r) => ids.includes(r.firm_id)),
     allFirms: async () => [
       firm('501'),
       firm('777', { role: 'lp', manager_firm_type: null, lp_firm_type: 'Public Pension Fund' }),
@@ -88,8 +113,8 @@ function fakeClient(loaded = true): PartnerClient {
   } as unknown as PartnerClient;
 }
 
-function source(env: Record<string, string> = {}, loaded = true) {
-  const s = new PartnerSource(fakeClient(loaded), { get: (k: string) => env[k] } as unknown as ConfigService);
+function source(env: Record<string, string> = {}, loaded = true, contract?: Contract) {
+  const s = new PartnerSource(fakeClient(loaded, contract), { get: (k: string) => env[k] } as unknown as ConfigService);
   s.fxLoader = async () => FxTable.parse('Date,USD,\n2020-01-02,1.1,\n');
   return s;
 }
@@ -127,6 +152,40 @@ describe('PartnerSource', () => {
 
   it('yields nothing when the stage schema is not loaded', async () => {
     expect(await collect(source({}, false))).toEqual([]);
+  });
+
+  it('a v1 stage yields firms with no focus', async () => {
+    const firms = (await collect(source({ PARTNER_STAGES: 'firms' }))).flatMap((b) => b.investors ?? []);
+    expect(firms.map((f) => f.focus)).toEqual([undefined, undefined]);
+  });
+
+  it('a v2 stage attaches focus to the right firm', async () => {
+    const firms = (
+      await collect(source({ PARTNER_STAGES: 'firms' }, true, { version: 2, snapshotDate: '2026-10-14' }))
+    ).flatMap((b) => b.investors ?? []);
+    expect(firms.find((f) => f.externalId === '777')!.focus).toBeUndefined();
+    expect(firms.find((f) => f.externalId === '501')!.focus).toEqual([
+      expect.objectContaining({
+        role: 'manager',
+        stages: ['Seed'],
+        industries: ['Software'],
+        rangeMinUsd: 1_000_000,
+        rangeMaxUsd: 5_000_000,
+        reportedOn: '2025-06-30',
+        snapshotDate: '2026-10-14',
+      }),
+    ]);
+  });
+
+  it('a v2 stage missing a column throws before any batch', async () => {
+    const s = source({}, true, { version: 2, snapshotDate: '2026-10-14', missing: ['range_currency'] });
+    const seen: SourceBatch[] = [];
+    await expect(
+      (async () => {
+        for await (const b of s.stream({ days: 1, limit: 100 })) seen.push(b);
+      })(),
+    ).rejects.toThrow(/range_currency/);
+    expect(seen).toEqual([]);
   });
 
   it('is never fetched and never part of an "all sources" run', async () => {

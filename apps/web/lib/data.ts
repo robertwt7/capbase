@@ -793,6 +793,8 @@ export const getInvestor = cache(async function getInvestor(
       funds,
       namedFundCount: funds.length,
       citations: [],
+      focus: null,
+      focusCount: 0,
       indexable: false,
       access: { unlocked: true, signedIn: false, unlockedUntil: null, previewLimit: PREVIEW_LIMIT },
     };

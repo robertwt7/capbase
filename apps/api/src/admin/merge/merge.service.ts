@@ -109,6 +109,10 @@ const INVESTOR_CHILDREN = [
   // survivor already holds is kept as a second row — the InvestorHolding rule
   // below — and the merge stays reversible.
   { model: 'fundCommitment', column: 'investorId' },
+  // The partner's reported focus. No unique on investorId, so both firms' rows
+  // survive a merge (the detail read picks the newest per role) and an unmerge
+  // restores them from `moved`.
+  { model: 'investorFocus', column: 'investorId' },
 ] as const;
 
 /** A person owns their roles, and the private contact details attached to them

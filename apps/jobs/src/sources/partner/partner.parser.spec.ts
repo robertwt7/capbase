@@ -2,14 +2,19 @@ import { describe, expect, it } from '@jest/globals';
 
 import { FxTable } from '../../util/fx';
 import {
+  FOCUS_RANGE_MAX_USD,
   PARTNER_SECTOR_MAP,
   cleanProse,
   companyFacts,
   companyStage,
   currencyCode,
+  emptyFocusIssues,
   firmType,
+  focusLabels,
+  focusRange,
   fundStatus,
   fundStrategy,
+  millionsToUnits,
   normalizeEmail,
   normalizeLinkedIn,
   normalizePhone,
@@ -17,6 +22,8 @@ import {
   partnerCountry,
   roundFor,
   toCommitment,
+  toFirmFocus,
+  toFirmFocusList,
   toFund,
   toInvestorFirm,
   toMetric,
@@ -25,6 +32,7 @@ import {
   toRound,
   type CompanyRow,
   type DealRow,
+  type FirmFocusRow,
   type FirmRow,
   type FundRow,
   type KeptFirm,
@@ -225,6 +233,200 @@ describe('toInvestorFirm', () => {
 
   it('never uses a platform host as the domain', () => {
     expect(toInvestorFirm(firm({ website: 'https://www.linkedin.com/company/x' }), 'Venture', [], 2026).domain).toBeNull();
+  });
+
+  it('carries no focus when none is offered', () => {
+    expect(toInvestorFirm(firm(), 'Venture', [], 2026).focus).toBeUndefined();
+    expect(toInvestorFirm(firm(), 'Venture', [], 2026, []).focus).toBeUndefined();
+  });
+
+  it('carries the focus roles it is given', () => {
+    const roles = toFirmFocusList([focusRow()], '2026-10-14', emptyFocusIssues());
+    expect(toInvestorFirm(firm(), 'Venture', [], 2026, roles).focus).toEqual(roles);
+  });
+});
+
+const focusRow = (over: Partial<FirmFocusRow> = {}): FirmFocusRow => ({
+  firm_id: '501',
+  role: 'manager',
+  reported_on: '2025-06-30',
+  stages: ['Seed', 'Initial Round', 'Round B,C,D...'],
+  main_strategy: 'Venture Capital (All Stages)',
+  strategies: ['Early Stage', 'Expansion / Late Stage'],
+  industries: ['Software', 'Healthcare'],
+  verticals: ['Fintech'],
+  geographies: ['US', 'Europe'],
+  range_min_usd_mn: 1,
+  range_max_usd_mn: 10,
+  range_min_local_mn: null,
+  range_max_local_mn: null,
+  range_currency: 'USD',
+  ...over,
+});
+
+describe('investor focus', () => {
+  describe('focusLabels', () => {
+    it('trims, drops blanks and junk, de-duplicates case-insensitively, keeps source order', () => {
+      expect(
+        focusLabels([' Software ', '', null, 'Unknown', 'other', 'N/A', '--', 'None', 'software', 'Healthcare', 'Fintech']),
+      ).toEqual(['Software', 'Healthcare', 'Fintech']);
+    });
+
+    it('keeps the first spelling of a duplicate', () => {
+      expect(focusLabels(['FinTech', 'Fintech', 'fintech'])).toEqual(['FinTech']);
+    });
+
+    it('keeps a label that contains commas whole', () => {
+      expect(focusLabels(['Round B,C,D...'])).toEqual(['Round B,C,D...']);
+    });
+
+    it('drops an over-long label and returns [] for null', () => {
+      expect(focusLabels(['x'.repeat(81), 'Seed'])).toEqual(['Seed']);
+      expect(focusLabels(null)).toEqual([]);
+    });
+  });
+
+  describe('millionsToUnits', () => {
+    it('converts millions to whole units exactly once', () => {
+      expect(millionsToUnits(1.5)).toEqual({ value: 1_500_000, invalid: false });
+      expect(millionsToUnits(22.75)).toEqual({ value: 22_750_000, invalid: false });
+      expect(millionsToUnits(0.1)).toEqual({ value: 100_000, invalid: false });
+    });
+
+    it('reads 0 as no bound, negative and non-finite as invalid', () => {
+      expect(millionsToUnits(0)).toEqual({ value: null, invalid: false });
+      expect(millionsToUnits(null)).toEqual({ value: null, invalid: false });
+      expect(millionsToUnits(-999)).toEqual({ value: null, invalid: true });
+      expect(millionsToUnits(Number.NaN)).toEqual({ value: null, invalid: true });
+    });
+  });
+
+  describe('focusRange', () => {
+    it('keeps both bounds', () => {
+      expect(focusRange(focusRow())).toEqual({
+        range: { minUsd: 1_000_000, maxUsd: 10_000_000, currency: 'USD', minLocal: null, maxLocal: null },
+      });
+    });
+
+    it('keeps a one-sided range ("From" / "Up to")', () => {
+      expect(focusRange(focusRow({ range_max_usd_mn: null })).range).toMatchObject({ minUsd: 1_000_000, maxUsd: null });
+      expect(focusRange(focusRow({ range_min_usd_mn: 0 })).range).toMatchObject({ minUsd: null, maxUsd: 10_000_000 });
+    });
+
+    it('drops 0/0 without an issue', () => {
+      expect(focusRange(focusRow({ range_min_usd_mn: 0, range_max_usd_mn: 0 }))).toEqual({ range: null });
+    });
+
+    it('drops an inverted range', () => {
+      expect(focusRange(focusRow({ range_min_usd_mn: 20, range_max_usd_mn: 5 }))).toEqual({
+        range: null,
+        issue: 'range-inverted',
+      });
+    });
+
+    it('drops an implausible range (a unit error)', () => {
+      expect(focusRange(focusRow({ range_max_usd_mn: 5_687_059.32 }))).toEqual({
+        range: null,
+        issue: 'range-implausible',
+      });
+      expect(focusRange(focusRow({ range_max_usd_mn: FOCUS_RANGE_MAX_USD / 1e6 })).range).not.toBeNull();
+    });
+
+    it('drops both bounds when one is invalid', () => {
+      expect(focusRange(focusRow({ range_min_usd_mn: -999 }))).toEqual({ range: null, issue: 'amount-invalid' });
+    });
+
+    it('keeps native bounds for a non-USD firm', () => {
+      expect(
+        focusRange(focusRow({ range_currency: 'EUR', range_min_local_mn: 0.9, range_max_local_mn: 9 })).range,
+      ).toEqual({ minUsd: 1_000_000, maxUsd: 10_000_000, currency: 'EUR', minLocal: 900_000, maxLocal: 9_000_000 });
+    });
+
+    it('reads RMB as CNY, and a blank currency as USD-only', () => {
+      expect(
+        focusRange(focusRow({ range_currency: 'RMB', range_min_local_mn: 7, range_max_local_mn: 70 })).range,
+      ).toMatchObject({ currency: 'CNY', minLocal: 7_000_000, maxLocal: 70_000_000 });
+      expect(
+        focusRange(focusRow({ range_currency: ' ', range_min_local_mn: 7, range_max_local_mn: 70 })).range,
+      ).toEqual({ minUsd: 1_000_000, maxUsd: 10_000_000, currency: 'USD', minLocal: null, maxLocal: null });
+    });
+
+    it('keeps no local bounds for a USD firm', () => {
+      expect(
+        focusRange(focusRow({ range_currency: 'USD', range_min_local_mn: 1, range_max_local_mn: 10 })).range,
+      ).toMatchObject({ currency: 'USD', minLocal: null, maxLocal: null });
+    });
+
+    it('falls back to USD-only when the local bounds do not line up', () => {
+      expect(
+        focusRange(focusRow({ range_currency: 'EUR', range_min_local_mn: null, range_max_local_mn: 9 })).range,
+      ).toEqual({ minUsd: 1_000_000, maxUsd: 10_000_000, currency: 'USD', minLocal: null, maxLocal: null });
+    });
+  });
+
+  describe('toFirmFocus', () => {
+    it('maps a manager with everything', () => {
+      expect(toFirmFocus(focusRow(), '2026-10-14')).toEqual({
+        focus: {
+          role: 'manager',
+          stages: ['Seed', 'Initial Round', 'Round B,C,D...'],
+          mainStrategy: 'Venture Capital (All Stages)',
+          strategies: ['Early Stage', 'Expansion / Late Stage'],
+          industries: ['Software', 'Healthcare'],
+          verticals: ['Fintech'],
+          geographies: ['US', 'Europe'],
+          rangeMinUsd: 1_000_000,
+          rangeMaxUsd: 10_000_000,
+          rangeCurrency: 'USD',
+          rangeMinLocal: null,
+          rangeMaxLocal: null,
+          reportedOn: '2025-06-30',
+          snapshotDate: '2026-10-14',
+        },
+        issues: [],
+      });
+    });
+
+    it('ignores stages and main strategy on an LP row', () => {
+      const { focus } = toFirmFocus(focusRow({ role: 'lp' }), '2026-10-14');
+      expect(focus).toMatchObject({ role: 'lp', stages: [], mainStrategy: null, industries: ['Software', 'Healthcare'] });
+    });
+
+    it('falls back to the snapshot date', () => {
+      expect(toFirmFocus(focusRow({ reported_on: null }), '2026-10-14').focus?.reportedOn).toBe('2026-10-14');
+    });
+
+    it('is null when nothing usable is stated', () => {
+      const r = toFirmFocus(
+        focusRow({
+          stages: ['Unknown'],
+          main_strategy: null,
+          strategies: null,
+          industries: [''],
+          verticals: null,
+          geographies: ['Other'],
+          range_min_usd_mn: 0,
+          range_max_usd_mn: 0,
+        }),
+        '2026-10-14',
+      );
+      expect(r).toEqual({ focus: null, issues: ['labels-dropped'] });
+    });
+
+    it('reads a junk main strategy as null', () => {
+      expect(toFirmFocus(focusRow({ main_strategy: 'Unknown' }), '2026-10-14').focus?.mainStrategy).toBeNull();
+    });
+
+    it('tallies issues across a firm', () => {
+      const tally = emptyFocusIssues();
+      const roles = toFirmFocusList(
+        [focusRow({ range_min_usd_mn: 20, range_max_usd_mn: 5 }), focusRow({ role: 'lp', range_min_usd_mn: -999 })],
+        '2026-10-14',
+        tally,
+      );
+      expect(roles.map((r) => r.role)).toEqual(['manager', 'lp']);
+      expect(tally).toEqual({ 'amount-invalid': 1, 'range-implausible': 0, 'range-inverted': 1, 'labels-dropped': 0 });
+    });
   });
 });
 

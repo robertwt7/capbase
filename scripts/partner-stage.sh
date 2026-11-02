@@ -45,9 +45,12 @@ case "$cmd" in
     esac
     echo "==> Loading $file into schema partner_stage"
     "${reader[@]}" | psql_in
-    psql_in -c "ANALYZE partner_stage.firm, partner_stage.fund, partner_stage.company, partner_stage.deal,
-                         partner_stage.deal_investor, partner_stage.person, partner_stage.commitment,
-                         partner_stage.fund_metric;"
+    # Every staged table, whichever stage version the file is (v2 adds
+    # firm_focus and meta).
+    psql_in -c "DO \$\$ DECLARE t text; BEGIN
+                  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'partner_stage' LOOP
+                    EXECUTE format('ANALYZE partner_stage.%I', t);
+                  END LOOP; END \$\$;"
     "$0" status
     ;;
   drop)
@@ -64,6 +67,14 @@ case "$cmd" in
                   SELECT 'person', count(*) FROM partner_stage.person UNION ALL
                   SELECT 'commitment', count(*) FROM partner_stage.commitment UNION ALL
                   SELECT 'fund_metric', count(*) FROM partner_stage.fund_metric;"
+      if [ "$(psql_in -tAc "SELECT to_regclass('partner_stage.meta') IS NOT NULL")" = "t" ]; then
+        psql_in -c "SELECT stage_version, snapshot_date, built_at FROM partner_stage.meta;"
+      else
+        echo "stage version 1 (no partner_stage.meta): investor focus not staged"
+      fi
+      if [ "$(psql_in -tAc "SELECT to_regclass('partner_stage.firm_focus') IS NOT NULL")" = "t" ]; then
+        psql_in -c "SELECT role AS focus_role, count(*) FROM partner_stage.firm_focus GROUP BY role ORDER BY role;"
+      fi
     else
       echo "partner_stage is not loaded."
     fi

@@ -40,6 +40,8 @@ export const GATED_SECTIONS = {
   investorPeople: 'open',
   investorFunds: 'open',
   investorCommitments: 'members',
+  // A block of ≤ 2 role rows (manager, LP): signed in sees all of it.
+  investorFocus: 'members',
   fundCommitments: 'members',
   fundMetrics: 'members',
   fundTerms: 'contributors',

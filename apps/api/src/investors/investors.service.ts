@@ -33,6 +33,7 @@ import { Prisma } from '@repo/db';
 
 import { toPerson } from '../companies/company.mapper';
 import { toFund } from '../funds/fund.mapper';
+import { toInvestorFocus } from './investor-focus.mapper';
 import {
   FUND_BLANKS,
   INVESTOR_BLANKS,
@@ -378,12 +379,33 @@ export class InvestorsService {
     // Prisma's `_count`: that aggregates the WHOLE child table with GROUP BY
     // before joining, which on half a million holdings and roles cost ~500 ms
     // per profile even for a firm with none.
-    const [holdingCount, fundCount, peopleCount, commitmentCount] = await Promise.all([
+    // The reported focus is ≤ 2 rows per role (`investorFocus`): the role
+    // probe is public like every count, and the rows themselves are loaded
+    // only for a viewer the gate lets see them — never signed out.
+    const focusVisible = gateLimit('investorFocus', access) > 0;
+    const [holdingCount, fundCount, peopleCount, commitmentCount, focusRoles, focusRows] = await Promise.all([
       this.prisma.investorHolding.count({ where: { investorId: found.id, ...PUBLIC_HOLDINGS } }),
       this.prisma.fund.count({ where: { managerId: found.id, ...PUBLIC_FUNDS } }),
       this.prisma.personRole.count({ where: { investorId: found.id, ...PUBLIC_OFFICERS } }),
       this.prisma.fundCommitment.count({ where: { investorId: found.id, ...PUBLIC_LP_COMMITMENTS } }),
+      this.prisma.investorFocus.findMany({
+        where: { investorId: found.id },
+        distinct: ['role'],
+        select: { role: true },
+      }),
+      focusVisible
+        ? this.prisma.investorFocus.findMany({
+            // Read gate rule 2, as `publicRowsWhere` states it — but this
+            // column is non-nullable, so the plain `not` form is exact here.
+            where: {
+              investorId: found.id,
+              ...(partnerVisible(access) ? {} : { externalSource: { not: PARTNER_SOURCE } }),
+            },
+            orderBy: [{ reportedOn: 'desc' }, { externalId: 'asc' }],
+          })
+        : Promise.resolve([]),
     ]);
+    const focusCount = focusRoles.length;
     const row = {
       ...found,
       _count: { holdings: holdingCount, funds: fundCount, people: peopleCount, commitments: commitmentCount },
@@ -407,6 +429,8 @@ export class InvestorsService {
         funds: [],
         namedFundCount: row._count.funds,
         citations: [],
+        focus: null,
+        focusCount,
         indexable: Boolean(row.description),
         access: gate,
       };
@@ -465,6 +489,9 @@ export class InvestorsService {
       // What we can name, as against `fundCount` — what the firm told the SEC.
       namedFundCount: row._count.funds,
       citations: await this.loadFundCitations(funds.map((f) => f.id)),
+      // Partner data, gated `members`; never part of the indexable rule.
+      focus: toInvestorFocus(focusRows),
+      focusCount,
       // INDEXABLE_INVESTOR, read off the counts this response already carries.
       indexable:
         Boolean(row.description) ||

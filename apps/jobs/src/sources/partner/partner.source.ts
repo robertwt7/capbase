@@ -13,13 +13,17 @@ import type {
 } from '../ingestion-source';
 import { PartnerClient } from './partner.client';
 import {
+  FOCUS_ISSUES,
   PARTNER,
+  emptyFocusIssues,
   firmType,
   toCommitment,
   toFund,
   toInvestorFirm,
   toMetric,
+  toFirmFocusList,
   toRecord,
+  type FirmFocusRow,
   type KeptFirm,
   type PersonRow,
 } from './partner.parser';
@@ -90,6 +94,18 @@ export class PartnerSource implements IngestionSource {
     const stages = parseStages(this.config.get<string>('PARTNER_STAGES'));
     this.logger.log(`Stages: ${PARTNER_STAGES.filter((s) => stages.has(s)).join(', ')}`);
 
+    // The stage contract, checked before the first yield so a malformed stage
+    // fails before any write. v1 has no investor focus; v2 must carry all of it.
+    const contract = await this.client.stageContract();
+    let focusSnapshot: string | null = null;
+    if (contract.version >= 2) {
+      await this.client.requireFocusColumns();
+      if (!contract.snapshotDate) throw new Error('partner_stage.meta has no snapshot_date');
+      focusSnapshot = contract.snapshotDate;
+    } else {
+      this.logger.log('stage v1: investor focus not staged');
+    }
+
     // The firm universe decides which firms are investors at all; every stage
     // needs it, and it is small (tens of thousands of short rows).
     const firms = await this.client.allFirms();
@@ -118,7 +134,9 @@ export class PartnerSource implements IngestionSource {
     const since = new Date().getUTCFullYear();
     const limit = opts.limit;
 
-    if (stages.has('firms')) yield* this.firmBatches(firms.filter((f) => kept.has(f.firm_id)), kept, since, limit);
+    if (stages.has('firms')) {
+      yield* this.firmBatches(firms.filter((f) => kept.has(f.firm_id)), kept, since, limit, focusSnapshot);
+    }
     if (stages.has('funds')) yield* this.fundBatches(kept, limit);
     if (stages.has('companies')) yield* this.companyBatches(kept, fx!, limit);
     if (stages.has('commitments')) yield* this.commitmentBatches(kept, fx!, limit);
@@ -130,24 +148,49 @@ export class PartnerSource implements IngestionSource {
     kept: Map<string, KeptFirm>,
     since: number,
     limit: number,
+    /** The v2 snapshot date, or null when focus is not staged (v1). */
+    focusSnapshot: string | null,
   ): AsyncIterable<SourceBatch> {
     let people = 0;
+    let focusRoles = 0;
+    const issues = emptyFocusIssues();
     const bounded = firms.slice(0, limit);
     for (let i = 0; i < bounded.length; i += PARTNER_BATCH) {
       const page = bounded.slice(i, i + PARTNER_BATCH);
+      const ids = page.map((f) => f.firm_id);
       const byFirm = new Map<string, PersonRow[]>();
-      for (const p of await this.client.people(page.map((f) => f.firm_id))) {
+      for (const p of await this.client.people(ids)) {
         const list = byFirm.get(p.firm_id);
         if (list) list.push(p);
         else byFirm.set(p.firm_id, [p]);
       }
+      const focusOf = new Map<string, FirmFocusRow[]>();
+      if (focusSnapshot) {
+        for (const r of await this.client.firmFocus(ids)) {
+          const list = focusOf.get(r.firm_id);
+          if (list) list.push(r);
+          else focusOf.set(r.firm_id, [r]);
+        }
+      }
       const investors: NormalizedInvestorFirm[] = page.map((f) =>
-        toInvestorFirm(f, kept.get(f.firm_id)!.type, byFirm.get(f.firm_id) ?? [], since),
+        toInvestorFirm(
+          f,
+          kept.get(f.firm_id)!.type,
+          byFirm.get(f.firm_id) ?? [],
+          since,
+          focusSnapshot ? toFirmFocusList(focusOf.get(f.firm_id) ?? [], focusSnapshot, issues) : [],
+        ),
       );
       people += investors.reduce((n, f) => n + (f.people?.length ?? 0), 0);
+      focusRoles += investors.reduce((n, f) => n + (f.focus?.length ?? 0), 0);
       yield { investors };
     }
-    this.logger.log(`Firms stage: ${bounded.length} firms, ${people} people offered`);
+    this.logger.log(
+      `Firms stage: ${bounded.length} firms, ${people} people offered` +
+        (focusSnapshot
+          ? `, ${focusRoles} focus roles offered (issues: ${FOCUS_ISSUES.map((k) => `${k} ${issues[k]}`).join(', ')})`
+          : ''),
+    );
   }
 
   private async *fundBatches(kept: Map<string, KeptFirm>, limit: number): AsyncIterable<SourceBatch> {

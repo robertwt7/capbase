@@ -553,6 +553,8 @@ model Investor {
   proposals      InvestorChangeProposal[]
   /// Commitments this firm made to funds as a limited partner.
   commitments    FundCommitment[]
+  /// What the firm reports it invests in, per role (partner data, ingest-only).
+  focus          InvestorFocus[]
 
   /// Public holdings (approved, on a public company) — the /investors sort key.
   /// Maintained by refreshDirectoryCounts (@repo/db); cards count live, so this
@@ -697,6 +699,52 @@ model FundCommitment {
 
   @@unique([externalSource, externalId])
   @@index([fundId])
+  @@index([investorId])
+}
+
+/// What an investor firm REPORTS it invests in, per role: as a fund `manager`
+/// (its own initial equity cheques) or as an `lp` (its commitments to funds).
+/// Ingest-only (the partner), never contributed, never on a directory row. A
+/// historical statement as of `reportedOn`, not a promise the firm is investing.
+/// Rows are never deleted by ingest; an older snapshot never replaces a newer one.
+model InvestorFocus {
+  id         String   @id @default(cuid())
+  investorId String
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  /// 'manager' | 'lp' (INVESTOR_FOCUS_ROLES).
+  role       String
+
+  /// Reported labels, as published (trimmed, de-duplicated, junk dropped).
+  /// `stages` and `mainStrategy` are manager-only.
+  stages       String[] @default([])
+  mainStrategy String?
+  strategies   String[] @default([])
+  industries   String[] @default([])
+  verticals    String[] @default([])
+  /// manager: geographic EXPOSURE; lp: geographic PREFERENCES.
+  geographies  String[] @default([])
+
+  /// manager: initial equity investment; lp: typical fund commitment.
+  /// Whole USD as reported in USD; null = that bound not reported.
+  rangeMinUsd   BigInt?
+  rangeMaxUsd   BigInt?
+  /// The firm's reporting currency (ISO 4217); 'USD' when it reports in USD.
+  rangeCurrency String  @default("USD")
+  /// As reported in `rangeCurrency`; null for USD.
+  rangeMinLocal BigInt?
+  rangeMaxLocal BigInt?
+
+  /// The source section's own update date, else the snapshot date.
+  reportedOn   DateTime
+  snapshotDate DateTime
+
+  externalSource String
+  /// `<source firm id>:<role>`.
+  externalId     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([externalSource, externalId])
   @@index([investorId])
 }
 

@@ -161,7 +161,7 @@ export class V1ReadController {
   @V1ReadThrottle()
   @ApiOperation({ summary: 'Get an investor firm' })
   @ApiOkResponse({
-    description: 'The firm, its portfolio, named funds and officers.',
+    description: 'The firm, its portfolio, named funds, officers and reported investment focus.',
   })
   @ApiMovedPermanentlyResponse({
     description: 'Merged into another firm: `{ slug }` names it.',

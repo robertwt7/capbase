@@ -19,6 +19,7 @@ import {
   type NormalizedFundMetric,
   type NormalizedInvestor,
   type NormalizedInvestorFirm,
+  type NormalizedInvestorFocus,
   type NormalizedPerson,
   type NormalizedRecord,
   type NormalizedRound,
@@ -52,6 +53,53 @@ import {
 } from './identifier.writer';
 import { uniquePersonSlug } from './person-matcher';
 import { pairNearDuplicates } from './round-dedup';
+
+/** What `writeInvestorFocus` did with a firm's focus roles. */
+export interface FocusWriteCounts {
+  /** Roles created or updated. */
+  written: number;
+  /** Roles already holding exactly these values. */
+  unchanged: number;
+  /** Roles whose stored `reportedOn` is newer than the incoming one. */
+  stale: number;
+  /** Roles not written: the firm row is only a weak (name-only) association. */
+  weak: number;
+  /** Roles not written: the firm row (or every survivor) is unapproved or gone. */
+  skipped: number;
+}
+
+export const emptyFocusCounts = (): FocusWriteCounts => ({ written: 0, unchanged: 0, stale: 0, weak: 0, skipped: 0 });
+
+export function addFocusCounts(into: FocusWriteCounts, from: FocusWriteCounts): void {
+  into.written += from.written;
+  into.unchanged += from.unchanged;
+  into.stale += from.stale;
+  into.weak += from.weak;
+  into.skipped += from.skipped;
+}
+
+/**
+ * Strong enough to attach the partner's reported focus to this firm row?
+ * Checked on the ROW, never on the path that found it: an identifier the
+ * partner attached through an earlier name match would otherwise vouch for
+ * itself on every later run. `own` — the source's own row; `domain` — both
+ * identifying domains present and equal; anything else is `weak`.
+ */
+export function focusAssociation(
+  row: { externalSource: string | null; externalId: string | null; domain: string | null },
+  source: string,
+  sourceFirmId: string,
+  sourceDomain: string | null,
+): 'own' | 'domain' | 'weak' {
+  if (row.externalSource === source && row.externalId === sourceFirmId) return 'own';
+  const a = row.domain?.trim().toLowerCase();
+  const b = sourceDomain?.trim().toLowerCase();
+  if (a && b && a === b) return 'domain';
+  return 'weak';
+}
+
+const focusDay = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`);
+const toBig = (n: number | null): bigint | null => (n == null ? null : BigInt(Math.round(n)));
 
 export interface IngestResult {
   processed: number;
@@ -317,6 +365,8 @@ export class IngestService {
   private stats: EdgeStats = emptyEdgeStats();
   /** What the company identity policy declined to write this run. */
   private matchStats: MatchStats = emptyMatchStats();
+  /** Investor focus roles written / skipped this run. */
+  private focusStats: FocusWriteCounts = emptyFocusCounts();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -342,6 +392,7 @@ export class IngestService {
     const lazy = this.lazyIndexes(active.some((src) => SOURCE_RECORD_SCHEMES.has(src.name)));
     this.stats = emptyEdgeStats();
     this.matchStats = emptyMatchStats();
+    this.focusStats = emptyFocusCounts();
     let processed = 0;
     let upserted = 0;
     let investors = 0;
@@ -464,6 +515,13 @@ export class IngestService {
         `${ids.conflict + inv.conflict + per.conflict} conflicts (merge candidates recorded)`,
     );
     this.logMatchStats();
+    const fo = this.focusStats;
+    if (fo.written + fo.unchanged + fo.stale + fo.weak + fo.skipped > 0) {
+      this.logger.log(
+        `Investor focus: ${fo.written} roles written, ${fo.unchanged} unchanged, ${fo.stale} stale (a newer report held), ` +
+          `${fo.weak} not written (name-only association), ${fo.skipped} skipped (firm unapproved or gone)`,
+      );
+    }
     const st = this.stats;
     if (Object.values(st).some((n) => n > 0)) {
       // Counts only — never a value. The contact count in particular is a
@@ -1890,6 +1948,7 @@ export class IngestService {
       );
       await this.writeIdentifiers('investor', ownId, source, firm.identifiers, domain, index);
       await this.writeFirmPeople(firm, source, ownId, personIndex);
+      await this.writeFirmFocus(ownId, firm, source);
       return;
     }
 
@@ -1907,6 +1966,7 @@ export class IngestService {
       index.byKey.set(key, matchId);
       await this.writeIdentifiers('investor', matchId, source, firm.identifiers, domain, index);
       await this.writeFirmPeople(firm, source, matchId, personIndex);
+      await this.writeFirmFocus(matchId, firm, source);
       return;
     }
 
@@ -1934,6 +1994,124 @@ export class IngestService {
     index.names.set(created.id, firm.name);
     await this.writeIdentifiers('investor', created.id, source, firm.identifiers, domain, index);
     await this.writeFirmPeople(firm, source, created.id, personIndex);
+    await this.writeFirmFocus(created.id, firm, source);
+  }
+
+  private async writeFirmFocus(investorId: string, firm: NormalizedInvestorFirm, source: string): Promise<void> {
+    if (!firm.focus?.length) return;
+    const counts = await this.writeInvestorFocus(
+      investorId,
+      { externalId: firm.externalId, domain: firm.domain ?? null },
+      firm.focus,
+      source,
+    );
+    addFocusCounts(this.focusStats, counts);
+  }
+
+  /**
+   * Write a firm's reported focus rows. Public for
+   * `backfill-partner-investor-focus`. Never touches the firm row, people or
+   * contacts, and writes no Revision (a firm has no company timeline), no
+   * Citation (partner facts carry none) and no `partnerFields` mark (the row's
+   * `externalSource` is its provenance, which the read gate filters on).
+   *
+   * Association (`focusAssociation`): the source's OWN firm row, looked up by
+   * its provenance key, wins; failing that, `investorId` — the row the source
+   * resolved this firm to — must share the firm's identifying domain. A
+   * name-only association writes nothing (`weak`). An admin merge is followed
+   * from whichever row qualified to its approved survivor.
+   *
+   * Per role: absent → create; a stored `reportedOn` newer than the incoming →
+   * `stale`, untouched; identical values → `unchanged`; otherwise update
+   * (re-homing the row to the current survivor). A stored role the incoming
+   * focus lacks is never deleted.
+   */
+  async writeInvestorFocus(
+    investorId: string,
+    firm: { externalId: string; domain: string | null },
+    focus: readonly NormalizedInvestorFocus[],
+    source: string,
+  ): Promise<FocusWriteCounts> {
+    const counts = emptyFocusCounts();
+    if (focus.length === 0) return counts;
+    const select = { id: true, externalSource: true, externalId: true, domain: true, mergedIntoId: true, moderationStatus: true } as const;
+
+    let anchor = await this.prisma.investor.findUnique({
+      where: { externalSource_externalId: { externalSource: source, externalId: firm.externalId } },
+      select,
+    });
+    if (!anchor) {
+      const row = await this.prisma.investor.findUnique({ where: { id: investorId }, select });
+      if (!row) {
+        counts.skipped += focus.length;
+        return counts;
+      }
+      if (focusAssociation(row, source, firm.externalId, firm.domain) === 'weak') {
+        counts.weak += focus.length;
+        return counts;
+      }
+      anchor = row;
+    }
+
+    // Follow admin merges to the live survivor.
+    let target: typeof anchor | null = anchor;
+    for (let hops = 0; target?.mergedIntoId; hops++) {
+      if (hops >= MAX_MERGE_HOPS) {
+        target = null;
+        break;
+      }
+      target = await this.prisma.investor.findUnique({ where: { id: target.mergedIntoId }, select });
+    }
+    if (!target || target.moderationStatus !== 'APPROVED') {
+      counts.skipped += focus.length;
+      return counts;
+    }
+
+    for (const f of focus) {
+      const externalId = `${firm.externalId}:${f.role}`;
+      const data = {
+        investorId: target.id,
+        role: f.role,
+        stages: f.stages,
+        mainStrategy: f.mainStrategy,
+        strategies: f.strategies,
+        industries: f.industries,
+        verticals: f.verticals,
+        geographies: f.geographies,
+        rangeMinUsd: toBig(f.rangeMinUsd),
+        rangeMaxUsd: toBig(f.rangeMaxUsd),
+        rangeCurrency: f.rangeCurrency,
+        rangeMinLocal: toBig(f.rangeMinLocal),
+        rangeMaxLocal: toBig(f.rangeMaxLocal),
+        reportedOn: focusDay(f.reportedOn),
+        snapshotDate: focusDay(f.snapshotDate),
+      };
+      const existing = await this.prisma.investorFocus.findUnique({
+        where: { externalSource_externalId: { externalSource: source, externalId } },
+      });
+      if (!existing) {
+        await this.prisma.investorFocus.create({ data: { ...data, externalSource: source, externalId } });
+        counts.written++;
+        continue;
+      }
+      if (existing.reportedOn.getTime() > data.reportedOn.getTime()) {
+        counts.stale++;
+        continue;
+      }
+      const same = (Object.keys(data) as (keyof typeof data)[]).every((k) => {
+        const a = existing[k];
+        const b = data[k];
+        if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+        return sameValue(a, b);
+      });
+      if (same) {
+        counts.unchanged++;
+        continue;
+      }
+      await this.prisma.investorFocus.update({ where: { id: existing.id }, data });
+      counts.written++;
+    }
+    return counts;
   }
 
   /** The firm's own officers, as role rows carrying `investorId` and no

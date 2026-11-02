@@ -255,6 +255,39 @@ export interface NormalizedInvestorFirm {
    *  shape as a company's people; the resulting role row carries `investorId`
    *  instead of `companyId`. */
   people?: NormalizedPerson[];
+  /** Reported investment focus per role (partner only). Absent = the source
+   *  states none; ingest never deletes a stored role on absence. */
+  focus?: NormalizedInvestorFocus[];
+}
+
+/**
+ * What a firm REPORTS it invests in, in one role: as a fund `manager` (its own
+ * initial equity cheques) or as an `lp` (its commitments to funds). Labels are
+ * the publisher's own (cleaned, never mapped onto a capbase vocabulary). Money
+ * in whole units — converted from the publisher's millions exactly once, by the
+ * parser. A null bound was not reported.
+ */
+export interface NormalizedInvestorFocus {
+  role: 'manager' | 'lp';
+  /** Manager only. */
+  stages: string[];
+  /** Manager only. */
+  mainStrategy: string | null;
+  strategies: string[];
+  industries: string[];
+  verticals: string[];
+  /** manager: geographic exposure; lp: geographic preferences. */
+  geographies: string[];
+  rangeMinUsd: number | null;
+  rangeMaxUsd: number | null;
+  /** ISO 4217; 'USD' when the firm reports in USD (then no local bounds). */
+  rangeCurrency: string;
+  rangeMinLocal: number | null;
+  rangeMaxLocal: number | null;
+  /** `YYYY-MM-DD`: the section's own update date, else the snapshot date. */
+  reportedOn: string;
+  /** `YYYY-MM-DD`. */
+  snapshotDate: string;
 }
 
 /** One private fund contributed by a source. */

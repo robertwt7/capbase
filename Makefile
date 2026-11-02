@@ -295,6 +295,15 @@ backfill-partner-company-facts: ## Fill partner industry/location on matched com
 	yarn workspace jobs build
 	cd apps/jobs && node dist/backfill-partner-company-facts.js
 
+# Writes the partner's reported investor focus (stages, strategies, industries,
+# geography, initial-equity / typical-commitment ranges) onto firms it owns or
+# matched by domain. Needs a v2 partner_stage. No firms re-run, no people or
+# contacts. Idempotent (a second run writes 0 rows).
+.PHONY: backfill-partner-investor-focus
+backfill-partner-investor-focus: ## Write the partner's reported investor focus onto owned/domain-matched firms (needs a v2 partner_stage; no network; re-runnable)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-partner-investor-focus.js
+
 # Company-match repair: separates companies ingestion wrongly combined, from the
 # partner's original identities, with a journaled, reversible apply. Runbook:
 # docs/DATA_REBUILD.md → "Repairing wrongly combined companies". `fix` only ever
@@ -328,7 +337,11 @@ test-company-repair: ## Focused unit tests: identity policy, ingest, merge detec
 
 .PHONY: test-company-repair-integration
 test-company-repair-integration: ## Real-PostgreSQL repair suite in a task-owned throwaway database (dropped after)
-	@scripts/test-company-repair-integration.sh
+	@scripts/test-company-repair-integration.sh company-match-repair
+
+.PHONY: test-investor-focus-integration
+test-investor-focus-integration: ## Real-PostgreSQL investor-focus suite in a task-owned throwaway database (dropped after)
+	@scripts/test-company-repair-integration.sh investor-focus
 
 .PHONY: check-company-repair
 check-company-repair: test-company-repair test-company-repair-integration ## Every required company-repair check (+ jobs lint, whitespace)
@@ -370,6 +383,28 @@ backfill-partner-provenance-prod: ## [VPS] Mark partner-only rows and partner-wr
 .PHONY: backfill-partner-company-facts-prod
 backfill-partner-company-facts-prod: ## [VPS] Fill partner industry/location on matched companies inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-partner-company-facts.js
+
+# Synthetic investor focus on four local firms, to check the Investment focus
+# section before real data (prints their slugs). LOCAL ONLY: refuses on the VPS
+# (infra/env/app.env present) and on any container but the local Postgres.
+.PHONY: investor-focus-fixture
+investor-focus-fixture: ## [local] Load synthetic investor focus on four firms (prints their slugs)
+	@$(call investor_focus_local_only)
+	@docker exec -i capbase-postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/fixtures/investor-focus-fixture.sql
+
+.PHONY: investor-focus-fixture-remove
+investor-focus-fixture-remove: ## [local] Remove the synthetic investor focus rows
+	@$(call investor_focus_local_only)
+	@docker exec -i capbase-postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DELETE FROM \"InvestorFocus\" WHERE \"externalId\" LIKE '"'"'fixture:%'"'"'" -c "SELECT count(*) AS fixture_rows_left FROM \"InvestorFocus\" WHERE \"externalId\" LIKE '"'"'fixture:%'"'"'"'
+
+define investor_focus_local_only
+if [ "$${PG_CONTAINER:-capbase-postgres}" != "capbase-postgres" ]; then echo "❌ refusing: PG_CONTAINER is not the local capbase-postgres"; exit 1; fi; \
+if [ -f infra/env/app.env ]; then echo "❌ refusing: infra/env/app.env exists — this looks like the VPS"; exit 1; fi
+endef
+
+.PHONY: backfill-partner-investor-focus-prod
+backfill-partner-investor-focus-prod: ## [VPS] Write the partner's reported investor focus inside the deployed jobs container
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-partner-investor-focus.js
 
 # Company-match repair on the VPS: the CLI in the already deployed jobs image,
 # bundle/plan mounted read-only, results to OUT (0700, owned by you). Needs

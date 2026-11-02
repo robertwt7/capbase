@@ -34,6 +34,7 @@ export function LockedSection({
   placeholder,
   next,
   contributeHref = '/contribute',
+  tier = 'contributors',
   className,
 }: {
   access: ViewerAccess;
@@ -51,6 +52,9 @@ export function LockedSection({
   next: string;
   /** Where "Contribute to unlock" leads. */
   contributeHref?: string;
+  /** The section's gate tier, for a `subject` block's signed-out copy: a
+   *  `members` block opens on sign-in alone. */
+  tier?: 'members' | 'contributors';
   className?: string;
 }) {
   if (access.unlocked || total <= shown) return null;
@@ -98,7 +102,9 @@ export function LockedSection({
           ) : (
             <>
               <p className="font-sans text-[13px] leading-relaxed text-graphite-700">
-                {subject ? (
+                {subject && tier === 'members' ? (
+                  <>{subject} is open to anyone signed in.</>
+                ) : subject ? (
                   <>{subject} open to contributors: sign in, and any approved contribution unlocks
                     every profile for {CONTRIBUTION_WINDOW_DAYS} days.</>
                 ) : (

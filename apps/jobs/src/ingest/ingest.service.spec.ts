@@ -1,12 +1,19 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import type { ConfigService } from '@nestjs/config';
 
-import { IngestService, normalizeFundName, normalizeInvestorName, normalizeName } from './ingest.service';
+import {
+  IngestService,
+  focusAssociation,
+  normalizeFundName,
+  normalizeInvestorName,
+  normalizeName,
+} from './ingest.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   IngestionSource,
   NormalizedFund,
   NormalizedInvestorFirm,
+  NormalizedInvestorFocus,
   NormalizedRecord,
   SourceBatch,
 } from '../sources/ingestion-source';
@@ -138,9 +145,39 @@ function mockPrismaBase(
   let peopleCreated = 0;
   const identifiers: IdentifierRow[] = [...seedIdentifiers];
   const candidates: CandidateRow[] = [];
+  /** Firms created during the run: found by `findUnique` (the focus writer's
+   *  own-row read), never by the index load's `findMany`. */
+  const createdInvestors: Record<string, unknown>[] = [];
+  const focusRows: Record<string, unknown>[] = [];
+  type InvestorWhere = { id?: string; externalSource_externalId?: { externalSource: string; externalId: string } };
+  const findInvestor = (where: InvestorWhere) => {
+    const all = [...existingInvestors, ...createdInvestors] as Record<string, unknown>[];
+    if (where.id) return all.find((i) => i.id === where.id) ?? null;
+    const k = where.externalSource_externalId;
+    return k ? (all.find((i) => i.externalSource === k.externalSource && i.externalId === k.externalId) ?? null) : null;
+  };
   return {
     identifiers,
     candidates,
+    focusRows,
+    investorFocus: {
+      findUnique: jest.fn<(args: { where: { externalSource_externalId: { externalSource: string; externalId: string } } }) => Promise<unknown>>(
+        async (args) => {
+          const k = args.where.externalSource_externalId;
+          return focusRows.find((r) => r.externalSource === k.externalSource && r.externalId === k.externalId) ?? null;
+        },
+      ),
+      create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<unknown>>(async (args) => {
+        const row = { id: `focus-${focusRows.length + 1}`, ...args.data };
+        focusRows.push(row);
+        return row;
+      }),
+      update: jest.fn<(args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>>(async (args) => {
+        const row = focusRows.find((r) => r.id === args.where.id);
+        if (row) Object.assign(row, args.data);
+        return row;
+      }),
+    },
     bindings,
     roundBindings,
     companyIngestBinding: {
@@ -184,13 +221,17 @@ function mockPrismaBase(
     investor: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingInvestors),
       findUnique: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(
-        async (args) => existingInvestors.find((i) => i.id === args.where.id) ?? null,
+        async (args) => findInvestor(args.where as InvestorWhere),
       ),
       update: jest.fn<(args: { where: { id: string } }) => Promise<unknown>>(async (args) => ({
         id: args.where.id,
       })),
       create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<{ id: string }>>(
-        async () => ({ id: `i-new-${++created}` }),
+        async (args) => {
+          const id = `i-new-${++created}`;
+          createdInvestors.push({ ...args.data, id, mergedIntoId: null });
+          return { id };
+        },
       ),
     },
     company: {
@@ -1486,6 +1527,135 @@ describe('IngestService investor firms', () => {
     ]).run(RUN);
 
     expect(result.investors).toBe(1);
+  });
+});
+
+describe('IngestService investor focus', () => {
+  const managerFocus = (over: Partial<NormalizedInvestorFocus> = {}): NormalizedInvestorFocus => ({
+    role: 'manager',
+    stages: ['Seed'],
+    mainStrategy: 'Venture Capital',
+    strategies: ['Early Stage'],
+    industries: ['Software'],
+    verticals: [],
+    geographies: ['US'],
+    rangeMinUsd: 1_000_000,
+    rangeMaxUsd: 5_000_000,
+    rangeCurrency: 'USD',
+    rangeMinLocal: null,
+    rangeMaxLocal: null,
+    reportedOn: '2025-06-30',
+    snapshotDate: '2026-10-14',
+    ...over,
+  });
+  const partnerFirm = (over: Partial<NormalizedInvestorFirm> = {}) =>
+    firm({ externalId: 'P1', name: 'Granite Peak Partners', domain: 'granitepeak.example', crdNumber: null, focus: [managerFocus()], ...over });
+  const service = (prisma: ReturnType<typeof mockPrisma>, firms: NormalizedInvestorFirm[]) =>
+    new IngestService(prisma as unknown as PrismaService, [{ ...stubSource([], firms), name: 'PARTNER' }], config());
+  const run = { ...RUN, sources: ['PARTNER'] };
+
+  it('focusAssociation: own, domain, weak, empty domains', () => {
+    const row = (over: Record<string, string | null>) => ({ externalSource: null, externalId: null, domain: null, ...over });
+    expect(focusAssociation(row({ externalSource: 'PARTNER', externalId: 'P1' }), 'PARTNER', 'P1', null)).toBe('own');
+    expect(focusAssociation(row({ externalSource: 'SEC_ADV', externalId: '9', domain: 'a.example' }), 'PARTNER', 'P1', 'A.example')).toBe('domain');
+    expect(focusAssociation(row({ externalSource: 'SEC_ADV', externalId: '9', domain: 'a.example' }), 'PARTNER', 'P1', 'b.example')).toBe('weak');
+    expect(focusAssociation(row({ domain: '' }), 'PARTNER', 'P1', '')).toBe('weak');
+    expect(focusAssociation(row({ domain: null }), 'PARTNER', 'P1', null)).toBe('weak');
+    // Another source's own row with the same external id is not ours.
+    expect(focusAssociation(row({ externalSource: 'SEC_ADV', externalId: 'P1' }), 'PARTNER', 'P1', null)).toBe('weak');
+  });
+
+  it('a created partner firm gets its focus, in whole units', async () => {
+    const prisma = mockPrisma();
+    await service(prisma, [partnerFirm()]).run(run);
+    expect(prisma.investorFocus.create).toHaveBeenCalledTimes(1);
+    expect(prisma.focusRows[0]).toMatchObject({
+      investorId: 'i-new-1',
+      role: 'manager',
+      externalSource: 'PARTNER',
+      externalId: 'P1:manager',
+      stages: ['Seed'],
+      rangeMinUsd: 1_000_000n,
+      rangeMaxUsd: 5_000_000n,
+      rangeCurrency: 'USD',
+      reportedOn: new Date('2025-06-30T00:00:00.000Z'),
+      snapshotDate: new Date('2026-10-14T00:00:00.000Z'),
+    });
+  });
+
+  it('an own-key update writes changed focus only; an identical pass is unchanged', async () => {
+    const own = investorRow({ id: 'i-own', externalSource: 'PARTNER', externalId: 'P1', domain: 'granitepeak.example', moderationStatus: 'APPROVED' });
+    const prisma = mockPrisma([], [own]);
+    await service(prisma, [partnerFirm()]).run(run);
+    await service(prisma, [partnerFirm()]).run(run);
+    expect(prisma.investorFocus.create).toHaveBeenCalledTimes(1);
+    expect(prisma.investorFocus.update).not.toHaveBeenCalled();
+
+    await service(prisma, [partnerFirm({ focus: [managerFocus({ industries: ['Software', 'Fintech'] })] })]).run(run);
+    expect(prisma.investorFocus.update).toHaveBeenCalledTimes(1);
+    expect(prisma.focusRows[0]).toMatchObject({ investorId: 'i-own', industries: ['Software', 'Fintech'] });
+  });
+
+  it('a domain-matched ADV firm gets focus', async () => {
+    const adv = investorRow({ id: 'i-adv', name: 'Granite Peak Advisors', externalSource: 'SEC_ADV', externalId: '777', domain: 'granitepeak.example', moderationStatus: 'APPROVED' });
+    const prisma = mockPrisma([], [adv]);
+    await service(prisma, [partnerFirm()]).run(run);
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.focusRows).toHaveLength(1);
+    expect(prisma.focusRows[0]).toMatchObject({ investorId: 'i-adv', externalId: 'P1:manager' });
+  });
+
+  it('a name-matched firm gets none (weak)', async () => {
+    const adv = investorRow({ id: 'i-adv', name: 'Granite Peak Partners', externalSource: 'SEC_ADV', externalId: '777', domain: 'other.example', moderationStatus: 'APPROVED' });
+    const prisma = mockPrisma([], [adv]);
+    await service(prisma, [partnerFirm()]).run(run);
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.investorFocus.create).not.toHaveBeenCalled();
+  });
+
+  it('an older reportedOn is stale and never replaces a newer one', async () => {
+    const own = investorRow({ id: 'i-own', externalSource: 'PARTNER', externalId: 'P1', moderationStatus: 'APPROVED' });
+    const prisma = mockPrisma([], [own]);
+    const svc = new IngestService(prisma as unknown as PrismaService, [], config());
+    expect(await svc.writeInvestorFocus('i-own', { externalId: 'P1', domain: null }, [managerFocus()], 'PARTNER')).toMatchObject({ written: 1 });
+    expect(
+      await svc.writeInvestorFocus('i-own', { externalId: 'P1', domain: null }, [managerFocus({ reportedOn: '2024-01-01', industries: ['Old'] })], 'PARTNER'),
+    ).toMatchObject({ written: 0, stale: 1 });
+    expect(prisma.focusRows[0]).toMatchObject({ industries: ['Software'] });
+  });
+
+  it('a role absent from the incoming record is not deleted', async () => {
+    const own = investorRow({ id: 'i-own', externalSource: 'PARTNER', externalId: 'P1', moderationStatus: 'APPROVED' });
+    const prisma = mockPrisma([], [own]);
+    const svc = new IngestService(prisma as unknown as PrismaService, [], config());
+    await svc.writeInvestorFocus('i-own', { externalId: 'P1', domain: null }, [managerFocus(), managerFocus({ role: 'lp', stages: [], mainStrategy: null })], 'PARTNER');
+    expect(prisma.focusRows.map((r) => r.role)).toEqual(['manager', 'lp']);
+    expect(await svc.writeInvestorFocus('i-own', { externalId: 'P1', domain: null }, [managerFocus()], 'PARTNER')).toMatchObject({ unchanged: 1 });
+    expect(prisma.focusRows.map((r) => r.role)).toEqual(['manager', 'lp']);
+  });
+
+  it('follows a merge to the approved survivor, and skips an unapproved one', async () => {
+    const loser = investorRow({ id: 'i-lose', externalSource: 'PARTNER', externalId: 'P1', mergedIntoId: 'i-win', moderationStatus: 'APPROVED' });
+    const winner = investorRow({ id: 'i-win', externalSource: 'SEC_ADV', externalId: '9', moderationStatus: 'APPROVED' });
+    const pending = investorRow({ id: 'i-pend', externalSource: 'PARTNER', externalId: 'P2', moderationStatus: 'PENDING' });
+    const prisma = mockPrisma([], [loser, winner, pending]);
+    const svc = new IngestService(prisma as unknown as PrismaService, [], config());
+    expect(await svc.writeInvestorFocus('i-win', { externalId: 'P1', domain: null }, [managerFocus()], 'PARTNER')).toMatchObject({ written: 1 });
+    expect(prisma.focusRows[0]).toMatchObject({ investorId: 'i-win' });
+    expect(await svc.writeInvestorFocus('i-pend', { externalId: 'P2', domain: null }, [managerFocus()], 'PARTNER')).toMatchObject({ written: 0, skipped: 1 });
+  });
+
+  it("never touches the firm row's partnerFields, description or people", async () => {
+    const own = investorRow({ id: 'i-own', externalSource: 'PARTNER', externalId: 'P1', moderationStatus: 'APPROVED', description: 'Kept.', partnerFields: ['type'] });
+    const prisma = mockPrisma([], [own]);
+    const svc = new IngestService(prisma as unknown as PrismaService, [], config());
+    await svc.writeInvestorFocus('i-own', { externalId: 'P1', domain: null }, [managerFocus()], 'PARTNER');
+    expect(prisma.investor.update).not.toHaveBeenCalled();
+    expect(prisma.investor.create).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.personRole.upsert).not.toHaveBeenCalled();
+    expect(prisma.personContact.upsert).not.toHaveBeenCalled();
+    expect(prisma.revision.createMany).not.toHaveBeenCalled();
   });
 });
 

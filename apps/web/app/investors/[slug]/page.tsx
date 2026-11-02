@@ -6,6 +6,7 @@ import { Citation } from '@/components/Citation';
 import { CommitmentAmount } from '@/components/CommitmentAmount';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
+import { InvestorFocusSection } from '@/components/InvestorFocusSection';
 import { JsonLd } from '@/components/JsonLd';
 import { LockedSection } from '@/components/LockedSection';
 import { isMasked, Masked, SignInChip } from '@/components/Masked';
@@ -174,6 +175,27 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         <Metric label="Sectors" value={investor.sectors.length ? String(investor.sectors.length) : '—'} />
         {investor.fundCount ? <Metric label="Private funds" value={formatCount(investor.fundCount)} /> : null}
       </section>
+
+      {/* The firm's reported focus (partner data, `members`): the block when
+          the API sent it, a sign-in panel when it withheld it, else nothing —
+          no focus on record means no section, not an empty state. */}
+      {investor.focus ? (
+        <InvestorFocusSection focus={investor.focus} />
+      ) : investor.focusCount > 0 ? (
+        <section className="border-t border-line py-8">
+          <SectionHeader title="Investment focus" size="md" className="mb-5 border-b-0 pb-0" />
+          <LockedSection
+            access={access}
+            next={path}
+            total={investor.focusCount}
+            shown={0}
+            noun="focus entries"
+            subject="This firm's reported investment focus"
+            tier="members"
+            placeholder="terms"
+          />
+        </section>
+      ) : null}
 
       {showFunds && (
       <section className="border-t border-line py-8">

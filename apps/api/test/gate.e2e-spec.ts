@@ -51,7 +51,13 @@ describe('Read gate (e2e)', () => {
     aum: 314_159_265,
     fundHq: `partner-fund-hq-${stamp}`,
     personTitle: `partner-person-title-${stamp}`,
+    focusStage: `FOCUS_SENTINEL_STAGE-${stamp}`,
+    focusIndustry: `FOCUS_SENTINEL_INDUSTRY-${stamp}`,
+    focusGeo: `FOCUS_SENTINEL_GEO-${stamp}`,
+    focusLpStrategy: `FOCUS_SENTINEL_LP_STRATEGY-${stamp}`,
+    focusPartnerOnly: `FOCUS_SENTINEL_PARTNER_ONLY-${stamp}`,
   };
+  const focusSentinels = () => [S.focusStage, S.focusIndustry, S.focusGeo, S.focusLpStrategy, S.focusPartnerOnly];
   const names = {
     publicCo: `Gate Public Co ${stamp}`,
     partnerCo: `Gate Partner Only Co ${stamp}`,
@@ -278,6 +284,36 @@ describe('Read gate (e2e)', () => {
         moderationStatus: 'APPROVED',
       },
     });
+
+    // --- The partner's reported focus: both roles on the public ADV firm, one
+    // on the partner-only firm. Rows cascade with their firm.
+    const focus = (investorId: string, role: string, data: Record<string, unknown>) =>
+      prisma.investorFocus.create({
+        data: {
+          investorId,
+          role,
+          reportedOn: new Date('2025-06-30T00:00:00.000Z'),
+          snapshotDate: new Date('2026-10-14T00:00:00.000Z'),
+          externalSource: 'PARTNER',
+          externalId: `${tag}-${investorId}:${role}`,
+          ...data,
+        },
+      });
+    await focus(ids.firm, 'manager', {
+      stages: [S.focusStage],
+      mainStrategy: 'Venture Capital',
+      industries: [S.focusIndustry],
+      geographies: [S.focusGeo],
+      rangeMinUsd: 1_000_000n,
+      rangeMaxUsd: 10_000_000n,
+    });
+    await focus(ids.firm, 'lp', {
+      strategies: [S.focusLpStrategy],
+      rangeMaxUsd: 50_000_000n,
+      rangeCurrency: 'EUR',
+      rangeMaxLocal: 45_000_000n,
+    });
+    await focus(ids.partnerFirm, 'manager', { industries: [S.focusPartnerOnly] });
 
     // --- A partner person, officer of the ADV firm.
     ids.partnerPerson = (
@@ -554,6 +590,71 @@ describe('Read gate (e2e)', () => {
     });
   });
 
+  describe('investor focus', () => {
+    it('signed out: focus withheld, roles counted, no label anywhere in the body', async () => {
+      const { body } = await get(`/investors/${slugs.firm}`, 'signedOut');
+      expect(body.focus).toBeNull();
+      expect(body.focusCount).toBe(2);
+      expect(leaks(body, focusSentinels())).toEqual([]);
+
+      const stub = await get(`/investors/${slugs.partnerFirm}`, 'signedOut');
+      expect(stub.body).toMatchObject({ partnerOnly: true, focus: null, focusCount: 1 });
+      expect(leaks(stub.body, focusSentinels())).toEqual([]);
+    });
+
+    const expected = {
+      manager: {
+        stages: [S.focusStage],
+        mainStrategy: 'Venture Capital',
+        strategies: [],
+        industries: [S.focusIndustry],
+        verticals: [],
+        geographicExposure: [S.focusGeo],
+        initialEquityInvestment: { minUsd: 1_000_000, maxUsd: 10_000_000, currency: 'USD', minLocal: null, maxLocal: null },
+        reportedOn: '2025-06-30',
+      },
+      lp: {
+        strategyPreferences: [S.focusLpStrategy],
+        industries: [],
+        verticals: [],
+        geographicPreferences: [],
+        typicalCommitment: { minUsd: null, maxUsd: 50_000_000, currency: 'EUR', minLocal: null, maxLocal: 45_000_000 },
+        reportedOn: '2025-06-30',
+      },
+    };
+
+    it.each(['locked', 'contributor', 'admin'] as const)('%s: both blocks, exact values', async (viewer) => {
+      const { body } = await get(`/investors/${slugs.firm}`, viewer);
+      expect(body.focusCount).toBe(2);
+      expect(body.focus).toEqual(expected);
+      const pfirm = await get(`/investors/${slugs.partnerFirm}`, viewer);
+      expect(pfirm.body.focus.manager.industries).toEqual([S.focusPartnerOnly]);
+    });
+
+    it('unlocked by a recent contribution: the same block', async () => {
+      const contribution = await prisma.changeProposal.create({
+        data: { companyId: ids.publicCo!, submittedById: ids['user-USER']!, changes: { hq: 'London' }, moderationStatus: 'APPROVED' },
+      });
+      try {
+        const { body } = await get(`/investors/${slugs.firm}`, 'locked');
+        expect(body.access.unlocked).toBe(true);
+        expect(body.focus).toEqual(expected);
+      } finally {
+        await prisma.changeProposal.delete({ where: { id: contribution.id } });
+      }
+    });
+
+    it('directories and search never carry focus, for any viewer', async () => {
+      const q = encodeURIComponent(String(stamp));
+      for (const viewer of ['signedOut', 'locked', 'contributor'] as const) {
+        const investors = await get(`/investors?q=${q}`, viewer);
+        expect(leaks(investors.body, focusSentinels())).toEqual([]);
+        const search = await get(`/search?q=${q}`, viewer);
+        expect(leaks(search.body, focusSentinels())).toEqual([]);
+      }
+    });
+  });
+
   describe('fund page', () => {
     it('signed out: terms, metrics and commitments withheld, partner status masked', async () => {
       const { body } = await get(`/funds/${slugs.fund}`, 'signedOut');
@@ -742,6 +843,10 @@ describe('Read gate (e2e)', () => {
       expect((await v1(`/v1/funds/${slugs.fund}`)).body.fund.managementFeePct).toBe(S.fee);
       expect((await v1(`/v1/companies/${slugs.publicCo}`)).body.company.rounds).toHaveLength(3);
       expect((await v1(`/v1/people/${slugs.partnerPerson}`)).body.roles).toHaveLength(1);
+      const firm = (await v1(`/v1/investors/${slugs.firm}`)).body;
+      expect(firm.focusCount).toBe(2);
+      expect(firm.focus.manager.stages).toEqual([S.focusStage]);
+      expect(firm.focus.lp.strategyPreferences).toEqual([S.focusLpStrategy]);
     });
   });
 });
