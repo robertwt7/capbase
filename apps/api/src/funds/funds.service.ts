@@ -35,6 +35,7 @@ import { toCitation } from '../provenance/citation.mapper';
 import { UsersService } from '../users/users.service';
 import {
   toFundCommitmentRow,
+  toFundMandate,
   toFundMetricRow,
   toFundSummary,
   toFundTerms,
@@ -159,7 +160,8 @@ export class FundsService {
    *
    * Gated: commitments and metrics are previewed (`gateLimit`, no partner rows
    * signed out) against counts over all of them; the terms are a contributor's
-   * (`termsHidden`); partner-written facts are masked signed out; a
+   * (`termsHidden`); the reported mandate is one `members` block
+   * (`mandateHidden`); partner-written facts are masked signed out; a
    * partner-only fund is a stub for a signed-out viewer.
    */
   async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<FundDetailResponse> {
@@ -183,6 +185,7 @@ export class FundsService {
 
     const summary = toFundSummary(row as FundWithManager);
     const terms = toFundTerms(row);
+    const mandate = toFundMandate(row);
     const commitmentCount = row._count.commitments;
     const gate = { ...access, previewLimit: PREVIEW_LIMIT };
     const base = {
@@ -210,12 +213,16 @@ export class FundsService {
         commitments: [],
         metrics: [],
         termsHidden: false,
+        // The stub renders no sections; the gate never reaches the mandate.
+        mandate: null,
+        mandateHidden: false,
         citations: [],
       };
     }
 
     const termsHidden =
       gateLimit('fundTerms', access) === 0 && GATED_TERMS.some((t) => terms[t] !== null && terms[t] !== undefined);
+    const mandateHidden = gateLimit('fundMandate', access) === 0 && mandate !== null;
     let fund = maskPartnerFields({ ...summary, ...terms }, row.partnerFields, access, FUND_BLANKS);
     if (gateLimit('fundTerms', access) === 0) {
       fund = { ...fund };
@@ -236,6 +243,8 @@ export class FundsService {
         gateLimit('fundMetrics', access),
       ).map(toFundMetricRow),
       termsHidden,
+      mandate: mandateHidden ? null : mandate,
+      mandateHidden,
       citations: citations.map(toCitation),
     };
   }

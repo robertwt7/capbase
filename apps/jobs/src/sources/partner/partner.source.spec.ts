@@ -24,7 +24,10 @@ const firm = (firm_id: string, over: Partial<FirmRow> = {}): FirmRow => ({
   ...over,
 });
 
-type Contract = { version: number; snapshotDate: string | null; missing?: string[] };
+type Contract = { version: number; snapshotDate: string | null; missing?: string[]; mandateMissing?: string[] };
+
+/** Every `fundMandates` call, to prove a pre-v3 stage never reads the table. */
+let mandateCalls: string[][] = [];
 
 /** A fake client over tiny in-memory stage tables, keyset-paged like the real one. */
 function fakeClient(loaded = true, contract: Contract = { version: 1, snapshotDate: null }): PartnerClient {
@@ -59,6 +62,27 @@ function fakeClient(loaded = true, contract: Contract = { version: 1, snapshotDa
           range_currency: 'USD',
         },
       ].filter((r) => ids.includes(r.firm_id)),
+    requireMandateColumns: async () => {
+      if (contract.mandateMissing?.length) {
+        throw new Error(`partner_stage.fund_mandate is missing column(s): ${contract.mandateMissing.join(', ')}`);
+      }
+    },
+    fundMandates: async (ids: string[]) => {
+      mandateCalls.push(ids);
+      return [
+        {
+          fund_id: 'F1',
+          detailed_strategy: 'Early Stage: Seed',
+          industries: ['Automobiles, Other Vehicles & Parts', 'Software'],
+          verticals: null,
+          geographic_focus: ['US'],
+          geographic_exposure: ['US', 'Other'],
+          domicile: 'Delaware',
+          structure: 'Commingled',
+          legal_structure: 'Commingled',
+        },
+      ].filter((r) => ids.includes(r.fund_id));
+    },
     allFirms: async () => [
       firm('501'),
       firm('777', { role: 'lp', manager_firm_type: null, lp_firm_type: 'Public Pension Fund' }),
@@ -186,6 +210,46 @@ describe('PartnerSource', () => {
       })(),
     ).rejects.toThrow(/range_currency/);
     expect(seen).toEqual([]);
+  });
+
+  it('a v3 stage missing a mandate column throws before any batch', async () => {
+    const s = source({}, true, { version: 3, snapshotDate: '2026-10-14', mandateMissing: ['legal_structure'] });
+    const seen: SourceBatch[] = [];
+    await expect(
+      (async () => {
+        for await (const b of s.stream({ days: 1, limit: 100 })) seen.push(b);
+      })(),
+    ).rejects.toThrow(/legal_structure/);
+    expect(seen).toEqual([]);
+  });
+
+  it('a v2 stage yields funds with no mandate and never reads the mandate table', async () => {
+    mandateCalls = [];
+    const funds = (
+      await collect(source({ PARTNER_STAGES: 'funds' }, true, { version: 2, snapshotDate: '2026-10-14' }))
+    ).flatMap((b) => b.funds ?? []);
+    expect(funds.map((f) => f.mandate)).toEqual([undefined]);
+    expect(mandateCalls).toEqual([]);
+  });
+
+  it('a v3 stage attaches the mandate to the right fund', async () => {
+    mandateCalls = [];
+    const funds = (
+      await collect(source({ PARTNER_STAGES: 'funds' }, true, { version: 3, snapshotDate: '2026-10-14' }))
+    ).flatMap((b) => b.funds ?? []);
+    expect(mandateCalls).toEqual([['F1', 'F2']]);
+    expect(funds).toHaveLength(1);
+    expect(funds[0]!.mandate).toEqual({
+      detailedStrategy: 'Early Stage: Seed',
+      industries: ['Automobiles, Other Vehicles & Parts', 'Software'],
+      verticals: [],
+      geographicFocus: ['US'],
+      geographicExposure: ['US'],
+      domicile: 'Delaware',
+      structure: 'Commingled',
+      legalStructure: null,
+      reportedOn: '2026-10-14',
+    });
   });
 
   it('is never fetched and never part of an "all sources" run', async () => {

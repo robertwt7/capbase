@@ -343,6 +343,10 @@ test-company-repair-integration: ## Real-PostgreSQL repair suite in a task-owned
 test-investor-focus-integration: ## Real-PostgreSQL investor-focus suite in a task-owned throwaway database (dropped after)
 	@scripts/test-company-repair-integration.sh investor-focus
 
+.PHONY: test-fund-mandate-integration
+test-fund-mandate-integration: ## Real-PostgreSQL fund-mandate suite in a task-owned throwaway database
+	@scripts/test-company-repair-integration.sh fund-mandate
+
 .PHONY: check-company-repair
 check-company-repair: test-company-repair test-company-repair-integration ## Every required company-repair check (+ jobs lint, whitespace)
 	yarn workspace jobs lint
@@ -396,6 +400,16 @@ investor-focus-fixture: ## [local] Load synthetic investor focus on four firms (
 investor-focus-fixture-remove: ## [local] Remove the synthetic investor focus rows
 	@$(call investor_focus_local_only)
 	@docker exec -i capbase-postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DELETE FROM \"InvestorFocus\" WHERE \"externalId\" LIKE '"'"'fixture:%'"'"'" -c "SELECT count(*) AS fixture_rows_left FROM \"InvestorFocus\" WHERE \"externalId\" LIKE '"'"'fixture:%'"'"'"'
+
+.PHONY: fund-mandate-fixture
+fund-mandate-fixture: ## [local] Load synthetic fund mandates on four funds (prints their slugs)
+	@$(call investor_focus_local_only)
+	@docker exec -i capbase-postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/fixtures/fund-mandate-fixture.sql
+
+.PHONY: fund-mandate-fixture-remove
+fund-mandate-fixture-remove: ## [local] Remove the synthetic fund mandates
+	@$(call investor_focus_local_only)
+	@docker exec -i capbase-postgres sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "UPDATE \"Fund\" SET \"detailedStrategy\" = NULL, industries = '"'"'{}'"'"', verticals = '"'"'{}'"'"', \"geographicFocus\" = '"'"'{}'"'"', \"geographicExposure\" = '"'"'{}'"'"', domicile = NULL, structure = NULL, \"legalStructure\" = NULL, \"mandateReportedOn\" = NULL WHERE \"mandateReportedOn\" = DATE '"'"'2000-01-01'"'"'" -c "SELECT count(*) AS fixture_rows_left FROM \"Fund\" WHERE \"mandateReportedOn\" = DATE '"'"'2000-01-01'"'"'"'
 
 define investor_focus_local_only
 if [ "$${PG_CONTAINER:-capbase-postgres}" != "capbase-postgres" ]; then echo "❌ refusing: PG_CONTAINER is not the local capbase-postgres"; exit 1; fi; \

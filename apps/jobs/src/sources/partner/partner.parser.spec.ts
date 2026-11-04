@@ -14,6 +14,7 @@ import {
   focusRange,
   fundStatus,
   fundStrategy,
+  geographyLabels,
   millionsToUnits,
   normalizeEmail,
   normalizeLinkedIn,
@@ -25,6 +26,7 @@ import {
   toFirmFocus,
   toFirmFocusList,
   toFund,
+  toFundMandate,
   toInvestorFirm,
   toMetric,
   toPerson,
@@ -34,6 +36,7 @@ import {
   type DealRow,
   type FirmFocusRow,
   type FirmRow,
+  type FundMandateRow,
   type FundRow,
   type KeptFirm,
   type PersonRow,
@@ -525,6 +528,101 @@ describe('funds', () => {
     expect(toFund(fund({ mgmt_fee_pct: null, carry_pct: 250 }), kept)).toMatchObject({
       managementFeePct: null,
       carriedInterestPct: null,
+    });
+  });
+
+  it('carries no mandate unless one is given, and attaches one that is', () => {
+    expect(toFund(fund(), kept)).not.toHaveProperty('mandate');
+    expect(toFund(fund(), kept, null)).not.toHaveProperty('mandate');
+    const { mandate } = toFundMandate(mandateRow(), '2026-10-14');
+    expect(toFund(fund(), kept, mandate)!.mandate).toBe(mandate);
+  });
+});
+
+const mandateRow = (over: Partial<FundMandateRow> = {}): FundMandateRow => ({
+  fund_id: 'F1',
+  detailed_strategy: 'Early Stage: Seed',
+  industries: ['Software', 'Automobiles, Other Vehicles & Parts', 'Diversified'],
+  verticals: ['Fintech'],
+  geographic_focus: ['North America'],
+  geographic_exposure: ['North America', 'Europe', 'Other'],
+  domicile: 'Delaware',
+  structure: 'Commingled',
+  legal_structure: 'Limited Partnership',
+  ...over,
+});
+
+describe('fund mandate', () => {
+  describe('geographyLabels', () => {
+    it('splits a ; list nested in one element', () => {
+      expect(geographyLabels(['North America; Europe; Global', 'Asia'])).toEqual([
+        'North America',
+        'Europe',
+        'Global',
+        'Asia',
+      ]);
+    });
+
+    it('collapses the doubled SAR suffix, then de-duplicates it against the correct label', () => {
+      expect(geographyLabels(['Hong Kong SAR - China SAR - China', 'Hong Kong SAR - China'])).toEqual([
+        'Hong Kong SAR - China',
+      ]);
+    });
+
+    it('drops Other and keeps Global', () => {
+      expect(geographyLabels(['Other', 'Global'])).toEqual(['Global']);
+    });
+
+    it('reads null as nothing', () => {
+      expect(geographyLabels(null)).toEqual([]);
+      expect(geographyLabels([null])).toEqual([]);
+    });
+  });
+
+  describe('toFundMandate', () => {
+    it('cleans a full row and dates it at the snapshot', () => {
+      expect(toFundMandate(mandateRow(), '2026-10-14')).toEqual({
+        mandate: {
+          detailedStrategy: 'Early Stage: Seed',
+          // A label containing commas stays whole; Diversified is a statement.
+          industries: ['Software', 'Automobiles, Other Vehicles & Parts', 'Diversified'],
+          verticals: ['Fintech'],
+          geographicFocus: ['North America'],
+          geographicExposure: ['North America', 'Europe'],
+          domicile: 'Delaware',
+          structure: 'Commingled',
+          legalStructure: 'Limited Partnership',
+          reportedOn: '2026-10-14',
+        },
+        issues: ['labels-dropped'],
+      });
+    });
+
+    it('drops a fund structure misfiled as the legal structure, keeping the structure', () => {
+      const { mandate, issues } = toFundMandate(
+        mandateRow({ structure: 'Commingled', legal_structure: 'Commingled', geographic_exposure: null }),
+        '2026-10-14',
+      );
+      expect(mandate).toMatchObject({ structure: 'Commingled', legalStructure: null });
+      expect(issues).toEqual(['legal-misfiled']);
+    });
+
+    it('keeps a US-state domicile as published', () => {
+      expect(toFundMandate(mandateRow({ domicile: ' Delaware ' }), '2026-10-14').mandate!.domicile).toBe('Delaware');
+    });
+
+    it('is null when nothing usable is left', () => {
+      const empty = mandateRow({
+        detailed_strategy: 'Unknown',
+        industries: [],
+        verticals: null,
+        geographic_focus: ['Other'],
+        geographic_exposure: null,
+        domicile: ' ',
+        structure: null,
+        legal_structure: null,
+      });
+      expect(toFundMandate(empty, '2026-10-14')).toEqual({ mandate: null, issues: ['labels-dropped'] });
     });
   });
 });

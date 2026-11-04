@@ -226,7 +226,7 @@ export class V1ReadController {
   @ApiOperation({ summary: 'Get a private fund' })
   @ApiOkResponse({
     description:
-      '`{ fund, commitments, commitmentCount, metrics, citations, indexable }` — the fund, its terms, its largest LP commitments and point-in-time metrics.',
+      '`{ fund, commitments, commitmentCount, metrics, mandate, citations, indexable }` — the fund, its terms, its reported mandate and structure, its largest LP commitments and point-in-time metrics.',
   })
   @ApiNotFoundResponse({ description: 'No public fund has this slug.' })
   @Get('funds/:slug')

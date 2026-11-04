@@ -279,6 +279,14 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   Gated: metrics and LP commitments are `members` (`metricCount`/`commitmentCount` are public),
   the terms block and close dates are `contributors` — the API nulls them and sets `termsHidden`
   only when there were terms to hide, so a fund with none shows no Terms section (no false lock).
+  Between the metric strip and Terms sit **Investment mandate** (Strategy, Industries, Verticals,
+  Geographic focus, Geographic exposure — label lists through `FocusLabels`) and **Fund
+  structure** (Domicile, Structure, Legal structure, the header's `Fact` styling), both from
+  `components/FundMandateSection.tsx`, each with a "Reported as of …" line, rows and sections
+  omitted when empty (never an `EmptyState`). The mandate is one `members` block
+  (`fundMandate`): signed out the API sends `mandate: null` + `mandateHidden` and the page shows
+  one `LockedSection`; a stub sends neither. Never in the directory, search, metadata, JSON-LD or
+  OG. `make fund-mandate-fixture` (`-remove`) loads synthetic mandates on four local funds.
   Signed out, the directory's status filter (a partner-only column) is a "Sign in to filter by
   status" button and the API ignores `?status=`.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies). The
@@ -555,8 +563,8 @@ the API** so a hidden value never reaches the browser:
    section a tier, and `gateLimit(section, access)` the rows a viewer gets: `open` 2 / 2 / all,
    `members` 0 / 2 / all, `contributors` 0 / 0 / all (signed out / signed in but locked /
    unlocked; 2 = `PREVIEW_LIMIT`). Company rounds, diversity, acquisitions and exits, investor LP
-   commitments, investor focus (`investorFocus`, ≤ 2 role rows: signed in sees all of it) and
-   fund commitments/metrics are `members`; fund terms `contributors`; the rest
+   commitments, investor focus (`investorFocus`, ≤ 2 role rows: signed in sees all of it),
+   the fund mandate (`fundMandate`, one block) and fund commitments/metrics are `members`; fund terms `contributors`; the rest
    `open`. An approved contribution unlocks everything for `CONTRIBUTION_WINDOW_DAYS` (30).
 2. **By provenance.** Anything the licensed partner wrote is `members` at least, except
    public prose: `PUBLIC_PARTNER_FIELDS` (`oneLiner`, `description`) is never masked —
@@ -893,7 +901,17 @@ the slug on create (`ingest/fund-slug.ts`, shared with `make backfill-fund-slugs
 the pre-existing funds theirs; `Fund.slug` stays nullable until that has run everywhere). A
 data partner adds what no filing reports: `status` (`FundStatus`), launch/latest/final close
 dates, hard cap, management fee, carry, hurdle and target IRRs (percentages as published, null
-when absent — never 0). `FundCommitment` (an LP `Investor` → `Fund`, money in the fund's
+when absent — never 0) and its **reported mandate and structure** (migration `fund_mandate`,
+additive, nine columns): `detailedStrategy` (the published strategy label — not `strategy`, the
+broad class), `industries[]`, `verticals[]`, `geographicFocus[]` (where it targets),
+`geographicExposure[]` (where it reports exposure; usually includes the focus — a different fact),
+`domicile` (a country or a US state, never `hq`), `structure`, `legalStructure` and
+`mandateReportedOn` (the stage's snapshot date; the source dates no fund section). Labels are kept
+as published (cleaned, never mapped onto `FUND_STRATEGIES`/`SECTORS`/`COUNTRY_CODES`); an empty
+list or null was not reported; `regionFocus` stays the primary region. Ingest writes them on
+create and own key, and an enrichment fills blank ones (an empty list counts as blank); an older
+`mandateReportedOn` never replaces a newer one. No overview prose is stored (it needs a rewrite
+first). `FundCommitment` (an LP `Investor` → `Fund`, money in the fund's
 currency plus an ECB-converted `amountUsd`) and `FundMetric` (one per fund per as-at date) are
 ingest-only and write no revisions; `FundCommitment` has **no** `(fundId, investorId)` unique,
 so an investor merge keeps both rows (the `InvestorHolding` rule) and stays reversible.
@@ -1116,6 +1134,13 @@ last one clobber `totalRaisedUsd`:
   stage throws on a v2 stage missing one; a v1 stage logs "investor focus not staged" and runs as
   before). The parser (`toFirmFocus`) drops junk labels, `0` bounds ("no bound"), and the whole
   range when a bound is negative, above `FOCUS_RANGE_MAX_USD` ($10bn — unit errors) or inverted.
+  v3 adds `partner_stage.fund_mandate` (one row per fund; industries/verticals split on `;` because
+  their labels contain commas, geographies on `,`): `requireMandateColumns()` checks every
+  `FUND_MANDATE_COLUMNS` column before any write (a v1/v2 stage logs "fund mandate not staged"),
+  `toFundMandate` cleans it (`geographyLabels` re-splits a nested `;` list and collapses the doubled
+  `SAR - China`; a `Commingled`/SMA value in the legal-structure field is dropped as misfiled), and
+  the **funds stage** writes it on create, own key and enrichment — so `STAGE=funds` alone is the
+  rollout, with no backfill CLI. `make test-fund-mandate-integration` is its real-Postgres suite.
   **Focus association** (`focusAssociation` / `IngestService.writeInvestorFocus`): only the
   partner's OWN firm row (looked up by provenance key) or a firm with the same identifying domain
   receives focus — checked on the row, never on the path that found it, because an identifier the

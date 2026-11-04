@@ -1,6 +1,7 @@
 import type {
   Fund,
   FundCommitmentRow,
+  FundMandate,
   FundMetricRow,
   FundStatus,
   FundStrategy,
@@ -66,6 +67,26 @@ export function toFundTerms(row: DbFund): FundTerms {
     targetIrrGrossMaxPct: row.targetIrrGrossMaxPct,
     regionFocus: row.regionFocus,
   };
+}
+
+/** The reported mandate and structure, or null when the row holds none of it.
+ *  Read by the detail page only: no directory or terms payload carries it. */
+export function toFundMandate(row: DbFund): FundMandate | null {
+  const mandate: FundMandate = {
+    detailedStrategy: row.detailedStrategy ?? null,
+    industries: row.industries ?? [],
+    verticals: row.verticals ?? [],
+    geographicFocus: row.geographicFocus ?? [],
+    geographicExposure: row.geographicExposure ?? [],
+    domicile: row.domicile ?? null,
+    structure: row.structure ?? null,
+    legalStructure: row.legalStructure ?? null,
+    reportedOn: dateN(row.mandateReportedOn ?? null),
+  };
+  const lists = [mandate.industries, mandate.verticals, mandate.geographicFocus, mandate.geographicExposure];
+  const scalars = [mandate.detailedStrategy, mandate.domicile, mandate.structure, mandate.legalStructure];
+  if (lists.every((l) => l.length === 0) && scalars.every((v) => v === null)) return null;
+  return mandate;
 }
 
 export function toFundCommitmentRow(row: CommitmentWithInvestor): FundCommitmentRow {

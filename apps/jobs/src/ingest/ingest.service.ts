@@ -158,10 +158,20 @@ interface MatchStats {
   roundBindingConflicts: number;
   nameCandidates: number;
   samples: string[];
+  /** Funds whose stored mandate is newer than the incoming snapshot's. */
+  fundMandateStale: number;
 }
 
 function emptyMatchStats(): MatchStats {
-  return { held: {}, conflicts: {}, childOwnerClashes: 0, roundBindingConflicts: 0, nameCandidates: 0, samples: [] };
+  return {
+    held: {},
+    conflicts: {},
+    childOwnerClashes: 0,
+    roundBindingConflicts: 0,
+    nameCandidates: 0,
+    samples: [],
+    fundMandateStale: 0,
+  };
 }
 
 /** Lookup tables for funds (one query per run). */
@@ -543,6 +553,7 @@ export class IngestService {
    *  record keys to start an investigation from (source ids, never content). */
   private logMatchStats(): void {
     const m = this.matchStats;
+    if (m.fundMandateStale > 0) this.logger.log(`Fund mandate: ${m.fundMandateStale} stale (older snapshot)`);
     const total = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
     const held = total(m.held);
     const conflicts = total(m.conflicts);
@@ -1169,6 +1180,12 @@ export class IngestService {
       // but only those. Writing its blanks would erase what the *other* source
       // contributed (an ADV re-run must not wipe a Form D vintage).
       const written = present(facts);
+      if (FUND_MANDATE_FIELDS.some((f) => f in written)) {
+        const stored = await this.prisma.fund.findUnique({ where: { id: ownId }, select: { mandateReportedOn: true } });
+        if (this.mandateIsStale(stored?.mandateReportedOn, written.mandateReportedOn)) {
+          for (const f of FUND_MANDATE_FIELDS) delete written[f];
+        }
+      }
       await this.prisma.fund.update({
         where: { id: ownId },
         data: { name: fund.name, ...written },
@@ -1243,11 +1260,29 @@ export class IngestService {
     const row = await this.prisma.fund.findUnique({ where: { id: fundId } });
     if (!row) return;
 
-    const data = fillBlanks(row as unknown as Record<string, unknown>, facts);
+    // Prisma lists cannot be null, so an empty list is the blank to fill.
+    const current: Record<string, unknown> = { ...(row as unknown as Record<string, unknown>) };
+    for (const f of FUND_LIST_FIELDS) {
+      if (Array.isArray(current[f]) && (current[f] as unknown[]).length === 0) current[f] = null;
+    }
+    let incoming = facts;
+    if (this.mandateIsStale(row.mandateReportedOn, facts.mandateReportedOn)) {
+      incoming = { ...facts };
+      for (const f of FUND_MANDATE_FIELDS) delete incoming[f];
+    }
+    const data = fillBlanks(current, incoming);
     Object.assign(data, provenanceUpdate(row, source, Object.keys(data)));
     if (Object.keys(data).length > 0) {
       await this.prisma.fund.update({ where: { id: fundId }, data });
     }
+  }
+
+  /** Whether a stored mandate is newer than the incoming one, which then must
+   *  not replace (or be mixed into) it. Counted once per fund. */
+  private mandateIsStale(stored: Date | null | undefined, incoming: unknown): boolean {
+    if (!stored || !(incoming instanceof Date) || stored.getTime() <= incoming.getTime()) return false;
+    this.matchStats.fundMandateStale++;
+    return true;
   }
 
   private async upsert(
@@ -2907,7 +2942,38 @@ function fundFacts(fund: NormalizedFund): Record<string, unknown> {
     targetIrrGrossMinPct: fund.targetIrrGrossMinPct ?? null,
     targetIrrGrossMaxPct: fund.targetIrrGrossMaxPct ?? null,
     regionFocus: fund.regionFocus ?? null,
+    ...mandateFacts(fund.mandate),
   };
+}
+
+/** Fund list columns: Prisma lists cannot be null, so an empty list is a blank
+ *  to fill and is never written or marked. */
+const FUND_LIST_FIELDS = ['industries', 'verticals', 'geographicFocus', 'geographicExposure'] as const;
+/** Every mandate column — what the older-snapshot guard withholds together. */
+const FUND_MANDATE_FIELDS = [
+  'detailedStrategy',
+  ...FUND_LIST_FIELDS,
+  'domicile',
+  'structure',
+  'legalStructure',
+  'mandateReportedOn',
+] as const;
+
+/** A fund's mandate columns. Scalars are null when absent (not reported); a
+ *  list is present only when non-empty, so `present()` never writes or marks
+ *  an empty one and `create` never receives a null list. */
+function mandateFacts(m: NormalizedFund['mandate']): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    detailedStrategy: m?.detailedStrategy ?? null,
+    domicile: m?.domicile ?? null,
+    structure: m?.structure ?? null,
+    legalStructure: m?.legalStructure ?? null,
+    mandateReportedOn: m ? isoDate(m.reportedOn) : null,
+  };
+  if (m) {
+    for (const f of FUND_LIST_FIELDS) if (m[f].length > 0) out[f] = m[f];
+  }
+  return out;
 }
 
 /** An ISO date string as a Date, or null for absent/unparseable input. */

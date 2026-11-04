@@ -3037,6 +3037,177 @@ describe('IngestService partner provenance', () => {
     expect([...(fund!.partnerFields as string[])].sort()).toEqual(['carriedInterestPct', 'status']);
   });
 
+  describe('fund mandate', () => {
+    const mandate = (over: Partial<NonNullable<NormalizedFund['mandate']>> = {}): NonNullable<NormalizedFund['mandate']> => ({
+      detailedStrategy: 'Buyout',
+      industries: ['Software', 'Automobiles, Other Vehicles & Parts'],
+      verticals: [],
+      geographicFocus: ['Europe'],
+      geographicExposure: ['Europe', 'North America'],
+      domicile: 'Luxembourg',
+      structure: 'Commingled',
+      legalStructure: null,
+      reportedOn: '2026-10-14',
+      ...over,
+    });
+    const mandateFund = (over: Partial<NormalizedFund> = {}): NormalizedFund => ({
+      externalId: 'F1',
+      name: 'Granite Peak Fund II',
+      manager: { externalId: '501', identifier: pid('501') },
+      status: 'Closed',
+      mandate: mandate(),
+      ...over,
+    });
+    const MANDATE_KEYS = [
+      'detailedStrategy',
+      'industries',
+      'verticals',
+      'geographicFocus',
+      'geographicExposure',
+      'domicile',
+      'structure',
+      'legalStructure',
+      'mandateReportedOn',
+    ];
+    const gp = () => investorRow({ id: 'i-gp', externalSource: 'PARTNER', externalId: '501' });
+    const advSetup = (fund: Record<string, unknown> = {}) =>
+      mockPrisma(
+        [],
+        [investorRow({ id: 'i-adv', crdNumber: '123', externalSource: 'SEC_ADV', externalId: '123' })],
+        [
+          fundRow({
+            id: 'f-adv',
+            managerId: 'i-adv',
+            name: 'Granite Peak Fund II, L.P.',
+            externalSource: 'SEC_ADV_FUNDS',
+            externalId: '805-1',
+            industries: [],
+            verticals: [],
+            geographicFocus: [],
+            geographicExposure: [],
+            detailedStrategy: null,
+            domicile: null,
+            structure: null,
+            legalStructure: null,
+            mandateReportedOn: null,
+            partnerFields: [],
+            ...fund,
+          }),
+        ],
+        [{ scheme: 'PARTNER', value: '501', entityType: 'investor', entityId: 'i-adv', source: 'PARTNER' }],
+      );
+
+    it('a created partner fund gets every mandate column, marking only the non-empty ones', async () => {
+      const prisma = mockPrisma([], [gp()]);
+      await partnerService(prisma, [{ funds: [mandateFund()] }]).run(RUN);
+      const data = prisma.fund.create.mock.calls[0]![0].data;
+      expect(data).toMatchObject({
+        detailedStrategy: 'Buyout',
+        industries: ['Software', 'Automobiles, Other Vehicles & Parts'],
+        geographicFocus: ['Europe'],
+        geographicExposure: ['Europe', 'North America'],
+        domicile: 'Luxembourg',
+        structure: 'Commingled',
+        legalStructure: null,
+        mandateReportedOn: new Date('2026-10-14'),
+      });
+      expect(data).not.toHaveProperty('verticals');
+      expect([...(data.partnerFields as string[])].sort()).toEqual(
+        [
+          'detailedStrategy',
+          'domicile',
+          'geographicExposure',
+          'geographicFocus',
+          'industries',
+          'mandateReportedOn',
+          'status',
+          'structure',
+        ].sort(),
+      );
+    });
+
+    it('an own-key update writes the mandate', async () => {
+      const prisma = mockPrisma([], [gp()], [fundRow({ id: 'f-p', managerId: 'i-gp', externalSource: 'PARTNER', externalId: 'F1' })]);
+      await partnerService(prisma, [{ funds: [mandateFund()] }]).run(RUN);
+      const [data] = updateData(prisma.fund.update.mock.calls);
+      expect(data).toMatchObject({
+        detailedStrategy: 'Buyout',
+        industries: ['Software', 'Automobiles, Other Vehicles & Parts'],
+        domicile: 'Luxembourg',
+        mandateReportedOn: new Date('2026-10-14'),
+      });
+      expect(data).not.toHaveProperty('verticals');
+      expect(data).not.toHaveProperty('legalStructure');
+    });
+
+    it('an own-key update from an older snapshot leaves the newer mandate alone but writes the rest', async () => {
+      const prisma = mockPrisma(
+        [],
+        [gp()],
+        [
+          fundRow({
+            id: 'f-p',
+            managerId: 'i-gp',
+            externalSource: 'PARTNER',
+            externalId: 'F1',
+            mandateReportedOn: new Date('2027-01-01'),
+          }),
+        ],
+      );
+      const svc = partnerService(prisma, [{ funds: [mandateFund()] }]);
+      await svc.run(RUN);
+      const [data] = updateData(prisma.fund.update.mock.calls);
+      expect(data).toMatchObject({ status: 'Closed' });
+      for (const k of MANDATE_KEYS) expect(data).not.toHaveProperty(k);
+      expect(svc.identityStats().fundMandateStale).toBe(1);
+    });
+
+    it('fills an enriched ADV fund\'s empty lists and null scalars, and marks them', async () => {
+      const prisma = advSetup();
+      await partnerService(prisma, [{ funds: [mandateFund()] }]).run(RUN);
+      const [data] = updateData(prisma.fund.update.mock.calls);
+      expect(data).toMatchObject({
+        detailedStrategy: 'Buyout',
+        industries: ['Software', 'Automobiles, Other Vehicles & Parts'],
+        geographicFocus: ['Europe'],
+        domicile: 'Luxembourg',
+        mandateReportedOn: new Date('2026-10-14'),
+      });
+      expect(data).not.toHaveProperty('verticals');
+      expect(data!.partnerFields).toEqual(expect.arrayContaining(['industries', 'domicile', 'mandateReportedOn']));
+      expect(data!.partnerFields).not.toContain('verticals');
+    });
+
+    it('an enriched ADV fund keeps a value it already holds', async () => {
+      const prisma = advSetup({ domicile: 'Cayman Islands', industries: ['Healthcare'] });
+      await partnerService(prisma, [{ funds: [mandateFund()] }]).run(RUN);
+      const [data] = updateData(prisma.fund.update.mock.calls);
+      expect(data).not.toHaveProperty('domicile');
+      expect(data).not.toHaveProperty('industries');
+      expect(data).toMatchObject({ structure: 'Commingled' });
+      expect(data!.partnerFields).not.toContain('domicile');
+    });
+
+    it('a fund without a mandate writes no mandate key on any path', async () => {
+      const noMandate = mandateFund({ mandate: undefined });
+      const created = mockPrisma([], [gp()]);
+      await partnerService(created, [{ funds: [noMandate] }]).run(RUN);
+      const own = mockPrisma([], [gp()], [fundRow({ id: 'f-p', managerId: 'i-gp', externalSource: 'PARTNER', externalId: 'F1' })]);
+      await partnerService(own, [{ funds: [noMandate] }]).run(RUN);
+      const adv = advSetup();
+      await partnerService(adv, [{ funds: [noMandate] }]).run(RUN);
+
+      const createData = created.fund.create.mock.calls[0]![0].data;
+      for (const k of ['industries', 'verticals', 'geographicFocus', 'geographicExposure']) {
+        expect(createData).not.toHaveProperty(k);
+      }
+      expect(createData.partnerFields).toEqual(['status']);
+      for (const data of [...updateData(own.fund.update.mock.calls), ...updateData(adv.fund.update.mock.calls)]) {
+        for (const k of MANDATE_KEYS) expect(data).not.toHaveProperty(k);
+      }
+    });
+  });
+
   it('a public match makes a partner-only company public record, even with nothing to fill', async () => {
     const prisma = mockPrisma([
       companyRow({

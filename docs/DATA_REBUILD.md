@@ -498,6 +498,32 @@ firms, plus the parser's issues (`amount-invalid`, `range-implausible`,
 name — deliberately left without focus. To undo it:
 `DELETE FROM "InvestorFocus" WHERE "externalSource" = 'PARTNER'` (no other writer).
 
+## Partner fund mandate (stage v3)
+
+A fund's reported mandate and structure (detailed strategy, industries,
+verticals, geographic focus and exposure, domicile, structure, legal structure)
+needs a **v3** partner stage — `partner_stage.meta` version 3 plus
+`partner_stage.fund_mandate`. v3 is a superset of v2, so it also serves the
+investor-focus backfill. On a v1/v2 stage the funds stage runs as before and logs
+"fund mandate not staged".
+
+There is no separate backfill: the **funds stage** carries the mandate. It writes
+only `Fund` rows (no people, contacts, commitments or metrics), so re-running it
+alone is the targeted path:
+
+```bash
+make partner-stage-load FILE=…/partner-stage-<date>-v3.sql.zst
+make partner-stage-status                   # stage_version 3, fund_mandate_rows
+make ingest-partner STAGE=funds             # -prod on the VPS
+make ingest-partner STAGE=funds             # again: every value unchanged
+```
+
+The stage's last line reports `N with a mandate (issues: labels-dropped …,
+legal-misfiled …)`; a run against an older snapshot logs "Fund mandate: N stale"
+and leaves the newer mandate alone. To undo it, reset the nine columns where
+`"mandateReportedOn" IS NOT NULL` and drop those names from `partnerFields`
+(the partner is their only writer).
+
 ## Shipping the local dataset to production
 
 Re-ingesting on prod (above) is the canonical path — every row is reproducible, and

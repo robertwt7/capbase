@@ -290,6 +290,21 @@ export interface NormalizedInvestorFocus {
   snapshotDate: string;
 }
 
+/** A fund's reported mandate and structure (partner only). Labels cleaned but
+ *  as published; an empty list / null was not reported. */
+export interface NormalizedFundMandate {
+  detailedStrategy: string | null;
+  industries: string[];
+  verticals: string[];
+  geographicFocus: string[];
+  geographicExposure: string[];
+  domicile: string | null;
+  structure: string | null;
+  legalStructure: string | null;
+  /** `YYYY-MM-DD`: the stage's snapshot date (the source dates no fund section). */
+  reportedOn: string;
+}
+
 /** One private fund contributed by a source. */
 export interface NormalizedFund {
   /** Stable id of the fund within the source: the SEC private fund id
@@ -334,6 +349,9 @@ export interface NormalizedFund {
   targetIrrGrossMinPct?: number | null;
   targetIrrGrossMaxPct?: number | null;
   regionFocus?: string | null;
+  /** Reported mandate + structure (partner only). Absent = not reported;
+   *  ingest never clears a stored mandate on absence. */
+  mandate?: NormalizedFundMandate;
 }
 
 /**

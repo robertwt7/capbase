@@ -53,6 +53,24 @@ export interface FundTerms {
   regionFocus?: string | null;
 }
 
+/** A fund's reported mandate and structure (partner data). Labels as
+ *  published; an empty list / null was not reported. Detail read only. */
+export interface FundMandate {
+  /** Distinct from `Fund.strategy` (the broad class). */
+  detailedStrategy: string | null;
+  industries: string[];
+  verticals: string[];
+  /** Target geography. */
+  geographicFocus: string[];
+  /** Reported exposure; usually includes the focus. */
+  geographicExposure: string[];
+  domicile: string | null;
+  structure: string | null;
+  legalStructure: string | null;
+  /** `YYYY-MM-DD`; null only for a row written before the column existed. */
+  reportedOn: string | null;
+}
+
 /** One limited partner's commitment to a fund. */
 export interface FundCommitmentRow {
   id: string;
@@ -85,6 +103,11 @@ export interface FundDetailResponse {
   /** The fund has terms this viewer may not see (every `FundTerms` field but
    *  `regionFocus` is then null). False when there are none to hide. */
   termsHidden: boolean;
+  /** The reported mandate and structure: null when the fund has none or this
+   *  viewer may not see it (`fundMandate`, members). */
+  mandate: FundMandate | null;
+  /** The fund has a mandate this viewer may not see. False when there is none. */
+  mandateHidden: boolean;
   /** Citations attesting the fund row (SEC funds; partner funds carry none). */
   citations: Citation[];
   /** `fundIndexable` — whether search engines should index the page. Never for

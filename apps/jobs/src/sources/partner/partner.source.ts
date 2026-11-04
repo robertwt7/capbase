@@ -7,6 +7,7 @@ import type {
   IngestionSource,
   NormalizedFund,
   NormalizedFundCommitment,
+  NormalizedFundMandate,
   NormalizedInvestorFirm,
   NormalizedRecord,
   SourceBatch,
@@ -14,14 +15,17 @@ import type {
 import { PartnerClient } from './partner.client';
 import {
   FOCUS_ISSUES,
+  MANDATE_ISSUES,
   PARTNER,
   emptyFocusIssues,
+  emptyMandateIssues,
   firmType,
   toCommitment,
   toFund,
   toInvestorFirm,
   toMetric,
   toFirmFocusList,
+  toFundMandate,
   toRecord,
   type FirmFocusRow,
   type KeptFirm,
@@ -105,6 +109,14 @@ export class PartnerSource implements IngestionSource {
     } else {
       this.logger.log('stage v1: investor focus not staged');
     }
+    // v3 adds the fund mandate (funds stage); v1/v2 run the funds stage as before.
+    let mandateSnapshot: string | null = null;
+    if (contract.version >= 3) {
+      await this.client.requireMandateColumns();
+      mandateSnapshot = contract.snapshotDate;
+    } else {
+      this.logger.log(`stage v${contract.version}: fund mandate not staged`);
+    }
 
     // The firm universe decides which firms are investors at all; every stage
     // needs it, and it is small (tens of thousands of short rows).
@@ -137,7 +149,7 @@ export class PartnerSource implements IngestionSource {
     if (stages.has('firms')) {
       yield* this.firmBatches(firms.filter((f) => kept.has(f.firm_id)), kept, since, limit, focusSnapshot);
     }
-    if (stages.has('funds')) yield* this.fundBatches(kept, limit);
+    if (stages.has('funds')) yield* this.fundBatches(kept, limit, mandateSnapshot);
     if (stages.has('companies')) yield* this.companyBatches(kept, fx!, limit);
     if (stages.has('commitments')) yield* this.commitmentBatches(kept, fx!, limit);
     if (stages.has('metrics')) yield* this.metricBatches(fx!, limit);
@@ -193,25 +205,45 @@ export class PartnerSource implements IngestionSource {
     );
   }
 
-  private async *fundBatches(kept: Map<string, KeptFirm>, limit: number): AsyncIterable<SourceBatch> {
+  private async *fundBatches(
+    kept: Map<string, KeptFirm>,
+    limit: number,
+    /** The v3 snapshot date, or null when the mandate is not staged (v1/v2). */
+    mandateSnapshot: string | null,
+  ): AsyncIterable<SourceBatch> {
     let after = '';
     let offered = 0;
     let skipped = 0;
+    let withMandate = 0;
+    const issues = emptyMandateIssues();
     while (offered + skipped < limit) {
       const rows = await this.client.funds(after, Math.min(PARTNER_BATCH, limit - offered - skipped));
       if (rows.length === 0) break;
       after = rows[rows.length - 1]!.fund_id;
+      const mandateOf = new Map<string, NormalizedFundMandate>();
+      if (mandateSnapshot) {
+        for (const m of await this.client.fundMandates(rows.map((r) => r.fund_id))) {
+          const { mandate, issues: found } = toFundMandate(m, mandateSnapshot);
+          for (const i of found) issues[i]++;
+          if (mandate) mandateOf.set(m.fund_id, mandate);
+        }
+      }
       const funds: NormalizedFund[] = [];
       for (const r of rows) {
-        const f = toFund(r, kept);
-        if (f) funds.push(f);
-        else skipped++;
+        const f = toFund(r, kept, mandateOf.get(r.fund_id));
+        if (f) {
+          funds.push(f);
+          if (f.mandate) withMandate++;
+        } else skipped++;
       }
       offered += funds.length;
       yield { funds };
     }
     this.logger.log(
-      `Funds stage: ${offered} funds offered, ${skipped} dropped (never launched, or manager not an investor)`,
+      `Funds stage: ${offered} funds offered, ${skipped} dropped (never launched, or manager not an investor)` +
+        (mandateSnapshot
+          ? `, ${withMandate} with a mandate (issues: ${MANDATE_ISSUES.map((k) => `${k} ${issues[k]}`).join(', ')})`
+          : ''),
     );
   }
 

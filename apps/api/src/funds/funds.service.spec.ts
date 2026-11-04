@@ -291,6 +291,67 @@ describe('FundsService', () => {
         expect(res.termsHidden).toBe(false);
       });
 
+      const MANDATE = {
+        detailedStrategy: 'MANDATE_SENTINEL_STRATEGY',
+        industries: ['MANDATE_SENTINEL_INDUSTRY'],
+        verticals: [],
+        geographicFocus: ['Europe'],
+        geographicExposure: [],
+        domicile: 'MANDATE_SENTINEL_DOMICILE',
+        structure: 'Commingled',
+        legalStructure: null,
+        mandateReportedOn: new Date('2026-10-14T00:00:00Z'),
+      };
+
+      it('withholds a mandate from a signed-out viewer, saying one exists', async () => {
+        findFirst.mockResolvedValue(termsRow(MANDATE));
+        const res = await withAccess({ unlocked: false, signedIn: false }).findOne('x');
+        expect(res.mandate).toBeNull();
+        expect(res.mandateHidden).toBe(true);
+        expect(JSON.stringify(res)).not.toContain('MANDATE_SENTINEL');
+      });
+
+      it('never claims a hidden mandate for a fund that has none', async () => {
+        findFirst.mockResolvedValue(termsRow());
+        const res = await withAccess({ unlocked: false, signedIn: false }).findOne('x');
+        expect(res).toMatchObject({ mandate: null, mandateHidden: false });
+      });
+
+      it('shows any signed-in viewer the whole mandate', async () => {
+        findFirst.mockResolvedValue(termsRow(MANDATE));
+        const res = await withAccess({ unlocked: false, signedIn: true }).findOne('x');
+        expect(res.mandateHidden).toBe(false);
+        expect(res.mandate).toEqual({
+          detailedStrategy: 'MANDATE_SENTINEL_STRATEGY',
+          industries: ['MANDATE_SENTINEL_INDUSTRY'],
+          verticals: [],
+          geographicFocus: ['Europe'],
+          geographicExposure: [],
+          domicile: 'MANDATE_SENTINEL_DOMICILE',
+          structure: 'Commingled',
+          legalStructure: null,
+          reportedOn: '2026-10-14',
+        });
+      });
+
+      it('a stub carries no mandate and claims none hidden', async () => {
+        findFirst.mockResolvedValue(termsRow({ ...MANDATE, partnerOnly: true }));
+        const res = await withAccess({ unlocked: false, signedIn: false }).findOne('x');
+        expect(res).toMatchObject({ mandate: null, mandateHidden: false });
+        expect(JSON.stringify(res)).not.toContain('MANDATE_SENTINEL');
+      });
+
+      it('directory items carry no mandate key', async () => {
+        const prisma = {
+          fund: { findMany: jest.fn(async () => [termsRow(MANDATE)]), count: jest.fn(async () => 1) },
+          $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+        } as unknown as PrismaService;
+        const svc = new FundsService(prisma, unlockedUsers);
+        const page = await svc.findAll({}, user);
+        expect(page.items[0]).not.toHaveProperty('mandate');
+        expect(JSON.stringify(page)).not.toContain('MANDATE_SENTINEL');
+      });
+
       it('returns a stub of a partner-only fund to a signed-out viewer', async () => {
         findFirst.mockResolvedValue(termsRow({ partnerOnly: true }));
         const res = await withAccess({ unlocked: false, signedIn: false }).findOne('x');

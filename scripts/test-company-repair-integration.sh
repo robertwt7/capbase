@@ -5,10 +5,11 @@
 # migration to it (and only it), runs the integration suite, and drops it — on
 # success, failure or Ctrl-C. Never touches DATABASE_URL's database, never runs
 # migrate dev/reset, and refuses any other database name. It also runs the
-# investor-focus suite (make test-investor-focus-integration); arguments are a
-# jest path filter.
+# investor-focus suite (make test-investor-focus-integration) and the fund-mandate
+# suite (make test-fund-mandate-integration); arguments are a jest path filter.
 #
-# Usage: make test-company-repair-integration | make test-investor-focus-integration
+# Usage: make test-company-repair-integration | make test-investor-focus-integration |
+#        make test-fund-mandate-integration
 set -euo pipefail
 
 CONTAINER="${PG_CONTAINER:-capbase-postgres}"

@@ -630,6 +630,29 @@ model Fund {
   targetIrrGrossMaxPct Float?
   regionFocus          String?
 
+  /// Investment mandate and structure, as a data partner REPORTS them. Labels
+  /// kept as published (cleaned, never mapped onto FUND_STRATEGIES / SECTORS /
+  /// COUNTRY_CODES). Ingest-only; read by the fund page alone (`fundMandate`
+  /// section, members). An empty list / null = not reported.
+  /// The reported strategy (`Early Stage: Seed`) — distinct from `strategy`,
+  /// the broad FUND_STRATEGIES class.
+  detailedStrategy   String?
+  industries         String[] @default([])
+  verticals          String[] @default([])
+  /// Where the fund TARGETS.
+  geographicFocus    String[] @default([])
+  /// Where the fund REPORTS exposure — usually includes the focus; a different fact.
+  geographicExposure String[] @default([])
+  /// Domicile as reported (a country or a US state) — not `hq`.
+  domicile           String?
+  /// `Commingled` | `Separately Managed Account`, as reported.
+  structure          String?
+  /// The legal form as reported (`Limited Partnership`, `Luxembourg SCSp`, …).
+  legalStructure     String?
+  /// The snapshot the mandate is reported as of (the source dates no fund
+  /// section). Guards against an older snapshot replacing a newer one.
+  mandateReportedOn  DateTime?
+
   /// SEC private fund identification number (805-XXXXXXXXXX), from Schedule D.
   secFundId String?
   /// The fund's own filer CIK, when a Form D filing matched it.

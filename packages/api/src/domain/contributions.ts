@@ -45,6 +45,8 @@ export const GATED_SECTIONS = {
   fundCommitments: 'members',
   fundMetrics: 'members',
   fundTerms: 'contributors',
+  // One block: signed in sees all of it.
+  fundMandate: 'members',
   personRoles: 'open',
 } as const satisfies Record<string, GateTier>;
 

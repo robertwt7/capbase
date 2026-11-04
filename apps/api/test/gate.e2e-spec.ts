@@ -56,8 +56,39 @@ describe('Read gate (e2e)', () => {
     focusGeo: `FOCUS_SENTINEL_GEO-${stamp}`,
     focusLpStrategy: `FOCUS_SENTINEL_LP_STRATEGY-${stamp}`,
     focusPartnerOnly: `FOCUS_SENTINEL_PARTNER_ONLY-${stamp}`,
+    mandateStrategy: `MANDATE_SENTINEL_STRATEGY-${stamp}`,
+    mandateIndustry: `MANDATE_SENTINEL_INDUSTRY-${stamp}`,
+    mandateVertical: `MANDATE_SENTINEL_VERTICAL-${stamp}`,
+    mandateGeo: `MANDATE_SENTINEL_GEO-${stamp}`,
+    mandateExposure: `MANDATE_SENTINEL_EXPOSURE-${stamp}`,
+    mandateDomicile: `MANDATE_SENTINEL_DOMICILE-${stamp}`,
+    mandateStructure: `MANDATE_SENTINEL_STRUCTURE-${stamp}`,
+    mandateLegal: `MANDATE_SENTINEL_LEGAL-${stamp}`,
+    mandatePartnerOnly: `MANDATE_SENTINEL_PARTNER_ONLY-${stamp}`,
   };
   const focusSentinels = () => [S.focusStage, S.focusIndustry, S.focusGeo, S.focusLpStrategy, S.focusPartnerOnly];
+  const mandateSentinels = () => [
+    S.mandateStrategy,
+    S.mandateIndustry,
+    S.mandateVertical,
+    S.mandateGeo,
+    S.mandateExposure,
+    S.mandateDomicile,
+    S.mandateStructure,
+    S.mandateLegal,
+    S.mandatePartnerOnly,
+  ];
+  const MANDATE_FIELDS = [
+    'detailedStrategy',
+    'industries',
+    'verticals',
+    'geographicFocus',
+    'geographicExposure',
+    'domicile',
+    'structure',
+    'legalStructure',
+    'mandateReportedOn',
+  ];
   const names = {
     publicCo: `Gate Public Co ${stamp}`,
     partnerCo: `Gate Partner Only Co ${stamp}`,
@@ -246,7 +277,17 @@ describe('Read gate (e2e)', () => {
           strategy: 'Venture capital',
           status: 'Closed',
           managementFeePct: S.fee,
-          partnerFields: ['managementFeePct', 'status'],
+          // The partner's reported mandate, every label a sentinel.
+          detailedStrategy: S.mandateStrategy,
+          industries: [S.mandateIndustry],
+          verticals: [S.mandateVertical],
+          geographicFocus: [S.mandateGeo],
+          geographicExposure: [S.mandateGeo, S.mandateExposure],
+          domicile: S.mandateDomicile,
+          structure: S.mandateStructure,
+          legalStructure: S.mandateLegal,
+          mandateReportedOn: new Date('2026-10-14'),
+          partnerFields: ['managementFeePct', 'status', ...MANDATE_FIELDS],
           externalSource: 'SEC_ADV_FUNDS',
           externalId: `${tag}-fund`,
           moderationStatus: 'APPROVED',
@@ -264,7 +305,9 @@ describe('Read gate (e2e)', () => {
           name: names.partnerFund,
           managerId: ids.partnerFirm,
           hq: S.fundHq,
-          partnerFields: ['hq'],
+          industries: [S.mandatePartnerOnly],
+          mandateReportedOn: new Date('2026-10-14'),
+          partnerFields: ['hq', 'industries', 'mandateReportedOn'],
           partnerOnly: true,
           externalSource: 'PARTNER',
           externalId: `${tag}-pfund`,
@@ -690,6 +733,49 @@ describe('Read gate (e2e)', () => {
       const locked = await get(`/funds/${slugs.partnerFund}`, 'locked');
       expect(locked.body.fund.hq).toBe(S.fundHq);
     });
+
+    it('signed out: the mandate is withheld whole, and said to exist', async () => {
+      const { body } = await get(`/funds/${slugs.fund}`, 'signedOut');
+      expect(body.mandate).toBeNull();
+      expect(body.mandateHidden).toBe(true);
+      expect(body.fund.masked ?? []).not.toContain('industries');
+      expect(leaks(body, mandateSentinels())).toEqual([]);
+
+      const stub = await get(`/funds/${slugs.partnerFund}`, 'signedOut');
+      expect(stub.body).toMatchObject({ mandate: null, mandateHidden: false });
+      expect(leaks(stub.body, mandateSentinels())).toEqual([]);
+    });
+
+    it.each(['locked', 'contributor', 'admin'] as const)('%s: the exact mandate block', async (viewer) => {
+      const { body } = await get(`/funds/${slugs.fund}`, viewer);
+      expect(body.mandateHidden).toBe(false);
+      expect(body.mandate).toEqual({
+        detailedStrategy: S.mandateStrategy,
+        industries: [S.mandateIndustry],
+        verticals: [S.mandateVertical],
+        geographicFocus: [S.mandateGeo],
+        geographicExposure: [S.mandateGeo, S.mandateExposure],
+        domicile: S.mandateDomicile,
+        structure: S.mandateStructure,
+        legalStructure: S.mandateLegal,
+        reportedOn: '2026-10-14',
+      });
+      // The mandate rides beside the fund, never inside it.
+      expect(body.fund).not.toHaveProperty('industries');
+      const partner = await get(`/funds/${slugs.partnerFund}`, viewer);
+      expect(partner.body.mandate.industries).toEqual([S.mandatePartnerOnly]);
+    });
+
+    it('no directory or search response carries a mandate label', async () => {
+      const q = encodeURIComponent(String(stamp));
+      for (const viewer of ['signedOut', 'locked', 'contributor'] as const) {
+        const funds = await get(`/funds?q=${q}`, viewer);
+        expect(funds.body.items.length).toBeGreaterThan(0);
+        expect(leaks(funds.body, mandateSentinels())).toEqual([]);
+        const search = await get(`/search?q=${q}`, viewer);
+        expect(leaks(search.body, mandateSentinels())).toEqual([]);
+      }
+    });
   });
 
   describe('person profile', () => {
@@ -840,7 +926,9 @@ describe('Read gate (e2e)', () => {
         )
       ).token;
       const v1 = (path: string) => http().get(path).set('Authorization', `Bearer ${key}`).expect(200);
-      expect((await v1(`/v1/funds/${slugs.fund}`)).body.fund.managementFeePct).toBe(S.fee);
+      const fund = (await v1(`/v1/funds/${slugs.fund}`)).body;
+      expect(fund.fund.managementFeePct).toBe(S.fee);
+      expect(fund.mandate).toMatchObject({ detailedStrategy: S.mandateStrategy, industries: [S.mandateIndustry] });
       expect((await v1(`/v1/companies/${slugs.publicCo}`)).body.company.rounds).toHaveLength(3);
       expect((await v1(`/v1/people/${slugs.partnerPerson}`)).body.roles).toHaveLength(1);
       const firm = (await v1(`/v1/investors/${slugs.firm}`)).body;

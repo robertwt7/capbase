@@ -75,6 +75,9 @@ case "$cmd" in
       if [ "$(psql_in -tAc "SELECT to_regclass('partner_stage.firm_focus') IS NOT NULL")" = "t" ]; then
         psql_in -c "SELECT role AS focus_role, count(*) FROM partner_stage.firm_focus GROUP BY role ORDER BY role;"
       fi
+      if [ "$(psql_in -tAc "SELECT to_regclass('partner_stage.fund_mandate') IS NOT NULL")" = "t" ]; then
+        psql_in -c "SELECT count(*) AS fund_mandate_rows FROM partner_stage.fund_mandate;"
+      fi
     else
       echo "partner_stage is not loaded."
     fi

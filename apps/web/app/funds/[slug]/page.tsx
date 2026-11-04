@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { Citation } from '@/components/Citation';
 import { CommitmentAmount } from '@/components/CommitmentAmount';
+import { Fact, FundMandateSection, FundStructureSection } from '@/components/FundMandateSection';
 import { LockedSection } from '@/components/LockedSection';
 import { isMasked, Masked, SignInChip } from '@/components/Masked';
 import { StubProfile } from '@/components/StubProfile';
@@ -56,7 +57,8 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
   const { slug } = await params;
   const detail = await getFund(slug);
   if (!detail) notFound();
-  const { fund, commitments, commitmentCount, metrics, metricCount, citations, access, termsHidden } = detail;
+  const { fund, commitments, commitmentCount, metrics, metricCount, citations, access, termsHidden, mandate, mandateHidden } =
+    detail;
   const path = `/funds/${slug}`;
   if (fund.partnerOnly) {
     return (
@@ -156,6 +158,30 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
         ) : null}
         <Metric label="LP commitments" value={formatCount(commitmentCount)} />
       </section>
+
+      {/* The reported mandate (members): the block whole, one sign-in panel, or
+          nothing for a fund that reports none — never an empty state. */}
+      {mandate ? (
+        <>
+          <FundMandateSection mandate={mandate} />
+          <FundStructureSection mandate={mandate} />
+        </>
+      ) : mandateHidden ? (
+        <section className="border-t border-line py-8">
+          <SectionHeader title="Investment mandate" size="md" className="mb-5 border-b-0 pb-0" />
+          <LockedSection
+            access={access}
+            next={path}
+            total={1}
+            shown={0}
+            noun="mandate"
+            subject="This fund's reported mandate and structure"
+            tier="members"
+            placeholder="terms"
+            className="mt-0"
+          />
+        </section>
+      ) : null}
 
       {/* A fund with no terms shows no block at all — never a false lock. */}
       {termsHidden && (
@@ -300,15 +326,6 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
       </section>
 
       <div className="pb-16" />
-    </div>
-  );
-}
-
-function Fact({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="text-[11px] tracking-[0.04em] text-graphite-500 uppercase">{label}</dt>
-      <dd className="font-mono text-sm text-ink">{value}</dd>
     </div>
   );
 }

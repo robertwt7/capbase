@@ -3,11 +3,13 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   FIRM_FOCUS_COLUMNS,
+  FUND_MANDATE_COLUMNS,
   type CommitmentRow,
   type CompanyRow,
   type DealRow,
   type FirmFocusRow,
   type FirmRow,
+  type FundMandateRow,
   type FundRow,
   type MetricRow,
   type PersonRow,
@@ -70,17 +72,29 @@ export class PartnerClient {
   /** Throws, naming every missing column, unless `partner_stage.firm_focus`
    *  carries the whole v2 contract (`FIRM_FOCUS_COLUMNS`). Run before any write. */
   async requireFocusColumns(): Promise<void> {
+    await this.requireColumns('firm_focus', FIRM_FOCUS_COLUMNS, 2);
+  }
+
+  /** The same for `partner_stage.fund_mandate` and the v3 contract
+   *  (`FUND_MANDATE_COLUMNS`). Run before any write. */
+  async requireMandateColumns(): Promise<void> {
+    await this.requireColumns('fund_mandate', FUND_MANDATE_COLUMNS, 3);
+  }
+
+  /** One error naming every column of `columns` that `partner_stage.<table>`
+   *  lacks; "load a v<version> stage" when the table is missing outright. */
+  private async requireColumns(table: string, columns: readonly string[], version: number): Promise<void> {
     const rows = await this.prisma.$queryRaw<{ column_name: string }[]>`
       SELECT column_name::text AS column_name
         FROM information_schema.columns
-       WHERE table_schema = 'partner_stage' AND table_name = 'firm_focus'`;
+       WHERE table_schema = 'partner_stage' AND table_name = ${table}`;
     const have = new Set(rows.map((r) => r.column_name));
-    const missing = FIRM_FOCUS_COLUMNS.filter((c) => !have.has(c));
-    if (missing.length === FIRM_FOCUS_COLUMNS.length) {
-      throw new Error('partner_stage.firm_focus is missing (load a v2 stage: make partner-stage-status)');
+    const missing = columns.filter((c) => !have.has(c));
+    if (missing.length === columns.length) {
+      throw new Error(`partner_stage.${table} is missing (load a v${version} stage: make partner-stage-status)`);
     }
     if (missing.length > 0) {
-      throw new Error(`partner_stage.firm_focus is missing column(s): ${missing.join(', ')}`);
+      throw new Error(`partner_stage.${table} is missing column(s): ${missing.join(', ')}`);
     }
   }
 
@@ -118,6 +132,17 @@ export class PartnerClient {
        WHERE (x.firm_id, x.role) > (${after[0]}, ${after[1]})
        ORDER BY x.firm_id, x.role
        LIMIT ${limit}`;
+  }
+
+  /** The mandate rows of one page of funds (the funds stage, v3). */
+  async fundMandates(fundIds: string[]): Promise<FundMandateRow[]> {
+    if (fundIds.length === 0) return [];
+    return this.prisma.$queryRaw<FundMandateRow[]>`
+      SELECT fund_id, detailed_strategy, industries::text[] AS industries, verticals::text[] AS verticals,
+             geographic_focus::text[] AS geographic_focus, geographic_exposure::text[] AS geographic_exposure,
+             domicile, structure, legal_structure
+        FROM partner_stage.fund_mandate
+       WHERE fund_id = ANY(${fundIds})`;
   }
 
   async allFirms(): Promise<FirmRow[]> {

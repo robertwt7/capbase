@@ -24,6 +24,7 @@ import type { FxTable } from '../../util/fx';
 import type {
   NormalizedFund,
   NormalizedFundCommitment,
+  NormalizedFundMandate,
   NormalizedFundMetric,
   NormalizedInvestor,
   NormalizedInvestorFirm,
@@ -183,6 +184,37 @@ export const FIRM_FOCUS_COLUMNS = [
   'range_max_local_mn',
   'range_currency',
 ] as const satisfies readonly (keyof FirmFocusRow)[];
+
+/**
+ * One fund's reported mandate and structure (stage v3,
+ * `partner_stage.fund_mandate`). Industries and verticals are split on `;`
+ * (their labels contain commas), geographies on `,`; otherwise raw.
+ */
+export interface FundMandateRow {
+  fund_id: string;
+  detailed_strategy: string | null;
+  industries: string[] | null;
+  verticals: string[] | null;
+  geographic_focus: string[] | null;
+  geographic_exposure: string[] | null;
+  domicile: string | null;
+  structure: string | null;
+  legal_structure: string | null;
+}
+
+/** The stage v3 contract for `partner_stage.fund_mandate` — what the preflight
+ *  checks before any write. */
+export const FUND_MANDATE_COLUMNS = [
+  'fund_id',
+  'detailed_strategy',
+  'industries',
+  'verticals',
+  'geographic_focus',
+  'geographic_exposure',
+  'domicile',
+  'structure',
+  'legal_structure',
+] as const satisfies readonly (keyof FundMandateRow)[];
 
 /** A firm that survived the type mapping, as edges need it. */
 export interface KeptFirm {
@@ -501,12 +533,17 @@ const positive = (n: number | null): number | null => (n != null && n > 0 ? n : 
 const pct = (n: number | null): number | null => (n != null && n >= 0 && n < 100 ? n : null);
 
 /** Null when the fund must be dropped (never launched, or its manager is not
- *  an investor we keep). */
-export function toFund(row: FundRow, keptFirms: ReadonlyMap<string, KeptFirm>): NormalizedFund | null {
+ *  an investor we keep). `mandate` (stage v3) is attached when given. */
+export function toFund(
+  row: FundRow,
+  keptFirms: ReadonlyMap<string, KeptFirm>,
+  mandate?: NormalizedFundMandate | null,
+): NormalizedFund | null {
   const status = fundStatus(row.status);
   if (status === 'skip') return null;
   if (!keptFirms.has(row.manager_id)) return null;
   return {
+    ...(mandate ? { mandate } : {}),
     externalId: row.fund_id,
     name: row.name.trim(),
     manager: firmRef(row.manager_id),
@@ -720,6 +757,88 @@ export function toFirmFocusList(
     if (focus) out.push(focus);
   }
   return out;
+}
+
+// --- Fund mandate (stage v3) -----------------------------------------------------
+
+/** The source's two fund-structure values. Seen in the legal-structure field
+ *  they are misfiled there, not a legal form. */
+const FUND_STRUCTURES = new Set(['commingled', 'separately managed account']);
+
+export type MandateIssue = 'labels-dropped' | 'legal-misfiled';
+export const MANDATE_ISSUES: readonly MandateIssue[] = ['labels-dropped', 'legal-misfiled'];
+export type MandateIssueCounts = Record<MandateIssue, number>;
+export const emptyMandateIssues = (): MandateIssueCounts => ({ 'labels-dropped': 0, 'legal-misfiled': 0 });
+
+/** The doubled suffix one geography carries (`Hong Kong SAR - China SAR - China`). */
+const DOUBLED_SAR = / SAR - China SAR - China$/i;
+
+/** Each element re-split on `;` (one exposure list nests a `;` list in an
+ *  element), the doubled ` SAR - China` suffix collapsed. Uncleaned. */
+function splitGeographies(raw: readonly (string | null)[] | null): string[] {
+  const out: string[] = [];
+  for (const r of raw ?? []) {
+    for (const part of (r ?? '').split(';')) out.push(part.trim().replace(DOUBLED_SAR, ' SAR - China'));
+  }
+  return out;
+}
+
+/** Geography labels: re-split, the doubled suffix repaired, then `focusLabels`. */
+export function geographyLabels(raw: readonly (string | null)[] | null): string[] {
+  return focusLabels(splitGeographies(raw));
+}
+
+/** One fund's cleaned mandate, or null when nothing usable is left. Lists go
+ *  through `focusLabels` (`Diversified` and `Global` are statements and stay);
+ *  a legal structure that is really a fund structure is dropped. */
+export function toFundMandate(
+  row: FundMandateRow,
+  snapshotDate: string,
+): { mandate: NormalizedFundMandate | null; issues: MandateIssue[] } {
+  const issues: MandateIssue[] = [];
+  let dropped = 0;
+  const take = (raw: readonly (string | null)[] | null) => {
+    const r = cleanLabels(raw);
+    dropped += r.dropped;
+    return r.labels;
+  };
+  const one = (v: string | null) => (v == null ? null : (take([v])[0] ?? null));
+
+  const detailedStrategy = one(row.detailed_strategy);
+  const industries = take(row.industries);
+  const verticals = take(row.verticals);
+  const geographicFocus = take(splitGeographies(row.geographic_focus));
+  const geographicExposure = take(splitGeographies(row.geographic_exposure));
+  const domicile = one(row.domicile);
+  const structure = one(row.structure);
+  let legalStructure = one(row.legal_structure);
+  if (legalStructure && FUND_STRUCTURES.has(legalStructure.toLowerCase())) {
+    legalStructure = null;
+    issues.push('legal-misfiled');
+  }
+  if (dropped > 0) issues.push('labels-dropped');
+
+  const empty =
+    industries.length + verticals.length + geographicFocus.length + geographicExposure.length === 0 &&
+    detailedStrategy == null &&
+    domicile == null &&
+    structure == null &&
+    legalStructure == null;
+  if (empty) return { mandate: null, issues };
+  return {
+    mandate: {
+      detailedStrategy,
+      industries,
+      verticals,
+      geographicFocus,
+      geographicExposure,
+      domicile,
+      structure,
+      legalStructure,
+      reportedOn: snapshotDate,
+    },
+    issues,
+  };
 }
 
 // --- Companies and deals ---------------------------------------------------------
