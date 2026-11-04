@@ -15,7 +15,7 @@ import { cache } from 'react';
 import {
   DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
-  PREVIEW_LIMIT,
+  DEFAULT_CONTRIBUTION_WINDOW_DAYS,
   type AcquisitionDeal,
   type Company,
   type CompanyDetailResponse,
@@ -35,7 +35,7 @@ import {
   type InvestorSummary,
   type MarketStat,
   type MarketTotals,
-  type Paginated,
+  type DirectoryPage,
   type Person,
   type PersonDetailResponse,
   type PersonListQuery,
@@ -508,6 +508,9 @@ function allowMockFallback(label: string, err: unknown): void {
   console.warn(`[data] ${label} fell back to mock data:`, err);
 }
 
+/** The offline fallback locks nothing (it is the unlocked mock data). */
+const NO_LOCKS: DirectoryPage<never>['locked'] = { filters: [], sorts: [], unlockBy: {} };
+
 /** Build a query string from defined params only. */
 function toSearchParams(query: object): string {
   const params = new URLSearchParams();
@@ -519,7 +522,7 @@ function toSearchParams(query: object): string {
 }
 
 /** Offline fallback: apply the list query to the mock array client-side. */
-function paginateFallbackCompanies(query: CompanyListQuery): Paginated<Company> {
+function paginateFallbackCompanies(query: CompanyListQuery): DirectoryPage<Company> {
   const page = query.page ?? 1;
   const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
   const needle = (query.q ?? '').trim().toLowerCase();
@@ -548,12 +551,13 @@ function paginateFallbackCompanies(query: CompanyListQuery): Paginated<Company> 
     total: list.length,
     page,
     pageSize,
+    locked: NO_LOCKS,
   };
 }
 
-export async function getCompanies(query: CompanyListQuery = {}): Promise<Paginated<Company>> {
+export async function getCompanies(query: CompanyListQuery = {}): Promise<DirectoryPage<Company>> {
   try {
-    return await apiFetch<Paginated<Company>>(`/companies${toSearchParams(query)}`, await listInit());
+    return await apiFetch<DirectoryPage<Company>>(`/companies${toSearchParams(query)}`, await listInit());
   } catch (err) {
     allowMockFallback('getCompanies', err);
     return paginateFallbackCompanies(query);
@@ -579,7 +583,13 @@ export async function getFeaturedCompanies(
     allowMockFallback('getFeaturedCompanies', err);
     return {
       items: paginateFallbackCompanies({ pageSize: limit, sort: 'raised' }).items,
-      access: { unlocked: false, signedIn: Boolean(token), unlockedUntil: null },
+      access: {
+        unlocked: false,
+        signedIn: Boolean(token),
+        unlockedUntil: null,
+        admin: false,
+        windowDays: DEFAULT_CONTRIBUTION_WINDOW_DAYS,
+      },
     };
   }
 }
@@ -636,8 +646,9 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
       access: {
         unlocked: true,
         signedIn: Boolean(token),
-        previewLimit: PREVIEW_LIMIT,
         unlockedUntil: null,
+        admin: false,
+        windowDays: DEFAULT_CONTRIBUTION_WINDOW_DAYS,
         totals: {
           rounds: company.rounds?.length ?? 0,
           people: company.people?.length ?? 0,
@@ -648,6 +659,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
         },
       },
       latestRound: null,
+      gate: { sections: {} },
       // The fallback rows have no database identity, so nothing can cite them.
       citations: [],
     };
@@ -700,7 +712,7 @@ export async function getInvestorCountries(): Promise<CountryFacet[]> {
 
 
 /** Offline fallback: apply the list query to the mock array client-side. */
-function paginateFallbackInvestors(query: InvestorListQuery): Paginated<InvestorSummary> {
+function paginateFallbackInvestors(query: InvestorListQuery): DirectoryPage<InvestorSummary> {
   const page = query.page ?? 1;
   const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
   const needle = (query.q ?? '').trim().toLowerCase();
@@ -718,14 +730,15 @@ function paginateFallbackInvestors(query: InvestorListQuery): Paginated<Investor
     total: list.length,
     page,
     pageSize,
+    locked: NO_LOCKS,
   };
 }
 
 export async function getInvestors(
   query: InvestorListQuery = {},
-): Promise<Paginated<InvestorSummary>> {
+): Promise<DirectoryPage<InvestorSummary>> {
   try {
-    return await apiFetch<Paginated<InvestorSummary>>(`/investors${toSearchParams(query)}`, await listInit());
+    return await apiFetch<DirectoryPage<InvestorSummary>>(`/investors${toSearchParams(query)}`, await listInit());
   } catch (err) {
     allowMockFallback('getInvestors', err);
     return paginateFallbackInvestors(query);
@@ -733,7 +746,7 @@ export async function getInvestors(
 }
 
 /** Offline fallback: apply the list query to the mock array client-side. */
-function paginateFallbackFunds(query: FundListQuery): Paginated<FundSummary> {
+function paginateFallbackFunds(query: FundListQuery): DirectoryPage<FundSummary> {
   const page = query.page ?? 1;
   const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
   const needle = (query.q ?? '').trim().toLowerCase();
@@ -756,12 +769,13 @@ function paginateFallbackFunds(query: FundListQuery): Paginated<FundSummary> {
     total: list.length,
     page,
     pageSize,
+    locked: NO_LOCKS,
   };
 }
 
-export async function getFunds(query: FundListQuery = {}): Promise<Paginated<FundSummary>> {
+export async function getFunds(query: FundListQuery = {}): Promise<DirectoryPage<FundSummary>> {
   try {
-    return await apiFetch<Paginated<FundSummary>>(`/funds${toSearchParams(query)}`, await listInit());
+    return await apiFetch<DirectoryPage<FundSummary>>(`/funds${toSearchParams(query)}`, await listInit());
   } catch (err) {
     allowMockFallback('getFunds', err);
     return paginateFallbackFunds(query);
@@ -796,7 +810,14 @@ export const getInvestor = cache(async function getInvestor(
       focus: null,
       focusCount: 0,
       indexable: false,
-      access: { unlocked: true, signedIn: false, unlockedUntil: null, previewLimit: PREVIEW_LIMIT },
+      access: {
+        unlocked: true,
+        signedIn: false,
+        unlockedUntil: null,
+        admin: false,
+        windowDays: DEFAULT_CONTRIBUTION_WINDOW_DAYS,
+      },
+      gate: { sections: {} },
     };
   }
 });
@@ -822,12 +843,18 @@ export const getFund = cache(async function getFund(slug: string): Promise<FundD
 // inventing some would put fabricated humans on a public page. An unreachable
 // API yields an empty directory, which reads as "nothing here yet".
 
-export async function getPeople(query: PersonListQuery = {}): Promise<Paginated<PersonSummary>> {
+export async function getPeople(query: PersonListQuery = {}): Promise<DirectoryPage<PersonSummary>> {
   try {
-    return await apiFetch<Paginated<PersonSummary>>(`/people${toSearchParams(query)}`, await listInit());
+    return await apiFetch<DirectoryPage<PersonSummary>>(`/people${toSearchParams(query)}`, await listInit());
   } catch (err) {
     console.warn('[data] getPeople failed; the directory renders empty:', err);
-    return { items: [], total: 0, page: query.page ?? 1, pageSize: query.pageSize ?? DEFAULT_PAGE_SIZE };
+    return {
+      items: [],
+      total: 0,
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? DEFAULT_PAGE_SIZE,
+      locked: NO_LOCKS,
+    };
   }
 }
 

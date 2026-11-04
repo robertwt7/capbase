@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 
 import { PageContainer, SectionHeader } from '@/components/ui';
-import { getToken } from '@/lib/auth';
 import { getFunds } from '@/lib/data';
 import { formatCount } from '@/lib/format';
 import { directoryCanonical, fundListQuery } from '@/lib/list-params';
@@ -28,12 +27,12 @@ export default async function FundsPage({
 }) {
   const sp = await searchParams;
   const query = fundListQuery(sp);
-  const [result, token] = await Promise.all([getFunds(query), getToken()]);
+  const result = await getFunds(query);
 
   return (
     <PageContainer className="pt-14 pb-20">
       <SectionHeader title="Funds" note={`${formatCount(result.total)} funds`} />
-      <FundDirectory result={result} initial={sp} signedIn={Boolean(token)} />
+      <FundDirectory result={result} initial={sp} />
     </PageContainer>
   );
 }

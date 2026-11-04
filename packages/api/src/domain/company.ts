@@ -4,6 +4,7 @@
 
 import type { CompanyTechnology, CompanyApp } from './technology';
 import type { EntityIdentifierRef } from './identifiers';
+import type { UnlockBy } from './visibility';
 
 export type Stage =
   | 'Bootstrapped' // no outside funding; human-written only — no source can state it
@@ -214,6 +215,8 @@ export interface FundingRound {
   investors: RoundInvestor[];
   /** Fields withheld from this viewer (see `Company.masked`). */
   masked?: string[];
+  /** Same contract as `Company.maskedUnlock`. */
+  maskedUnlock?: Record<string, UnlockBy>;
 }
 
 /**
@@ -331,6 +334,9 @@ export interface Company {
    *  viewer may not read. The value in the payload is blanked (null, '' or 0),
    *  so the web must check this before rendering one. */
   masked?: string[];
+  /** For each field in `masked` the gate withheld: what reveals it — signing
+   *  in, or contributing. Absent for a stub's withheld fields (sign in). */
+  maskedUnlock?: Record<string, UnlockBy>;
   /** Set (true) only for a signed-out viewer of a company that exists only
    *  because of the partner: the payload is a stub — identity, public prose and counts. */
   partnerOnly?: boolean;

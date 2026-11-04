@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import type { ViewerAccess } from '@repo/api';
+import { DEFAULT_GATE_POLICY, type ViewerAccess } from '@repo/api';
 
 import type { PrismaService } from '../prisma/prisma.service';
 import { loadCompanyTechnology } from './company-technology.reader';
@@ -54,7 +54,7 @@ function harness() {
 describe('company technology detail projection', () => {
   it('previews two rows and returns current totals and individual observation dates', async () => {
     const h = harness();
-    const result = await loadCompanyTechnology(h.prisma, company, locked, now);
+    const result = await loadCompanyTechnology(h.prisma, company, locked, DEFAULT_GATE_POLICY, now);
     expect(result.companyTechnologies.map((t) => t.id)).toEqual(['alpha', 'beta']);
     expect(result.totals).toEqual({ companyTechnologies: 3, companyApps: 0 });
     expect(result.companyTechnologies[0]).toMatchObject({ lastSeenAt: recent.toISOString(), evidence: 'Explicit generator' });
@@ -64,14 +64,14 @@ describe('company technology detail projection', () => {
 
   it('returns every eligible row when unlocked', async () => {
     const h = harness();
-    expect((await loadCompanyTechnology(h.prisma, company, unlocked, now)).companyTechnologies).toHaveLength(3);
+    expect((await loadCompanyTechnology(h.prisma, company, unlocked, DEFAULT_GATE_POLICY, now)).companyTechnologies).toHaveLength(3);
   });
 
   it('expires elected observations at read time even when a newer duplicate is fresh', async () => {
     const h = harness();
     h.observations[0]!.lastSeenAt = new Date('2026-01-01');
     h.observations.push({ ...h.observations[0]!, id: 'fresh-duplicate', scanId: 'duplicate', lastSeenAt: recent });
-    const result = await loadCompanyTechnology(h.prisma, company, unlocked, now);
+    const result = await loadCompanyTechnology(h.prisma, company, unlocked, DEFAULT_GATE_POLICY, now);
     expect(result.companyTechnologies.map((t) => t.id)).toEqual(['beta', 'gamma']);
     expect(result.totals.companyTechnologies).toBe(2);
   });
@@ -79,10 +79,10 @@ describe('company technology detail projection', () => {
   it('group-wide suppression hides the elected observation without borrowing duplicate freshness', async () => {
     const h = harness();
     h.observations.push({ ...h.observations[0]!, id: 'suppressed-duplicate', scanId: 'duplicate', suppressedAt: recent });
-    const result = await loadCompanyTechnology(h.prisma, company, unlocked, now);
+    const result = await loadCompanyTechnology(h.prisma, company, unlocked, DEFAULT_GATE_POLICY, now);
     expect(result.companyTechnologies.map((t) => t.id)).toEqual(['beta', 'gamma']);
     h.observations[3]!.suppressedAt = null;
-    expect((await loadCompanyTechnology(h.prisma, company, unlocked, now)).companyTechnologies.map((t) => t.id))
+    expect((await loadCompanyTechnology(h.prisma, company, unlocked, DEFAULT_GATE_POLICY, now)).companyTechnologies.map((t) => t.id))
       .toEqual(['alpha', 'beta', 'gamma']);
   });
 
@@ -90,20 +90,20 @@ describe('company technology detail projection', () => {
     const h = harness();
     h.observations[0]!.retiredAt = recent;
     h.observations.push({ ...h.observations[0]!, id: 'unretired-duplicate', scanId: 'duplicate', retiredAt: null });
-    expect((await loadCompanyTechnology(h.prisma, company, unlocked, now)).companyTechnologies.map((t) => t.id))
+    expect((await loadCompanyTechnology(h.prisma, company, unlocked, DEFAULT_GATE_POLICY, now)).companyTechnologies.map((t) => t.id))
       .toEqual(['beta', 'gamma']);
   });
 
   it('excludes the previous target immediately after a website change', async () => {
     const h = harness();
-    const result = await loadCompanyTechnology(h.prisma, { ...company, websiteUrl: 'https://new.example/' }, unlocked, now);
+    const result = await loadCompanyTechnology(h.prisma, { ...company, websiteUrl: 'https://new.example/' }, unlocked, DEFAULT_GATE_POLICY, now);
     expect(result.companyTechnologies).toEqual([]);
     expect(h.findObservations).not.toHaveBeenCalled();
   });
 
   it('returns empty data without any query for invalid targets', async () => {
     const h = harness();
-    const result = await loadCompanyTechnology(h.prisma, { ...company, websiteUrl: 'file:///etc/passwd' }, unlocked, now);
+    const result = await loadCompanyTechnology(h.prisma, { ...company, websiteUrl: 'file:///etc/passwd' }, unlocked, DEFAULT_GATE_POLICY, now);
     expect(result.totals).toEqual({ companyTechnologies: 0, companyApps: 0 });
     expect(h.findScan).not.toHaveBeenCalled();
     expect(h.queryRaw).not.toHaveBeenCalled();

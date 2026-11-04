@@ -1,6 +1,7 @@
 import type { FundStatus, FundStrategy, InvestorType } from './company';
 import type { GateAccess } from './contributions';
 import type { Citation } from './provenance';
+import type { GateView, UnlockBy } from './visibility';
 
 /** One private fund, with the manager it belongs to. */
 export interface Fund {
@@ -24,6 +25,8 @@ export interface Fund {
   hq?: string | null;
   /** Same contract as Company.masked. */
   masked?: string[];
+  /** Same contract as Company.maskedUnlock. */
+  maskedUnlock?: Record<string, UnlockBy>;
   /** Same contract as Company.partnerOnly. */
   partnerOnly?: boolean;
 }
@@ -114,6 +117,8 @@ export interface FundDetailResponse {
    *  a partner-only fund. */
   indexable: boolean;
   access: GateAccess;
+  /** How each section looks to this viewer. */
+  gate: GateView;
 }
 
 /** Sitemap entry for an indexable fund page. */

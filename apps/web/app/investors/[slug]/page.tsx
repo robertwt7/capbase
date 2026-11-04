@@ -1,7 +1,9 @@
+import type { GatedSection } from '@repo/api';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { AdminOnlyBadge } from '@/components/AdminOnlyBadge';
 import { Citation } from '@/components/Citation';
 import { CommitmentAmount } from '@/components/CommitmentAmount';
 import { CompanyLogo } from '@/components/CompanyLogo';
@@ -9,11 +11,12 @@ import { Identifiers } from '@/components/Identifiers';
 import { InvestorFocusSection } from '@/components/InvestorFocusSection';
 import { JsonLd } from '@/components/JsonLd';
 import { LockedSection } from '@/components/LockedSection';
-import { isMasked, Masked, SignInChip } from '@/components/Masked';
+import { isMasked, Masked, SignInChip, unlockOf, unlockOfAny } from '@/components/Masked';
 import { StubProfile } from '@/components/StubProfile';
 import { Badge, Button, EmptyState, SectionHeader } from '@/components/ui';
 import { getInvestor } from '@/lib/data';
 import { countryName, formatCount, formatUsd } from '@/lib/format';
+import { isDisabled, sectionView } from '@/lib/gate';
 import { canonical } from '@/lib/metadata';
 import { investorBreadcrumbJsonLd, investorJsonLd } from '@/lib/schema';
 
@@ -65,6 +68,16 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   const investor = await getInvestor(slug);
   if (!investor) notFound();
   const path = `/investors/${investor.slug}`;
+  const v = (key: GatedSection) => sectionView(investor, key);
+  /** A section switched off for visitors renders nothing, its count included. */
+  const on = (key: GatedSection) => !isDisabled(v(key));
+  /** The section title, tagged for an admin when visitors can't see it. */
+  const titled = (title: string, key: GatedSection) => (
+    <>
+      {title}
+      <AdminOnlyBadge view={v(key)} className="ml-3 align-middle" />
+    </>
+  );
   if (investor.partnerOnly) {
     return (
       <>
@@ -82,11 +95,13 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           next={path}
           back={{ href: '/investors', label: 'All investors' }}
           counts={[
-            { label: 'Portfolio companies', value: investor.portfolioCount },
-            { label: 'Funds named', value: investor.namedFundCount },
-            { label: 'Fund commitments', value: investor.commitmentCount },
-            { label: 'People', value: investor.peopleCount },
-          ].filter((c) => c.value > 0)}
+            { label: 'Portfolio companies', value: investor.portfolioCount, on: on('investorPortfolio') },
+            { label: 'Funds named', value: investor.namedFundCount, on: on('investorFunds') },
+            { label: 'Fund commitments', value: investor.commitmentCount, on: on('investorCommitments') },
+            { label: 'People', value: investor.peopleCount, on: on('investorPeople') },
+          ]
+            .filter((c) => c.value > 0 && c.on)
+            .map(({ label, value }) => ({ label, value }))}
         />
       </>
     );
@@ -106,7 +121,9 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
   );
   // A limited partner (a pension, an endowment) usually manages no funds of its
   // own; its funds block would only say so. Its commitments say what it does.
-  const showFunds = investor.namedFundCount > 0 || !!investor.fundCount || investor.commitmentCount === 0;
+  const showFunds =
+    on('investorFunds') &&
+    (investor.namedFundCount > 0 || !!investor.fundCount || investor.commitmentCount === 0);
 
   return (
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
@@ -145,7 +162,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
               )}
               {(masked('websiteUrl') || masked('linkedinUrl')) && (
                 <span className="flex items-center gap-2 font-mono text-xs text-graphite-500">
-                  Links <SignInChip next={path} />
+                  Links <SignInChip next={path} unlockBy={unlockOfAny(investor, ['websiteUrl', 'linkedinUrl'])} />
                 </span>
               )}
             </div>
@@ -171,27 +188,35 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
       </header>
 
       <section className="flex flex-wrap gap-x-16 gap-y-3.5 border-b border-line py-8">
-        <Metric label="Portfolio companies" value={formatCount(investor.portfolioCount)} />
-        <Metric label="Sectors" value={investor.sectors.length ? String(investor.sectors.length) : '—'} />
+        {on('investorPortfolio') && (
+          <>
+            <Metric label="Portfolio companies" value={formatCount(investor.portfolioCount)} />
+            <Metric label="Sectors" value={investor.sectors.length ? String(investor.sectors.length) : '—'} />
+          </>
+        )}
         {investor.fundCount ? <Metric label="Private funds" value={formatCount(investor.fundCount)} /> : null}
       </section>
 
-      {/* The firm's reported focus (partner data, `members`): the block when
-          the API sent it, a sign-in panel when it withheld it, else nothing —
-          no focus on record means no section, not an empty state. */}
-      {investor.focus ? (
-        <InvestorFocusSection focus={investor.focus} />
+      {/* The firm's reported focus (partner data): the block when the API sent
+          it, a lock panel when it withheld it, else nothing — no focus on
+          record (or the section switched off) means no section, not an empty
+          state. */}
+      {!on('investorFocus') ? null : investor.focus ? (
+        <InvestorFocusSection
+          focus={investor.focus}
+          badge={<AdminOnlyBadge view={v('investorFocus')} className="ml-3 align-middle" />}
+        />
       ) : investor.focusCount > 0 ? (
         <section className="border-t border-line py-8">
           <SectionHeader title="Investment focus" size="md" className="mb-5 border-b-0 pb-0" />
           <LockedSection
             access={access}
+            view={v('investorFocus')}
             next={path}
             total={investor.focusCount}
             shown={0}
             noun="focus entries"
             subject="This firm's reported investment focus"
-            tier="members"
             placeholder="terms"
           />
         </section>
@@ -200,7 +225,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
       {showFunds && (
       <section className="border-t border-line py-8">
         <SectionHeader
-          title="Funds"
+          title={titled('Funds', 'investorFunds')}
           note={
             investor.fundCount
               ? `${formatCount(investor.namedFundCount)} named of ${formatCount(investor.fundCount)} reported`
@@ -235,7 +260,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                   </span>
                   {isMasked(fund, 'strategy') ? (
                     <span className="justify-self-start">
-                      <SignInChip next={path} />
+                      <SignInChip next={path} unlockBy={unlockOf(fund, 'strategy')} />
                     </span>
                   ) : fund.strategy ? (
                     <Badge variant="pill" mono className="justify-self-start">
@@ -254,7 +279,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
                     {/* The size shown is gross assets, else capital closed —
                         withheld when that figure is the partner's. */}
                     {fund.grossAssetsUsd == null && isMasked(fund, 'closedUsd') ? (
-                      <SignInChip next={path} />
+                      <SignInChip next={path} unlockBy={unlockOf(fund, 'closedUsd')} />
                     ) : (
                       formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)
                     )}
@@ -287,6 +312,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         )}
         <LockedSection
           access={access}
+          view={v('investorFunds')}
           next={path}
           total={investor.namedFundCount}
           shown={investor.funds.length}
@@ -296,10 +322,10 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
       </section>
       )}
 
-      {investor.commitmentCount > 0 && (
+      {investor.commitmentCount > 0 && on('investorCommitments') && (
         <section className="border-t border-line py-8">
           <SectionHeader
-            title="Fund commitments"
+            title={titled('Fund commitments', 'investorCommitments')}
             note={
               investor.commitmentCount > investor.commitments.length
                 ? `${formatCount(investor.commitments.length)} largest of ${formatCount(investor.commitmentCount)}`
@@ -344,6 +370,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           </ul>
           <LockedSection
             access={access}
+            view={v('investorCommitments')}
             next={path}
             total={investor.commitmentCount}
             shown={investor.commitments.length}
@@ -353,9 +380,10 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         </section>
       )}
 
+      {on('investorPeople') && (
       <section className="border-t border-line py-8">
         <SectionHeader
-          title="People"
+          title={titled('People', 'investorPeople')}
           note={
             investor.peopleCount > investor.people.length
               ? `${formatCount(investor.people.length)} of ${formatCount(investor.peopleCount)} named`
@@ -401,6 +429,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
         )}
         <LockedSection
           access={access}
+          view={v('investorPeople')}
           next={path}
           total={investor.peopleCount}
           shown={investor.people.length}
@@ -408,10 +437,12 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           placeholder="card"
         />
       </section>
+      )}
 
+      {on('investorPortfolio') && (
       <section className="border-t border-line py-8">
         <SectionHeader
-          title="Portfolio"
+          title={titled('Portfolio', 'investorPortfolio')}
           note={
             investor.portfolioCount > investor.companies.length
               ? `${formatCount(investor.companies.length)} largest of ${formatCount(investor.portfolioCount)} known companies`
@@ -451,6 +482,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
             </ul>
             <LockedSection
               access={access}
+              view={v('investorPortfolio')}
               next={path}
               total={investor.portfolioCount}
               shown={investor.companies.length}
@@ -472,6 +504,7 @@ export default async function InvestorProfile({ params }: { params: Promise<{ sl
           </EmptyState>
         )}
       </section>
+      )}
 
       <footer className="mt-6 border-t border-line pt-7 pb-16 font-mono text-xs text-graphite-500">
         Something wrong here?{' '}

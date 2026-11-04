@@ -2,13 +2,15 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import {
   DEFAULT_PAGE_SIZE,
   PERSON_INDEX_MIN_ROLES,
-  PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
   gateLimit,
+  gateView,
   partnerVisible,
+  sectionPartnerRows,
   type Citation,
+  type DirectoryPage,
   type EntityIdentifierRef,
-  type Paginated,
+  type GatePolicy,
   type PersonDetailResponse,
   type PersonListQuery,
   type PersonSlugEntry,
@@ -18,7 +20,8 @@ import {
 } from '@repo/api';
 import { Prisma } from '@repo/db';
 
-import { limitRows, listAccess, publicRowsWhere, rowVisible, stubFor } from '../gate/gate';
+import { limitRows, listAccessFor, publicRowsWhere, rowVisible, stubFor } from '../gate/gate';
+import { GatePolicyService } from '../gate/gate-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_MERGE_HOPS, PUBLIC_PERSON, PUBLIC_ROLES } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
@@ -70,10 +73,13 @@ const INDEXABLE_PERSON_SQL = Prisma.sql`
   )
 `;
 
-/** The role sample a viewer may see on a card: no partner role signed out.
- *  `PUBLIC_ROLES` carries its own `OR`, so the provenance filter goes in an `AND`. */
-const visibleRoles = (access: ViewerAccess): Prisma.PersonRoleWhereInput =>
-  partnerVisible(access) ? PUBLIC_ROLES : { ...PUBLIC_ROLES, AND: [publicRowsWhere(access)] };
+/** The role sample a viewer may see on a card: the partner's roles only above
+ *  the roles section's partner audience. `PUBLIC_ROLES` carries its own `OR`,
+ *  so the provenance filter goes in an `AND`. */
+const visibleRoles = (access: ViewerAccess, policy: GatePolicy): Prisma.PersonRoleWhereInput =>
+  sectionPartnerRows(policy, 'personRoles', access)
+    ? PUBLIC_ROLES
+    : { ...PUBLIC_ROLES, AND: [publicRowsWhere(access, policy, 'personRoles')] };
 
 @Injectable()
 export class PeopleService {
@@ -83,6 +89,7 @@ export class PeopleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
+    private readonly gatePolicy: GatePolicyService,
   ) {}
 
   /**
@@ -96,10 +103,11 @@ export class PeopleService {
    * A signed-out viewer never sees a partner person (`identifierOnly` — the
    * partner is the only identifier-only source) or a partner role on a card.
    */
-  async findAll(query: PersonListQuery = {}, viewer?: { id: string; role: Role }): Promise<Paginated<PersonSummary>> {
+  async findAll(query: PersonListQuery = {}, viewer?: { id: string; role: Role }): Promise<DirectoryPage<PersonSummary>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
-    const access = listAccess(viewer);
+    const policy = this.gatePolicy.current();
+    const access = await listAccessFor(viewer, policy, 'person', (v) => this.users.accessFor(v));
 
     const where: Prisma.PersonWhereInput = {
       ...PUBLIC_PERSON,
@@ -122,7 +130,7 @@ export class PeopleService {
       take: pageSize,
       include: {
         roles: {
-          where: visibleRoles(access),
+          where: visibleRoles(access, policy),
           take: ROLE_SAMPLE,
           orderBy: { since: 'desc' },
           include: ROLE_INCLUDE,
@@ -153,7 +161,8 @@ export class PeopleService {
       };
     });
 
-    return { items, total, page, pageSize };
+    // People carry no configurable fact, so nothing is ever locked here.
+    return { items, total, page, pageSize, locked: { filters: [], sorts: [], unlockBy: {} } };
   }
 
   /**
@@ -191,6 +200,7 @@ export class PeopleService {
    * cover every role. A partner person is a stub for a signed-out viewer.
    */
   async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<PersonDetailResponse> {
+    const policy = this.gatePolicy.current();
     const access = await this.users.accessFor(viewer);
     // No `_count` here, as in the list: Prisma compiles a filtered relation
     // count into a GROUP BY over the whole PersonRole table before joining the
@@ -209,7 +219,7 @@ export class PeopleService {
     const organisationCount = new Set(
       all.roles.map((r) => (r.company ? `c:${r.company.slug}` : r.investor ? `i:${r.investor.slug}` : null)).filter(Boolean),
     ).size;
-    const gate = { ...access, previewLimit: PREVIEW_LIMIT };
+    const gate = gateView(policy, 'person', access);
 
     if (stubFor(found.identifierOnly, access)) {
       return {
@@ -220,7 +230,8 @@ export class PeopleService {
         identifiers: [],
         citations: [],
         indexable: false,
-        access: gate,
+        access,
+        gate,
       };
     }
 
@@ -228,8 +239,8 @@ export class PeopleService {
     // never reach the browser.
     const visibleIds = new Set(
       limitRows(
-        found.roles.filter((r) => rowVisible(r, access)),
-        gateLimit('personRoles', access),
+        found.roles.filter((r) => rowVisible(r, access, policy, 'personRoles')),
+        gateLimit('personRoles', access, policy),
       ).map((r) => r.id),
     );
     const roles = all.roles.filter((r) => visibleIds.has(r.id));
@@ -245,7 +256,8 @@ export class PeopleService {
       indexable:
         !found.identifierOnly &&
         (all.roleCount >= PERSON_INDEX_MIN_ROLES || identifiers.some((i) => i.scheme === 'WIKIDATA')),
-      access: gate,
+      access,
+      gate,
     };
   }
 

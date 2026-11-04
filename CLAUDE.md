@@ -99,18 +99,31 @@ The generated files import the unified `radix-ui` package — rewrite those to t
   an overlay — the landing page's contribution teaser. Reuse it for any other gated teaser
   rather than re-inlining a blur; there are no gradients, so the fade is the blur plus a
   translucent `bg-paper/45`.
-- **The read gate's UI** (see Backend → the read gate): **`LockedSection`**
-  (`components/LockedSection.tsx`) is what every gated section renders after its visible rows —
-  nothing when unlocked or when `total <= shown`, else up to 3 blurred **text-free**
-  `bg-graphite-200` placeholder shapes (`rung` | `card` | `row` | `terms`, `aria-hidden` + `inert`;
-  fake copy would be indexed) under a `data-nosnippet` `Card`: signed out "Sign in to see N …",
-  signed in "Showing X of Y — any approved contribution unlocks …" (plus "Your access lapsed on …"),
-  or, with `subject`, wording for a block withheld whole (fund terms, history entries). A section
-  renders its `EmptyState` **only when its total is 0** — a gated section with rows withheld is not
-  empty. **`Masked`** / **`SignInChip`** / `isMasked` (`components/Masked.tsx`) render a field the
-  API withheld (`entity.masked`, value blanked in the payload) as a mono "Sign in" chip; never
-  render a maskable value without asking (a blank total reads as "$0"); `link={false}` inside an
-  element that is already a link (directory rows). **`StubProfile`** is the signed-out page of a
+- **The read gate's UI** (see Backend → the read gate). The web never re-derives the policy: it
+  reads the per-viewer hints the API sends. **`LockedSection`** (`components/LockedSection.tsx`)
+  is what every gated section renders after its visible rows. It takes the section's `view`
+  (`sectionView(detail, key)` from `lib/gate.ts`, a lookup into `detail.gate.sections`) and
+  renders nothing when `view.unlockBy` is null or `total <= shown`, else up to 3 blurred
+  **text-free** `bg-graphite-200` placeholder shapes (`rung` | `card` | `row` | `terms`,
+  `aria-hidden` + `inert`; fake copy would be indexed) under a `data-nosnippet` `Card`. Its copy
+  keys on `view.unlockBy`: `signIn` "Sign in to see N …"; `contribute` signed out "… open to
+  contributors: sign in, then any approved contribution unlocks …"; `contribute` signed in
+  "Showing X of Y — any approved contribution unlocks …" (plus "Your access lapsed on …"), or,
+  with `subject`, wording for a block withheld whole (fund terms, mandate, focus). The window
+  number is `access.windowDays` (an admin setting — never a constant). A section whose view is
+  **`disabled`** (switched off for every visitor) is not rendered at all — no block, no stat, no
+  stub count, no funding summary line, no OG count; an admin still sees it, tagged
+  **`AdminOnlyBadge`** ("Hidden from visitors", when `view.adminOnly`). A section renders its
+  `EmptyState` **only when its total is 0** — a gated section with rows withheld is not empty.
+  **`Masked`** / **`SignInChip`** / `isMasked` (`components/Masked.tsx`) render a field the API
+  withheld (`entity.masked`, value blanked in the payload) as a mono chip: "Sign in", or
+  "Contributors" (→ `/contribute`) when `entity.maskedUnlock[field]` is `contribute` (`unlockOf`;
+  `unlockOfAny` for a node showing several fields). Never render a maskable value without asking
+  (a blank total reads as "$0"); `link={false}` inside an element that is already a link
+  (directory rows). **`LockedFilter`** (`components/LockedFilter.tsx`) stands in for a directory
+  filter whose param is in the list response's `locked.filters` ("Sign in to filter by stage" /
+  "Contributors can filter by stage", label from `FIELD_REGISTRY`); a sort in `locked.sorts` is
+  left out of the sort Select. The API ignores both, so a crafted URL shows the unfiltered page. **`StubProfile`** is the signed-out page of a
   `partnerOnly` company/investor/fund/person (name, public prose where available, counts,
   one sign-in panel). Company/firm stubs with prose are indexable and in the sitemap;
   bare stubs, funds and people stay `noindex, follow`. The API decides. JSON-LD, metadata
@@ -247,8 +260,9 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
 
 - `/` — landing: hero, market tape, a three-step **How it works** (public-record profiles,
   names, links and counts are open; rounds, deal values, fund terms and licensed data need a free
-  account (`PREVIEW_LIMIT` rows) → contribute → an approved contribution unlocks every profile for
-  `CONTRIBUTION_WINDOW_DAYS`), sector cards, and
+  account, which shows a preview → contribute → an approved contribution unlocks every profile for
+  the window, whose number streams in from the featured read's `access.windowDays` (`WindowDays`;
+  the loading shell says "a rolling window")), sector cards, and
   **Popular companies**: a fresh random draw per visit from `GET /companies/featured` (the API
   scores a 120-company pool on saves, named investors, recent rounds and a known valuation,
   caches it 15 min, and shuffles per call). A locked viewer sees the bottom half blurred
@@ -276,19 +290,20 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   dates, terms (fee, carry, hurdle, target IRR; `formatPct`), a metrics table and the largest
   LP commitments. `noindex` unless `fundIndexable` (`@repo/api` `indexing.ts`): a commitment,
   a size, a target, a final close or a fee (read off the stored row, never a partner-only fund).
-  Gated: metrics and LP commitments are `members` (`metricCount`/`commitmentCount` are public),
-  the terms block and close dates are `contributors` — the API nulls them and sets `termsHidden`
-  only when there were terms to hide, so a fund with none shows no Terms section (no false lock).
+  Gated (defaults): metrics and LP commitments are `members` (`metricCount`/`commitmentCount`
+  are public), the terms block and close dates are `contributors` — the API nulls them and sets
+  `termsHidden` only when there were terms to hide (and the block is not switched off), so a fund
+  with none shows no Terms section (no false lock).
   Between the metric strip and Terms sit **Investment mandate** (Strategy, Industries, Verticals,
   Geographic focus, Geographic exposure — label lists through `FocusLabels`) and **Fund
   structure** (Domicile, Structure, Legal structure, the header's `Fact` styling), both from
   `components/FundMandateSection.tsx`, each with a "Reported as of …" line, rows and sections
-  omitted when empty (never an `EmptyState`). The mandate is one `members` block
-  (`fundMandate`): signed out the API sends `mandate: null` + `mandateHidden` and the page shows
+  omitted when empty (never an `EmptyState`). The mandate is one block (`fundMandate`, `members`
+  by default): signed out the API sends `mandate: null` + `mandateHidden` and the page shows
   one `LockedSection`; a stub sends neither. Never in the directory, search, metadata, JSON-LD or
   OG. `make fund-mandate-fixture` (`-remove`) loads synthetic mandates on four local funds.
-  Signed out, the directory's status filter (a partner-only column) is a "Sign in to filter by
-  status" button and the API ignores `?status=`.
+  Signed out, the directory's status filter (a partner-only column) is a `LockedFilter` ("Sign in
+  to filter by status": `locked.filters` holds `status`) and the API ignores `?status=`.
 - `/investors` — investor directory (URL-driven filters, same pattern as companies). The
   default sort reads the stored `Investor.holdingCount` (see Database), and so does each card's
   portfolio count (a live count joined ~27k holdings to `Company` per page). The card's
@@ -299,8 +314,9 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   largest by capital raised; count and sectors cover the whole portfolio), the firm's people
   (capped at `INVESTOR_PEOPLE_PREVIEW`, "N of M named"), or an empty state inviting a
   contribution. Every section is also capped by the gate (`gateLimit`; LP commitments are
-  `members`) with a `LockedSection` against the public count. Between the metric strip and Funds
-  sits **Investment focus** (`components/InvestorFocusSection.tsx`, partner data, `members`): one
+  `members` by default) with a `LockedSection` against the public count. Between the metric strip
+  and Funds sits **Investment focus** (`components/InvestorFocusSection.tsx`, partner data, a
+  `members` block by default): one
   labelled `<dl>` grid per role — as a fund manager (Stages, Main strategy, Strategies,
   Industries, Verticals, Geographic exposure, Initial equity investment) and as a limited partner
   (Strategy preferences, Industries, Verticals, Geographic preferences, Typical fund commitment),
@@ -308,7 +324,8 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   shown, "Show all N", `aria-expanded`), ranges through `formatMoneyRange` ("From $1M", "Up to
   $10M"; a non-USD range in its own currency then a muted `≈ $…`), and a "Reported as of …" line
   per role. No focus on record → no section (never an `EmptyState`); withheld (`focus: null`,
-  `focusCount > 0`) → a `LockedSection` with `tier="members"` (sign-in alone opens it). Never in
+  `focusCount > 0`) → a `LockedSection` with the `investorFocus` view; switched off → nothing,
+  not even the lock. Never in
   metadata, JSON-LD, OG, directories or search. `make investor-focus-fixture` (`-remove`) loads
   synthetic focus on four local firms for checking the display. The detail read counts each relation with its own indexed `count()` — never
   Prisma's `_count`, which GROUP BYs the whole child table (~500 ms per profile at this size).
@@ -364,7 +381,7 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
   (server actions) approve/reject. The admin layout renders **no header of its own**: under
   the public `SiteHeader` it adds `AdminNav` (`app/admin/AdminNav.tsx`, Queue/Reports/Merges/
-  Users), whose pending counts come from `GET /admin/submissions/count` and `GET
+  Users/Visibility), whose pending counts come from `GET /admin/submissions/count` and `GET
   /admin/merges/count` — bare counts, never the queues themselves, since the layout runs on
   every admin page. The nav is **rendered only for an ADMIN session**, and only then are the
   counts fetched. Signed-out visitors and ordinary users on `/admin/login` see nothing
@@ -409,6 +426,21 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `<form>` (note + link inputs) whose buttons pick the server action via `formAction`:
   Resolve, Dismiss, and on an unsuppressed person Suppress & resolve. Resolving is
   bookkeeping only — companies/investors are never hidden by a report.
+- `/admin/visibility` — the read gate's settings (see Backend → the read gate), `FilterLink` tabs
+  Company / Investor / Fund / Person / Settings (`?tab=`). **Sections**: one `Card` per section
+  (`SectionPolicyRow.tsx`), Selects for Signed out / Signed in / Contributed (a block offers only
+  Hidden/Full), a Preview rows field (enabled only when a tier previews), the partner rows
+  audience, a "Search engines see: …" line (`crawlerView`: the signed-out level, plus "public rows
+  only" below a partner audience of everyone) and "Default" or "Changed by <admin> · date".
+  **Facts** (`FieldPolicyRow.tsx`): audience and partner audience (options below the audience
+  disabled), noting the directory filter/sort it also locks. **Settings** (`WindowRow.tsx`): the
+  contribution window. Every row is its own RHF + zod form (`lib/validation/visibility.ts` mirrors
+  the DTOs and runs the same `@repo/api` validators) with Save and, when overridden, Reset to
+  default; server actions in `app/admin/visibility/actions.ts` → `lib/admin.ts` → `GET /admin/
+  visibility`, `PUT|DELETE /admin/visibility/sections/:section`, `…/fields/:entity/:field`,
+  `…/settings/contribution-window` (`AdminVisibilityController`, `@Roles('ADMIN')`; unknown key →
+  404, a refused rule → 400 whose message is the form error). Each write reloads the policy
+  before it answers and logs `Gate policy: <admin> set …`.
 - `/verify-email?token=` — spends a verification link on a **button press, never on load**
   (mail scanners open every link and would burn the token). Signed-in, unverified, non-admin
   users see `components/VerifyEmailBanner.tsx` (with a "Resend link" button) on `/profile`,
@@ -556,55 +588,97 @@ front (`src/reports/`; the admin side is a separate `AdminReportsController` on
 `admin/reports`). The JWT is only
 identity: `JwtStrategy` re-reads the user, so role, ban and `tokenVersion` come from the DB.
 
-**The read gate.** Anyone can read; how much a viewer receives follows **two rules, applied in
-the API** so a hidden value never reaches the browser:
+**The read gate.** Anyone can read; how much a viewer receives is a **policy an admin can
+change** (`/admin/visibility`), applied **in the API** so a hidden value never reaches the
+browser. The policy lives in `@repo/api` `domain/visibility.ts`: the code **defaults** (which
+reproduce the original fixed gate) plus the stored **overrides** — the database holds only
+overrides, so no row means the default and "Reset to default" deletes the row. Three viewer
+tiers: `signedOut`, `signedIn` (no live contribution) and `unlocked` (an approved contribution
+inside the window, or the CONTRIBUTOR role). **Admins bypass everything** (`access.admin`).
 
-1. **By section.** `GATED_SECTIONS` (`@repo/api` `domain/contributions.ts`) gives every profile
-   section a tier, and `gateLimit(section, access)` the rows a viewer gets: `open` 2 / 2 / all,
-   `members` 0 / 2 / all, `contributors` 0 / 0 / all (signed out / signed in but locked /
-   unlocked; 2 = `PREVIEW_LIMIT`). Company rounds, diversity, acquisitions and exits, investor LP
-   commitments, investor focus (`investorFocus`, ≤ 2 role rows: signed in sees all of it),
-   the fund mandate (`fundMandate`, one block) and fund commitments/metrics are `members`; fund terms `contributors`; the rest
-   `open`. An approved contribution unlocks everything for `CONTRIBUTION_WINDOW_DAYS` (30).
-2. **By provenance.** Anything the licensed partner wrote is `members` at least, except
-   public prose: `PUBLIC_PARTNER_FIELDS` (`oneLiner`, `description`) is never masked —
-   `partnerVisible(access)` is false only for a signed-out viewer: partner **rows**
-   (`externalSource = 'PARTNER'`, and partner `RoundInvestor`s) are filtered out of every child
-   query, partner **fields** (`partnerFields`) are blanked and listed in the entity's `masked`
-   everywhere it renders (profile, directory rows, featured, search hits), and a **partner-only
-   entity** (`partnerOnly`; for people `identifierOnly`) is a stub (name, public prose and
-   counts, `partnerOnly: true`). Company/firm stubs with prose are indexable and in the
-   sitemap; bare stubs, funds and people stay `noindex`. Partner-only entities remain
-   absent from signed-out directories and `/search`. Signed-in viewers see partner data
-   inside the section limits.
+1. **By section.** `SECTION_REGISTRY` lists every profile section (its page, label, `kind:
+   rows | block` and default); `GateSectionPolicy` overrides one. A section gives each tier
+   `hidden | preview | full` (`previewRows` 1..25, default 2), never less for a tier with more
+   access; a `block` (`fundTerms`, `fundMandate`, `investorFocus`) is never previewed.
+   `gateLimit(section, access, policy)` is the row count (0 / `previewRows` / Infinity). Defaults:
+   company rounds, diversity, acquisitions, exits, investor LP commitments, fund commitments and
+   metrics `members` (hidden / preview / full); investor focus and the fund mandate `members`
+   blocks (hidden / full / full); fund terms `contributors` (hidden / hidden / full); the rest
+   `open` (preview / preview / full). A section **hidden from every tier is switched off**: no
+   rows and no derived summary (`latestRound`; no `termsHidden`/`mandateHidden` lock) for anyone
+   but an admin. An approved contribution unlocks for `contributionWindowDays` (`SiteSetting`,
+   default 30, 1..365; a change applies to every user at once).
+2. **By provenance**, three ways:
+   - **Rows** — each section's `partnerAudience` (default `signedIn`) says who receives the
+     partner's rows (`externalSource = 'PARTNER'`, partner `RoundInvestor`s, partner-corrected
+     round/term columns via `gateRowFields`).
+   - **Fields** — `FIELD_REGISTRY` lists every configurable header fact of company / investor /
+     fund (with the directory filter and sort it backs); `GateFieldPolicy` overrides one with an
+     `audience` (who sees the value at all) and a `partnerAudience` (who sees it when the partner
+     wrote it, ≥ audience). Defaults: everyone / `signedIn`, except company and firm `oneLiner`
+     and `description` (public prose: everyone / everyone). A withheld field is blanked and
+     listed in the entity's `masked`, with `maskedUnlock[field]` saying what reveals it
+     (`signIn` | `contribute`) — everywhere it renders (profile, directory rows, featured,
+     search hits, the investor page's fund cards). A field outside the registry keeps the fixed
+     partner rule (masked signed out).
+   - **Entities** (fixed, `partnerVisible`) — a **partner-only entity** (`partnerOnly`; for
+     people `identifierOnly`) is a stub signed out (name, the prose its field policy allows,
+     counts, `partnerOnly: true`) and absent from signed-out directories and `/search`.
+     Company/firm stubs with prose are indexable and in the sitemap; bare stubs, funds and
+     people stay `noindex`. `indexable`, canonical and the sitemap never depend on the policy.
 
-**Counts and market aggregates stay public**, partner rows included — a count says rows exist,
-not what they say, and it is the sign-in hook. Signed out, a directory filter on column `X` never
-matches a partner-marked `X` (`unmaskedFilters`); **sort order is an accepted trade** (sorting by
-total raised can reveal the rank, never the value, of a partner-raised total).
+**Counts and market aggregates stay public and unconfigurable**, partner rows included — a
+count says rows exist, not what they say, and it is the sign-in hook. Directory filters and sorts
+follow the field policy (`directoryFilters`): a filter on a field the viewer may not see is
+ignored and reported in the response's `locked.filters` (so is a partner-only column below its
+partner audience — fund `status` — where narrowing would match nothing); a filter on a field
+whose partner value is withheld never matches a partner-marked value; a sort on a hidden field
+falls back to the default (name; for funds, whose default is size, name too) and is reported in
+`locked.sorts`. A sort on a partner-gated value is an **accepted trade** (it can reveal the rank,
+never the value).
+
+The policy is read **synchronously** from `GatePolicyService.current()` (`apps/api/src/gate/`,
+`GateModule`, global): an in-memory snapshot loaded at boot, reloaded on every admin write and
+refreshed in the background after `GATE_POLICY_TTL_MS` (60 s, single-flight; a failed load keeps
+the last snapshot and logs; an invalid stored row is dropped and logged). So a profile (`no-store`)
+reflects a change on its next load; a signed-out directory within its 60 s ISR.
 
 Who is unlocked lives in **one** place, `UsersService.accessFor(viewer?)` → `ViewerAccess
-{ unlocked, signedIn, unlockedUntil }`: anonymous is locked and `signedIn: false`, an ADMIN or
-CONTRIBUTOR is unlocked with no query, everyone else is unlocked while their latest APPROVED row
-(any reviewable type, proposals included) is inside the window. `unlockedUntil` is still reported
-after it lapses so the UI can say when. Every profile read calls `accessFor` — company, investor,
-fund, person, history, `GET /auth/me/contributions`, `GET /companies/featured` — never a
-re-derivation. Directory lists and `/search` only apply rule 2, which needs nothing but whether
-the viewer is signed in, so they use `listAccess(viewer)` (no contribution lookup).
+{ unlocked, signedIn, unlockedUntil, admin, windowDays }`: anonymous is locked and `signedIn:
+false`, an ADMIN or CONTRIBUTOR is unlocked with no query, everyone else is unlocked while their
+latest APPROVED row (any reviewable type, proposals included) is inside the policy's window.
+`unlockedUntil` is still reported after it lapses so the UI can say when. Every profile read calls
+`accessFor` — company, investor, fund, person, history, `GET /auth/me/contributions`, `GET
+/companies/featured` — never a re-derivation. Directory lists and `/search` use
+`listAccessFor(viewer, policy, entity, accessFor)`: signed out, CONTRIBUTOR and ADMIN read off the
+role with no query (`listAccess`); a signed-in USER pays `accessFor` (nine indexed `findFirst`s)
+**only while** some field of that entity (or the card's partner rows: investor portfolio, person
+roles) has a `contributors` audience — otherwise a list stays one query.
 
-Enforcement goes through **one module, `apps/api/src/gate/`**: `publicRowsWhere(access)` (the
-child-row filter, in its `OR` form because Prisma's `{ not: 'PARTNER' }` drops NULL-source rows),
-`maskPartnerFields` / `maskFields` (with per-entity blanks for non-nullable fields), `stubFor`,
-`takeFor`/`limitRows`, `listAccess` and `unmaskedFilters`. (Company history needs none of it: it
-is CONTRIBUTOR/ADMIN only, see Routes.) Mappers stay pure: a service maps, then gates. Each
-section is capped **in the query** (`take`), so a gated row is never even loaded, and counts
-come from separate indexed `count()`s over every approved row. A new read has these to call.
+Enforcement goes through **one module, `apps/api/src/gate/`**: `publicRowsWhere(access, policy,
+section)` (the child-row filter, in its `OR` form because Prisma's `{ not: 'PARTNER' }` drops
+NULL-source rows), `rowVisible`, `visibleRoundInvestors`, `gateFields(kind, entity, partnerFields,
+access, policy, blanks)` and `gateRowFields` (with per-entity blanks for non-nullable fields),
+`maskFields`, `stubFor`, `takeFor`/`limitRows`, `listAccess`/`listAccessFor` and
+`directoryFilters`; the pure resolvers (`sectionLimit`, `sectionView`, `fieldGate`,
+`fieldUnlockBy`, the validators) are in `visibility.ts`. (Company history needs none of it: it is
+CONTRIBUTOR/ADMIN only, see Routes, and shows every revision whatever the policy hides.) Mappers
+stay pure: a service maps, then gates. Each section is capped **in the query** (`take`), so a
+gated row is never even loaded, and counts come from separate indexed `count()`s over every
+approved row. A new read has these to call. **A new section or fact must be added to the
+registry** (`SECTION_REGISTRY` / `FIELD_REGISTRY`) — a section is also a `GatedSection` type, so
+`gateLimit` won't compile without it; a field outside the registry silently keeps the fixed
+partner rule and is not configurable.
 
 Gated reads carry access **in-band**: the route sits behind `OptionalJwtAuthGuard` and the
 response includes `access` (`CompanyDetailResponse`, `InvestorDetailResponse`,
 `FundDetailResponse`, `PersonDetailResponse`, `CompanyHistoryResponse`,
 `FeaturedCompaniesResponse`), so a page needs one request and there is no standalone "am I
-unlocked?" endpoint. **Don't add a guard for this**: the guards (`JwtAuthGuard`,
+unlocked?" endpoint. The four detail responses also carry **`gate: { sections }`** — a
+`SectionView { disabled, unlockBy, adminOnly }` per section of that page, computed for this
+viewer by `sectionView` — and the four directory lists return **`DirectoryPage<T>`**
+(`Paginated<T>` plus `locked: { filters, sorts, unlockBy }`). `/v1` lists return the same
+superset. **Don't add a guard for this**: the guards (`JwtAuthGuard`,
 `OptionalJwtAuthGuard`, `RolesGuard`, `VerifiedEmailGuard`, `PendingCapGuard`, `TurnstileGuard`)
 decide whether a request may proceed, whereas the gate decides how much a request *sees*. Load
 citations only for rows already in the response, so a locked viewer never receives a citation
@@ -760,6 +834,14 @@ them from the `CREATE`/proposal revisions, else `updatedAt` (reviewer unknown), 
 contributed decided row has a `reviewedAt`; ingested rows stay null. `ChangeProposal` /
 `InvestorChangeProposal.clearedPartnerFields` records the partner marks an approval removed.
 
+**Read-gate overrides** (migration `gate_policy`, additive; config, so `prod-cleanup.sql` keeps
+them): `GateSectionPolicy` (`section` PK, `signedOut`/`signedIn`/`unlocked`, `previewRows`,
+`partnerAudience`), `GateFieldPolicy` (`entity` + `field` PK, `audience`, `partnerAudience`) and
+`SiteSetting` (`key` → JSON `value`; today `contributionWindowDays`). Plain-string columns
+validated in the API; each row carries `updatedAt` and `updatedById` (a plain id, like
+`reviewedById`). Empty tables are exactly the code defaults; deleting rows rolls a change back
+without a deploy.
+
 `ApiKey` holds personal `/v1` keys (owner, `scope`, unique `prefix`, sha256 `hash`,
 `allowedCidrs`, `lastUsedAt` debounced to once a minute, `revokedAt`); `InvestorChangeProposal`
 holds investor-firm edits (see Backend). `Company.domain` is indexed for `?domain=`.
@@ -881,7 +963,13 @@ passing, and keep `grep -rn personContact apps/api/src apps/web` to those three 
 `undefined` filter value as NO filter, so a `beforeAll` that failed before assigning the id
 deletes every row in the table (it emptied the local `User` table once). Guard with `if (id)`,
 delete by the ids you created, and avoid `/auth` calls in new suites (throttled at 20/min
-across the whole parallel run; create users with Prisma and mint keys via `ApiKeysService`).
+across the whole parallel run; create users with Prisma and mint keys via `ApiKeysService`). The read-gate policy tables are shared by every
+suite's app (suites run in parallel), so a suite never writes a policy row that another suite's
+assertions depend on: `gate-policy.e2e-spec.ts` stubs `GatePolicyService.current()` with a policy
+from `resolveGatePolicy`, and its admin-route cases touch only `companyExits` /
+`company.twitterUrl` and delete them at once. `PrismaService` disconnects on `app.close()`
+(`onModuleDestroy`) — finished suites otherwise held their pools and the parallel run exhausted
+Postgres's 100 connections.
 
 **Funds are a first-class entity too, and ingest-only.** `Fund` is one row per private fund
 with a **required** `managerId` FK to `Investor` — a fund whose manager cannot be resolved

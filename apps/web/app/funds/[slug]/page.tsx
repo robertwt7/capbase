@@ -1,16 +1,19 @@
+import type { GatedSection } from '@repo/api';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { AdminOnlyBadge } from '@/components/AdminOnlyBadge';
 import { Citation } from '@/components/Citation';
 import { CommitmentAmount } from '@/components/CommitmentAmount';
 import { Fact, FundMandateSection, FundStructureSection } from '@/components/FundMandateSection';
 import { LockedSection } from '@/components/LockedSection';
-import { isMasked, Masked, SignInChip } from '@/components/Masked';
+import { isMasked, Masked, SignInChip, unlockOfAny } from '@/components/Masked';
 import { StubProfile } from '@/components/StubProfile';
 import { Badge, EmptyState, SectionHeader } from '@/components/ui';
 import { getFund } from '@/lib/data';
 import { formatCount, formatDate, formatPct, formatPctRange, formatUsd } from '@/lib/format';
+import { isDisabled, sectionView } from '@/lib/gate';
 import { canonical } from '@/lib/metadata';
 
 const DESCRIPTION_MAX = 160;
@@ -60,6 +63,16 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
   const { fund, commitments, commitmentCount, metrics, metricCount, citations, access, termsHidden, mandate, mandateHidden } =
     detail;
   const path = `/funds/${slug}`;
+  const v = (key: GatedSection) => sectionView(detail, key);
+  /** A section switched off for visitors renders nothing, its count included. */
+  const on = (key: GatedSection) => !isDisabled(v(key));
+  /** The section title, tagged for an admin when visitors can't see it. */
+  const titled = (title: string, key: GatedSection) => (
+    <>
+      {title}
+      <AdminOnlyBadge view={v(key)} className="ml-3 align-middle" />
+    </>
+  );
   if (fund.partnerOnly) {
     return (
       <StubProfile
@@ -68,9 +81,11 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
         next={path}
         back={{ href: '/funds', label: 'All funds' }}
         counts={[
-          { label: 'LP commitments', value: commitmentCount },
-          { label: 'Metrics', value: metricCount },
-        ].filter((c) => c.value > 0)}
+          { label: 'LP commitments', value: commitmentCount, on: on('fundCommitments') },
+          { label: 'Metrics', value: metricCount, on: on('fundMetrics') },
+        ]
+          .filter((c) => c.value > 0 && c.on)
+          .map(({ label, value }) => ({ label, value }))}
       />
     );
   }
@@ -82,15 +97,21 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
     </Masked>
   );
 
-  const hasTerms = [
-    fund.managementFeePct,
-    fund.carriedInterestPct,
-    fund.hurdleRatePct,
-    fund.targetIrrNetMinPct,
-    fund.targetIrrNetMaxPct,
-    fund.targetIrrGrossMinPct,
-    fund.targetIrrGrossMaxPct,
-  ].some((v) => v != null);
+  const termFields = [
+    'managementFeePct',
+    'carriedInterestPct',
+    'hurdleRatePct',
+    'targetIrrNetMinPct',
+    'targetIrrNetMaxPct',
+    'targetIrrGrossMinPct',
+    'targetIrrGrossMaxPct',
+  ] as const;
+  // A term the partner wrote may be withheld on its own (masked) while the
+  // block is open: it still counts as a term, shown as a chip.
+  const hasTerms = termFields.some((f) => fund[f] != null || masked(f));
+  /** A term, or the chip when the API withheld it. */
+  const term = (fields: (typeof termFields)[number][], value: string): React.ReactNode =>
+    fields.some(masked) ? <SignInChip next={path} unlockBy={unlockOfAny(fund, [...fields])} /> : value;
 
   return (
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8">
@@ -118,7 +139,9 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
                 {fund.status}
               </Badge>
             )}
-            {(masked('strategy') || masked('status')) && <SignInChip next={path} />}
+            {(masked('strategy') || masked('status')) && (
+              <SignInChip next={path} unlockBy={unlockOfAny(fund, ['strategy', 'status'])} />
+            )}
           </div>
           <p className="mt-4 text-[15px] text-graphite-700">
             Managed by{' '}
@@ -156,27 +179,34 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
         {fund.grossAssetsUsd || masked('grossAssetsUsd') ? (
           <Metric label="Gross assets" value={m('grossAssetsUsd', formatUsd(fund.grossAssetsUsd ?? null))} />
         ) : null}
-        <Metric label="LP commitments" value={formatCount(commitmentCount)} />
+        {on('fundCommitments') && <Metric label="LP commitments" value={formatCount(commitmentCount)} />}
       </section>
 
-      {/* The reported mandate (members): the block whole, one sign-in panel, or
-          nothing for a fund that reports none — never an empty state. */}
-      {mandate ? (
+      {/* The reported mandate: the block whole, one lock panel, or nothing for
+          a fund that reports none (or with the section switched off) — never
+          an empty state. */}
+      {!on('fundMandate') ? null : mandate ? (
         <>
-          <FundMandateSection mandate={mandate} />
-          <FundStructureSection mandate={mandate} />
+          <FundMandateSection
+            mandate={mandate}
+            badge={<AdminOnlyBadge view={v('fundMandate')} className="ml-3 align-middle" />}
+          />
+          <FundStructureSection
+            mandate={mandate}
+            badge={<AdminOnlyBadge view={v('fundMandate')} className="ml-3 align-middle" />}
+          />
         </>
       ) : mandateHidden ? (
         <section className="border-t border-line py-8">
           <SectionHeader title="Investment mandate" size="md" className="mb-5 border-b-0 pb-0" />
           <LockedSection
             access={access}
+            view={v('fundMandate')}
             next={path}
             total={1}
             shown={0}
             noun="mandate"
             subject="This fund's reported mandate and structure"
-            tier="members"
             placeholder="terms"
             className="mt-0"
           />
@@ -189,6 +219,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
           <SectionHeader title="Terms" size="md" className="mb-5 border-b-0 pb-0" />
           <LockedSection
             access={access}
+            view={v('fundTerms')}
             next={path}
             total={1}
             shown={0}
@@ -201,26 +232,32 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
       )}
       {hasTerms && (
         <section className="py-8">
-          <SectionHeader title="Terms" size="md" className="mb-5 border-b-0 pb-0" />
+          <SectionHeader title={titled('Terms', 'fundTerms')} size="md" className="mb-5 border-b-0 pb-0" />
           <dl className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-px overflow-hidden rounded-[10px] border border-line bg-line">
-            <Term label="Management fee" value={formatPct(fund.managementFeePct)} />
-            <Term label="Carried interest" value={formatPct(fund.carriedInterestPct)} />
-            <Term label="Hurdle rate" value={formatPct(fund.hurdleRatePct)} />
+            <Term label="Management fee" value={term(['managementFeePct'], formatPct(fund.managementFeePct))} />
+            <Term label="Carried interest" value={term(['carriedInterestPct'], formatPct(fund.carriedInterestPct))} />
+            <Term label="Hurdle rate" value={term(['hurdleRatePct'], formatPct(fund.hurdleRatePct))} />
             <Term
               label="Target net IRR"
-              value={formatPctRange(fund.targetIrrNetMinPct, fund.targetIrrNetMaxPct)}
+              value={term(
+                ['targetIrrNetMinPct', 'targetIrrNetMaxPct'],
+                formatPctRange(fund.targetIrrNetMinPct, fund.targetIrrNetMaxPct),
+              )}
             />
             <Term
               label="Target gross IRR"
-              value={formatPctRange(fund.targetIrrGrossMinPct, fund.targetIrrGrossMaxPct)}
+              value={term(
+                ['targetIrrGrossMinPct', 'targetIrrGrossMaxPct'],
+                formatPctRange(fund.targetIrrGrossMinPct, fund.targetIrrGrossMaxPct),
+              )}
             />
           </dl>
         </section>
       )}
 
-      {metricCount > 0 && (
+      {metricCount > 0 && on('fundMetrics') && (
         <section className="border-t border-line py-8">
-          <SectionHeader title="Metrics" size="md" className="mb-5 border-b-0 pb-0" />
+          <SectionHeader title={titled('Metrics', 'fundMetrics')} size="md" className="mb-5 border-b-0 pb-0" />
           {metrics.length > 0 && (
           <div
             className="overflow-hidden rounded-[10px] border border-line bg-surface"
@@ -264,6 +301,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
           )}
           <LockedSection
             access={access}
+            view={v('fundMetrics')}
             next={path}
             total={metricCount}
             shown={metrics.length}
@@ -273,9 +311,10 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
         </section>
       )}
 
+      {on('fundCommitments') && (
       <section className="border-t border-line py-8">
         <SectionHeader
-          title="LP commitments"
+          title={titled('LP commitments', 'fundCommitments')}
           note={
             commitmentCount > commitments.length
               ? `${formatCount(commitments.length)} largest of ${formatCount(commitmentCount)}`
@@ -317,6 +356,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
         )}
         <LockedSection
           access={access}
+          view={v('fundCommitments')}
           next={path}
           total={commitmentCount}
           shown={commitments.length}
@@ -324,6 +364,7 @@ export default async function FundProfile({ params }: { params: Promise<{ slug: 
           placeholder="row"
         />
       </section>
+      )}
 
       <div className="pb-16" />
     </div>
@@ -341,7 +382,7 @@ function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function Term({ label, value }: { label: string; value: string }) {
+function Term({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5 bg-surface px-4 py-3.5">
       <dt className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase">{label}</dt>

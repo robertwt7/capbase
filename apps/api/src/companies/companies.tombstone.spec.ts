@@ -4,6 +4,7 @@ import type { Role } from '@repo/api';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
 import { CompaniesService } from './companies.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 /**
  * A merged-away company keeps its slug, so the old address must answer with a
@@ -45,7 +46,7 @@ function serviceWith(rows: { id: string; slug: string; mergedIntoId: string | nu
       unlockedUntil: null,
     })),
   } as unknown as UsersService;
-  return new CompaniesService(prisma, users);
+  return new CompaniesService(prisma, users, staticGatePolicy());
 }
 
 async function statusOf(fn: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {

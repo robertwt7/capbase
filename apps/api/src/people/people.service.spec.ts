@@ -6,6 +6,7 @@ import { PERSON_INDEX_MIN_ROLES, SITEMAP_PAGE_SIZE } from '@repo/api';
 import { PEOPLE_TOTAL_TTL_MS, PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 /** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
 const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
@@ -74,7 +75,7 @@ describe('PeopleService', () => {
       entityIdentifier: { findMany: identifierFindMany },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    service = new PeopleService(prisma, unlockedUsers);
+    service = new PeopleService(prisma, unlockedUsers, staticGatePolicy());
   });
 
   describe('findAll', () => {
@@ -394,7 +395,7 @@ describe('PeopleService', () => {
     const as = (access: { unlocked: boolean; signedIn: boolean }) =>
       new PeopleService((service as unknown as { prisma: PrismaService }).prisma, {
         accessFor: async () => ({ ...access, unlockedUntil: null }),
-      } as unknown as UsersService);
+      } as unknown as UsersService, staticGatePolicy());
     const roles = () => [
       role({ id: 'pr-p', externalSource: 'PARTNER', company: null, investor: { slug: 'gp', name: 'PARTNER-FIRM' } }),
       role({ id: 'pr-1', externalSource: 'SEC_EDGAR', company: { slug: 'a', name: 'A', domain: 'a.com' } }),

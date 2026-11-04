@@ -6,6 +6,7 @@ import { SITEMAP_PAGE_SIZE } from '@repo/api';
 import { CompaniesService } from './companies.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 const DAY = 86_400_000;
 
@@ -185,8 +186,9 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
     // pin the gate rule itself rather than a stub of it.
     const users = Object.assign(Object.create(UsersService.prototype) as UsersService, {
       lastContributionAt,
+      gatePolicy: staticGatePolicy(),
     });
-    service = new CompaniesService(prisma, users, new ConfigService({ TECH_DETAILS_ENABLED: String(techEnabled) }));
+    service = new CompaniesService(prisma, users, staticGatePolicy(), new ConfigService({ TECH_DETAILS_ENABLED: String(techEnabled) }));
   }
 
   beforeEach(() => build());
@@ -427,7 +429,7 @@ describe('CompaniesService.findFeatured (partner prose)', () => {
       company: { findMany },
     } as unknown as PrismaService;
     const users = { accessFor: async () => ({ unlocked: false, signedIn: false, unlockedUntil: null }) } as unknown as UsersService;
-    const result = await new CompaniesService(prisma, users).findFeatured();
+    const result = await new CompaniesService(prisma, users, staticGatePolicy()).findFeatured();
     expect(findMany).toHaveBeenCalledWith({
       where: { id: { in: ['c1'] }, moderationStatus: 'APPROVED', mergedIntoId: null },
     });
@@ -446,7 +448,7 @@ describe('CompaniesService.listSlugs (sitemap feed)', () => {
     ]);
     const prisma = { company: { findMany } } as unknown as PrismaService;
     const users = {} as unknown as UsersService;
-    const service = new CompaniesService(prisma, users);
+    const service = new CompaniesService(prisma, users, staticGatePolicy());
 
     const entries = await service.listSlugs();
 
@@ -477,7 +479,7 @@ describe('CompaniesService.createCompany (new fields persist)', () => {
       company: { create, findUnique },
     } as unknown as PrismaService;
     const users = {} as unknown as UsersService;
-    const service = new CompaniesService(prisma, users);
+    const service = new CompaniesService(prisma, users, staticGatePolicy());
 
     await service.createCompany(
       {
@@ -568,7 +570,7 @@ describe('CompaniesService.getCompanyHistory', () => {
     } as unknown as PrismaService;
     const users = { accessFor: jest.fn(async () => access) } as unknown as UsersService;
     return {
-      service: new CompaniesService(prisma, users),
+      service: new CompaniesService(prisma, users, staticGatePolicy()),
       findFirst,
       findMany,
       count,
@@ -713,7 +715,7 @@ describe('CompaniesService.findFeatured (landing shop window)', () => {
       company: { findMany },
     } as unknown as PrismaService;
     accessFor = jest.fn(async () => ({ unlocked: false, signedIn: false, unlockedUntil: null }));
-    service = new CompaniesService(prisma, { accessFor } as unknown as UsersService);
+    service = new CompaniesService(prisma, { accessFor } as unknown as UsersService, staticGatePolicy());
   });
 
   it('returns `limit` distinct companies drawn from the scored pool', async () => {
@@ -777,7 +779,7 @@ describe('CompaniesService country filter and facet', () => {
       company: { findMany, count },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    const service = new CompaniesService(prisma, {} as UsersService);
+    const service = new CompaniesService(prisma, {} as UsersService, staticGatePolicy());
 
     await service.findAllApproved({ country: 'GB' }, { id: 'u1', role: 'USER' });
 
@@ -795,7 +797,7 @@ describe('CompaniesService country filter and facet', () => {
       company: { findMany, count },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    const service = new CompaniesService(prisma, {} as UsersService);
+    const service = new CompaniesService(prisma, {} as UsersService, staticGatePolicy());
 
     const page = await service.findAllApproved({ country: 'GB', q: 'acme' });
 
@@ -823,7 +825,7 @@ describe('CompaniesService country filter and facet', () => {
       { countryCode: 'BE', _count: { _all: 189 } },
     ]);
     const prisma = { company: { groupBy } } as unknown as PrismaService;
-    const service = new CompaniesService(prisma, {} as UsersService);
+    const service = new CompaniesService(prisma, {} as UsersService, staticGatePolicy());
 
     const facets = await service.countries();
     await service.countries();
@@ -852,7 +854,7 @@ describe('CompaniesService domain lookup (public API de-duplication)', () => {
       company: { findMany, count },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    return { service: new CompaniesService(prisma, {} as UsersService), count };
+    return { service: new CompaniesService(prisma, {} as UsersService, staticGatePolicy()), count };
   };
 
   it('matches the normalised host and its legacy www. form', async () => {
@@ -882,7 +884,7 @@ describe('CompaniesService domain lookup (public API de-duplication)', () => {
     const prisma = {
       company: { create, findUnique: jest.fn(async () => null) },
     } as unknown as PrismaService;
-    await new CompaniesService(prisma, {} as UsersService).createCompany(
+    await new CompaniesService(prisma, {} as UsersService, staticGatePolicy()).createCompany(
       { name: 'Acme', domain: 'https://www.Acme.com/', industry: [], totalRaisedUsd: 0 } as never,
       'u1',
     );

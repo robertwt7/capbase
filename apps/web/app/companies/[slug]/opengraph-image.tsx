@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 
 import { getCompanyDetail } from '@/lib/data';
 import { formatUsd, foundedYear } from '@/lib/format';
+import { isDisabled, sectionView } from '@/lib/gate';
 import { loadOgFonts, OG, OG_SIZE, OgFallbackCard, OgMark, OgWordmark } from '@/lib/og';
 
 export const alt = 'Company funding profile on Capbase';
@@ -44,8 +45,10 @@ export default async function Image({ params }: { params: Promise<{ slug: string
         shown('stage') && company.stage ? company.stage.toUpperCase() : null,
         shown('founded') && foundedYear(company.founded) && `FOUNDED ${company.founded}`,
       ].filter((s): s is string => Boolean(s));
+  // A rounds section switched off for visitors says nothing, not even a count.
+  const roundsOff = isDisabled(sectionView(result, 'companyRounds'));
   const summary =
-    !stub && rounds.length === 0 && roundCount > 0
+    !stub && !roundsOff && rounds.length === 0 && roundCount > 0
       ? [`${roundCount} ${roundCount === 1 ? 'ROUND' : 'ROUNDS'}`, latest?.stage.toUpperCase()]
           .filter(Boolean)
           .join(' · ')

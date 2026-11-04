@@ -1404,3 +1404,43 @@ model CompanyRepairGroup {
 
   @@unique([runId, groupKey])
 }
+
+/// Admin overrides of the read gate's section defaults (`@repo/api`
+/// visibility.ts `SECTION_REGISTRY`). No row = the code default; "Reset to
+/// default" deletes the row. Plain-string columns validated in the API, like
+/// every other vocabulary. Config, not data: `prod-cleanup.sql` keeps it.
+model GateSectionPolicy {
+  section         String   @id
+  /// hidden | preview | full, per viewer tier
+  signedOut       String
+  signedIn        String
+  unlocked        String
+  previewRows     Int
+  /// everyone | signedIn | contributors — who sees the partner's rows
+  partnerAudience String
+  updatedAt       DateTime @updatedAt
+  /// The admin who set it (a plain id, like `reviewedById`).
+  updatedById     String
+}
+
+/// Admin overrides of a header fact's defaults (`FIELD_REGISTRY`).
+model GateFieldPolicy {
+  entity          String
+  field           String
+  /// everyone | signedIn | contributors — who sees the value at all
+  audience        String
+  /// … and who sees it when the partner wrote it (never below `audience`)
+  partnerAudience String
+  updatedAt       DateTime @updatedAt
+  updatedById     String
+
+  @@id([entity, field])
+}
+
+/// Site-wide scalar settings (key → JSON value). Today: `contributionWindowDays`.
+model SiteSetting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById String
+}

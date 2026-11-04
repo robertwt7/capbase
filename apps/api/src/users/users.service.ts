@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
-  CONTRIBUTION_WINDOW_DAYS,
   type MyContribution,
   type ReviewableType,
   type ReviewStatus,
@@ -10,10 +9,11 @@ import {
   type ViewerAccess,
 } from '@repo/api';
 
+import { GatePolicyService } from '../gate/gate-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PUBLIC_COMPANY, PUBLIC_COMPANY_RELATION } from '../prisma/public-filters';
 
-const WINDOW_MS = CONTRIBUTION_WINDOW_DAYS * 86_400_000;
+const DAY_MS = 86_400_000;
 
 // Company belongs to itself; sub-entities carry a `company` relation.
 type CompanyRef = { slug: string; name: string } | null;
@@ -25,7 +25,10 @@ type ContributionRow = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gatePolicy: GatePolicyService,
+  ) {}
 
   findByEmail(email: string) {
     return this.prisma.user.findUnique({ where: { email } });
@@ -286,18 +289,21 @@ export class UsersService {
    * read uses. Anonymous is locked; an admin or a contributor (a role only an
    * admin grants, for the people pushing data through /v1) is unlocked without
    * a query; anyone else is unlocked while their latest approved contribution is inside
-   * the rolling window. `unlockedUntil` is reported even after it lapses, so
-   * the UI can say when access expired.
+   * the rolling window (the policy's `contributionWindowDays` — a change applies to
+   * every user at once). `unlockedUntil` is reported even after it lapses, so the UI
+   * can say when access expired.
    */
   async accessFor(viewer?: { id: string; role: Role }): Promise<ViewerAccess> {
-    if (!viewer) return { unlocked: false, signedIn: false, unlockedUntil: null };
+    const windowDays = this.gatePolicy.current().contributionWindowDays;
+    const base = { admin: viewer?.role === 'ADMIN', windowDays };
+    if (!viewer) return { ...base, unlocked: false, signedIn: false, unlockedUntil: null };
     if (viewer.role === 'ADMIN' || viewer.role === 'CONTRIBUTOR') {
-      return { unlocked: true, signedIn: true, unlockedUntil: null };
+      return { ...base, unlocked: true, signedIn: true, unlockedUntil: null };
     }
     const last = await this.lastContributionAt(viewer.id);
-    if (!last) return { unlocked: false, signedIn: true, unlockedUntil: null };
-    const until = new Date(last.getTime() + WINDOW_MS);
-    return { unlocked: Date.now() < until.getTime(), signedIn: true, unlockedUntil: until.toISOString() };
+    if (!last) return { ...base, unlocked: false, signedIn: true, unlockedUntil: null };
+    const until = new Date(last.getTime() + windowDays * DAY_MS);
+    return { ...base, unlocked: Date.now() < until.getTime(), signedIn: true, unlockedUntil: until.toISOString() };
   }
 
   /** A user's own submissions across every type, any status, newest first. */

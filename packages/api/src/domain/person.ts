@@ -4,6 +4,7 @@
 // from a company profile, and keeps that name because a Citation anchors to it.
 
 import type { GateAccess } from './contributions';
+import type { GateView } from './visibility';
 import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
 
@@ -72,6 +73,8 @@ export interface PersonDetailResponse extends PersonSummary {
    *  names: the payload is a stub — name and counts. */
   partnerOnly?: boolean;
   access: GateAccess;
+  /** How each section looks to this viewer. */
+  gate: GateView;
 }
 
 /**

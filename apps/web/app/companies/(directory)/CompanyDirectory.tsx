@@ -9,11 +9,12 @@ import {
   STAGES,
   type Company,
   type CountryFacet,
-  type Paginated,
+  type DirectoryPage,
 } from '@repo/api';
 
 import { CompanyTable } from '@/components/CompanyTable';
 import { ALL_COUNTRIES, CountryFilter } from '@/components/CountryFilter';
+import { LockedFilter } from '@/components/LockedFilter';
 import {
   Button,
   EmptyState,
@@ -79,10 +80,20 @@ export function CompanyDirectory({
   countries,
   initial,
 }: {
-  result: Paginated<Company>;
+  /** `locked`: the filters and sorts the API ignores for this viewer. */
+  result: DirectoryPage<Company>;
   countries: CountryFacet[];
   initial: Record<string, string | undefined>;
 }) {
+  const { locked } = result;
+  const sorts = SORTS.filter((s) => !locked.sorts.includes(s.value));
+  /** The control, or — when the field it filters on is withheld — what opens it. */
+  const filter = (param: string, control: React.ReactNode) =>
+    locked.filters.includes(param) ? (
+      <LockedFilter entity="company" param={param} unlockBy={locked.unlockBy[param]} next="/companies" />
+    ) : (
+      control
+    );
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
@@ -159,39 +170,55 @@ export function CompanyDirectory({
           aria-label="Search companies"
           className="h-11 max-w-xs flex-1 basis-56"
         />
-        <FilterSelect
-          value={sector}
-          onChange={setSector}
-          allLabel="All sectors"
-          options={SECTORS}
-          className="w-[170px]"
-        />
-        <FilterSelect
-          value={stage}
-          onChange={setStage}
-          allLabel="All stages"
-          options={STAGES}
-          className="w-[150px]"
-        />
-        <FilterSelect
-          value={status}
-          onChange={setStatus}
-          allLabel="All statuses"
-          options={COMPANY_STATUSES}
-          className="w-[150px]"
-        />
-        <CountryFilter
-          value={country}
-          onChange={setCountry}
-          countries={countries}
-          className="w-[190px]"
-        />
-        <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
+        {filter(
+          'sector',
+          <FilterSelect
+            value={sector}
+            onChange={setSector}
+            allLabel="All sectors"
+            options={SECTORS}
+            className="w-[170px]"
+          />,
+        )}
+        {filter(
+          'stage',
+          <FilterSelect
+            value={stage}
+            onChange={setStage}
+            allLabel="All stages"
+            options={STAGES}
+            className="w-[150px]"
+          />,
+        )}
+        {filter(
+          'status',
+          <FilterSelect
+            value={status}
+            onChange={setStatus}
+            allLabel="All statuses"
+            options={COMPANY_STATUSES}
+            className="w-[150px]"
+          />,
+        )}
+        {filter(
+          'country',
+          <CountryFilter
+            value={country}
+            onChange={setCountry}
+            countries={countries}
+            className="w-[190px]"
+          />,
+        )}
+        {/* A locked sort is left out; the API answers it in name order. */}
+        <Select
+          value={sorts.some((s) => s.value === sort) ? sort : 'name'}
+          onValueChange={(v) => setSort(v as Sort)}
+        >
           <SelectTrigger className="w-[170px]" aria-label="Sort by">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {SORTS.map((s) => (
+            {sorts.map((s) => (
               <SelectItem key={s.value} value={s.value}>
                 {s.label}
               </SelectItem>

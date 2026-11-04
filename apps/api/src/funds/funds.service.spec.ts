@@ -3,6 +3,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { FundsService, fundOrderBy } from './funds.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 /** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
 const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
@@ -42,7 +43,7 @@ describe('FundsService', () => {
       citation: { findMany: citations },
       $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
     } as unknown as PrismaService;
-    service = new FundsService(prisma, unlockedUsers);
+    service = new FundsService(prisma, unlockedUsers, staticGatePolicy());
   });
 
   it('maps a row and its manager into a summary, money as numbers', async () => {
@@ -223,7 +224,7 @@ describe('FundsService', () => {
         } as unknown as PrismaService;
         return new FundsService(prisma, {
           accessFor: async () => ({ ...access, unlockedUntil: null }),
-        } as unknown as UsersService);
+        } as unknown as UsersService, staticGatePolicy());
       };
       const termsRow = (over: Record<string, unknown> = {}) => ({
         ...fundRow({ partnerFields: ['managementFeePct', 'status'], status: 'Closed' }),
@@ -346,7 +347,7 @@ describe('FundsService', () => {
           fund: { findMany: jest.fn(async () => [termsRow(MANDATE)]), count: jest.fn(async () => 1) },
           $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
         } as unknown as PrismaService;
-        const svc = new FundsService(prisma, unlockedUsers);
+        const svc = new FundsService(prisma, unlockedUsers, staticGatePolicy());
         const page = await svc.findAll({}, user);
         expect(page.items[0]).not.toHaveProperty('mandate');
         expect(JSON.stringify(page)).not.toContain('MANDATE_SENTINEL');

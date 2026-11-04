@@ -8,11 +8,12 @@ import {
   INVESTOR_TYPES,
   type CountryFacet,
   type InvestorSummary,
-  type Paginated,
+  type DirectoryPage,
 } from '@repo/api';
 
 import { ALL_COUNTRIES, CountryFilter } from '@/components/CountryFilter';
-import { isMasked, SignInChip } from '@/components/Masked';
+import { LockedFilter } from '@/components/LockedFilter';
+import { isMasked, SignInChip, unlockOf } from '@/components/Masked';
 
 import {
   Badge,
@@ -49,10 +50,19 @@ export function InvestorDirectory({
   countries,
   initial,
 }: {
-  result: Paginated<InvestorSummary>;
+  /** `locked`: the filters the API ignores for this viewer. */
+  result: DirectoryPage<InvestorSummary>;
   countries: CountryFacet[];
   initial: Record<string, string | undefined>;
 }) {
+  const { locked } = result;
+  /** The control, or — when the field it filters on is withheld — what opens it. */
+  const filter = (param: string, control: React.ReactNode) =>
+    locked.filters.includes(param) ? (
+      <LockedFilter entity="investor" param={param} unlockBy={locked.unlockBy[param]} next="/investors" />
+    ) : (
+      control
+    );
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
@@ -116,25 +126,31 @@ export function InvestorDirectory({
           aria-label="Search investors"
           className="h-11 max-w-xs flex-1 basis-56"
         />
-        <Select value={type} onValueChange={setType}>
-          <SelectTrigger className="w-[170px]" aria-label="All types">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All types</SelectItem>
-            {INVESTOR_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <CountryFilter
-          value={country}
-          onChange={setCountry}
-          countries={countries}
-          className="w-[190px]"
-        />
+        {filter(
+          'type',
+          <Select value={type} onValueChange={setType}>
+            <SelectTrigger className="w-[170px]" aria-label="All types">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All types</SelectItem>
+              {INVESTOR_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>,
+        )}
+        {filter(
+          'country',
+          <CountryFilter
+            value={country}
+            onChange={setCountry}
+            countries={countries}
+            className="w-[190px]"
+          />,
+        )}
         <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
           <SelectTrigger className="w-[170px]" aria-label="Sort by">
             <SelectValue />
@@ -191,7 +207,7 @@ export function InvestorDirectory({
                   </span>
                   {isMasked(inv, 'type') ? (
                     <span className="self-start">
-                      <SignInChip next="/investors" link={false} />
+                      <SignInChip next="/investors" link={false} unlockBy={unlockOf(inv, 'type')} />
                     </span>
                   ) : (
                     <Badge variant="pill" mono className="self-start">

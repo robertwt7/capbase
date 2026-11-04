@@ -1,36 +1,29 @@
-import { GATED_SECTIONS, PREVIEW_LIMIT, gateLimit, partnerVisible, type ViewerAccess } from './contributions';
+import { gateLimit, partnerVisible, type ViewerAccess } from './contributions';
+import { DEFAULT_GATE_POLICY } from './visibility';
 
-const signedOut: ViewerAccess = { unlocked: false, signedIn: false, unlockedUntil: null };
-const locked: ViewerAccess = { unlocked: false, signedIn: true, unlockedUntil: null };
-const unlocked: ViewerAccess = { unlocked: true, signedIn: true, unlockedUntil: null };
-
-const sectionOf = (tier: string) =>
-  (Object.keys(GATED_SECTIONS) as (keyof typeof GATED_SECTIONS)[]).find((s) => GATED_SECTIONS[s] === tier)!;
+const base = { unlockedUntil: null, admin: false, windowDays: 30 };
+const signedOut: ViewerAccess = { ...base, unlocked: false, signedIn: false };
+const locked: ViewerAccess = { ...base, unlocked: false, signedIn: true };
+const unlocked: ViewerAccess = { ...base, unlocked: true, signedIn: true };
 
 describe('gateLimit', () => {
   it.each([
-    ['open', signedOut, PREVIEW_LIMIT],
-    ['open', locked, PREVIEW_LIMIT],
-    ['open', unlocked, Infinity],
-    ['members', signedOut, 0],
-    ['members', locked, PREVIEW_LIMIT],
-    ['members', unlocked, Infinity],
-    ['contributors', signedOut, 0],
-    ['contributors', locked, 0],
-    ['contributors', unlocked, Infinity],
-  ] as const)('%s section → %o gets %d rows', (tier, access, expected) => {
-    expect(gateLimit(sectionOf(tier), access)).toBe(expected);
-  });
-
-  it('gates the money sections, not the names', () => {
-    expect(GATED_SECTIONS.companyRounds).toBe('members');
-    expect(GATED_SECTIONS.companyInvestors).toBe('open');
-    expect(GATED_SECTIONS.fundTerms).toBe('contributors');
+    ['companyInvestors', signedOut, 2],
+    ['companyInvestors', locked, 2],
+    ['companyInvestors', unlocked, Infinity],
+    ['companyRounds', signedOut, 0],
+    ['companyRounds', locked, 2],
+    ['companyRounds', unlocked, Infinity],
+    ['fundTerms', signedOut, 0],
+    ['fundTerms', locked, 0],
+    ['fundTerms', unlocked, Infinity],
+  ] as const)('%s → %o gets %d rows under the defaults', (section, access, expected) => {
+    expect(gateLimit(section, access, DEFAULT_GATE_POLICY)).toBe(expected);
   });
 });
 
 describe('partnerVisible', () => {
-  it('hides partner data from signed-out viewers only', () => {
+  it('hides partner entities from signed-out viewers only', () => {
     expect(partnerVisible(signedOut)).toBe(false);
     expect(partnerVisible(locked)).toBe(true);
     expect(partnerVisible(unlocked)).toBe(true);

@@ -72,14 +72,30 @@ function RoleBlock({ heading, rows, reportedOn }: { heading: string | null; rows
  * invested) and as a limited partner (its commitments to funds, where it
  * WANTS to commit). Renders nothing without focus.
  */
-export function InvestorFocusSection({ focus }: { focus: InvestorFocus | null }) {
+export function InvestorFocusSection({
+  focus,
+  badge,
+}: {
+  focus: InvestorFocus | null;
+  /** Beside the title (the admin's "Hidden from visitors" tag). */
+  badge?: ReactNode;
+}) {
   if (!focus || (!focus.manager && !focus.lp)) return null;
   const both = Boolean(focus.manager && focus.lp);
   const { manager, lp } = focus;
 
   return (
     <section className="border-t border-line py-8">
-      <SectionHeader title="Investment focus" size="md" className="mb-5 border-b-0 pb-0" />
+      <SectionHeader
+        title={
+          <>
+            Investment focus
+            {badge}
+          </>
+        }
+        size="md"
+        className="mb-5 border-b-0 pb-0"
+      />
       <div className="flex flex-col gap-8">
         {manager && (
           <RoleBlock

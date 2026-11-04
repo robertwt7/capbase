@@ -5,6 +5,7 @@ import { CompaniesService } from './companies.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { CreateChangeProposalDto } from './dto/create-proposal.dto';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 function dbCompany() {
   return {
@@ -39,7 +40,7 @@ function makeService() {
     company: { findUnique },
     changeProposal: { create },
   } as unknown as PrismaService;
-  const service = new CompaniesService(prisma, {} as unknown as UsersService);
+  const service = new CompaniesService(prisma, {} as unknown as UsersService, staticGatePolicy());
   return { service, create };
 }
 

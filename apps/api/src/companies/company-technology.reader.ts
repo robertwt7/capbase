@@ -4,6 +4,7 @@ import {
   WEBSITE_EXPIRY_MS,
   type CompanyApp,
   type CompanyTechnology,
+  type GatePolicy,
   type ViewerAccess,
 } from '@repo/api';
 
@@ -14,6 +15,7 @@ export async function loadCompanyTechnology(
   prisma: PrismaService,
   company: { id: string; websiteUrl: string | null; domain: string },
   access: ViewerAccess,
+  policy: GatePolicy,
   now = new Date(),
 ): Promise<{
   companyTechnologies: CompanyTechnology[];
@@ -45,7 +47,7 @@ export async function loadCompanyTechnology(
       lastSeenAt: { gt: cutoff },
       technologyId: { notIn: suppressed.map((row) => row.technologyId) },
     };
-    const limit = gateLimit('companyTechnologies', access);
+    const limit = gateLimit('companyTechnologies', access, policy);
     const [total, rows] = await Promise.all([
       prisma.companyTechnology.count({ where }),
       prisma.companyTechnology.findMany({
@@ -72,7 +74,7 @@ export async function loadCompanyTechnology(
   type AppRow = Omit<CompanyApp, 'verifiedAt' | 'lastSeenAt'> & { verifiedAt: Date; lastSeenAt: Date; total: number };
   // Election and suppression happen before freshness, counting and limits. In
   // particular a newer duplicate cannot resurrect an expired elected link.
-  const appLimit = gateLimit('companyApps', access);
+  const appLimit = gateLimit('companyApps', access, policy);
   const apps = await prisma.$queryRaw<AppRow[]>`
     WITH ranked AS (
       SELECT a.*, r.store, r."appId", r."storeUrl",

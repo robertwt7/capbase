@@ -1,4 +1,4 @@
-import { CONTRIBUTION_WINDOW_DAYS, type ViewerAccess } from '@repo/api';
+import type { SectionView, ViewerAccess } from '@repo/api';
 
 import { Button, Card } from '@/components/ui';
 import { formatCount, formatDate } from '@/lib/format';
@@ -16,17 +16,20 @@ const block = 'rounded-sm bg-graphite-200';
 
 /**
  * What a gated section shows in place of the rows the API withheld: a few
- * blurred placeholder shapes under a tier-aware call to action.
+ * blurred placeholder shapes under a call to action.
  *
- * The placeholders carry NO text — fake copy would be indexed and read as
- * data. The rows were never sent (the API gates them), so there is nothing
- * real to blur either. They are `aria-hidden` and `inert`, so focus and screen
- * readers reach only the panel, which is `data-nosnippet` so search engines
- * never quote it. Renders nothing for an unlocked viewer, or when the section
- * shows every row.
+ * The copy follows the API's hint for this section (`view.unlockBy`): what
+ * would show this viewer more — signing in, or contributing. The page never
+ * re-derives the policy. The placeholders carry NO text — fake copy would be
+ * indexed and read as data. The rows were never sent (the API gates them), so
+ * there is nothing real to blur either. They are `aria-hidden` and `inert`, so
+ * focus and screen readers reach only the panel, which is `data-nosnippet` so
+ * search engines never quote it. Renders nothing when nothing would unlock more,
+ * or when the section shows every row.
  */
 export function LockedSection({
   access,
+  view,
   total,
   shown,
   noun,
@@ -34,10 +37,11 @@ export function LockedSection({
   placeholder,
   next,
   contributeHref = '/contribute',
-  tier = 'contributors',
   className,
 }: {
   access: ViewerAccess;
+  /** The section's view (`sectionView(detail, key)`). */
+  view: SectionView | undefined;
   /** Every row of the section (the public count). */
   total: number;
   /** Rows the page rendered. */
@@ -52,17 +56,21 @@ export function LockedSection({
   next: string;
   /** Where "Contribute to unlock" leads. */
   contributeHref?: string;
-  /** The section's gate tier, for a `subject` block's signed-out copy: a
-   *  `members` block opens on sign-in alone. */
-  tier?: 'members' | 'contributors';
   className?: string;
 }) {
-  if (access.unlocked || total <= shown) return null;
+  const unlockBy = view?.disabled ? null : (view?.unlockBy ?? null);
+  if (unlockBy === null || total <= shown) return null;
   const hidden = total - shown;
+  const days = access.windowDays;
   const lapsed =
     access.unlockedUntil && new Date(access.unlockedUntil).getTime() < Date.now()
       ? access.unlockedUntil
       : null;
+  const signIn = (
+    <Button variant="primary" shape="pill" size="sm" href={`/login?next=${encodeURIComponent(next)}`}>
+      Sign in
+    </Button>
+  );
 
   return (
     <div className={cn('relative mt-3.5 min-h-[168px] overflow-hidden rounded-[10px]', className)}>
@@ -80,33 +88,11 @@ export function LockedSection({
       </div>
       <div className="absolute inset-0 flex items-center justify-center bg-paper/45 p-4">
         <Card data-nosnippet className="flex max-w-[460px] flex-col items-start gap-3 p-5">
-          {access.signedIn ? (
+          {unlockBy === 'signIn' ? (
             <>
               <p className="font-sans text-[13px] leading-relaxed text-graphite-700">
-                {lapsed && <>Your access lapsed on {formatDate(lapsed)}. </>}
                 {subject ? (
-                  <>{subject} open with any approved contribution, which unlocks every profile for{' '}
-                    {CONTRIBUTION_WINDOW_DAYS} days.</>
-                ) : (
-                  <>
-                    Showing <span className="font-mono text-ink">{formatCount(shown)}</span> of{' '}
-                    <span className="font-mono text-ink">{formatCount(total)}</span> {noun} — any
-                    approved contribution unlocks every profile for {CONTRIBUTION_WINDOW_DAYS} days.
-                  </>
-                )}
-              </p>
-              <Button variant="primary" shape="pill" size="sm" href={contributeHref}>
-                Contribute to unlock
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="font-sans text-[13px] leading-relaxed text-graphite-700">
-                {subject && tier === 'members' ? (
                   <>{subject} is open to anyone signed in.</>
-                ) : subject ? (
-                  <>{subject} open to contributors: sign in, and any approved contribution unlocks
-                    every profile for {CONTRIBUTION_WINDOW_DAYS} days.</>
                 ) : (
                   <>
                     Sign in to see <span className="font-mono text-ink">{formatCount(hidden)}</span>{' '}
@@ -115,13 +101,41 @@ export function LockedSection({
                   </>
                 )}
               </p>
-              <Button
-                variant="primary"
-                shape="pill"
-                size="sm"
-                href={`/login?next=${encodeURIComponent(next)}`}
-              >
-                Sign in
+              {signIn}
+            </>
+          ) : !access.signedIn ? (
+            <>
+              <p className="font-sans text-[13px] leading-relaxed text-graphite-700">
+                {subject ? (
+                  <>{subject} open to contributors</>
+                ) : (
+                  <>
+                    <span className="font-mono text-ink">{formatCount(hidden)}</span> {shown > 0 ? 'more ' : ''}
+                    {noun} open to contributors
+                  </>
+                )}
+                : sign in, then any approved contribution unlocks every profile for{' '}
+                <span className="font-mono text-ink">{days}</span> days.
+              </p>
+              {signIn}
+            </>
+          ) : (
+            <>
+              <p className="font-sans text-[13px] leading-relaxed text-graphite-700">
+                {lapsed && <>Your access lapsed on {formatDate(lapsed)}. </>}
+                {subject ? (
+                  <>{subject} open with any approved contribution, which unlocks every profile for{' '}
+                    {days} days.</>
+                ) : (
+                  <>
+                    Showing <span className="font-mono text-ink">{formatCount(shown)}</span> of{' '}
+                    <span className="font-mono text-ink">{formatCount(total)}</span> {noun} — any
+                    approved contribution unlocks every profile for {days} days.
+                  </>
+                )}
+              </p>
+              <Button variant="primary" shape="pill" size="sm" href={contributeHref}>
+                Contribute to unlock
               </Button>
             </>
           )}

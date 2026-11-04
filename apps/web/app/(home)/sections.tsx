@@ -1,4 +1,3 @@
-import { CONTRIBUTION_WINDOW_DAYS, PREVIEW_LIMIT } from '@repo/api';
 import Link from 'next/link';
 import { cache, type ReactNode } from 'react';
 
@@ -16,20 +15,32 @@ const HOME_FEATURED = 10;
 const HOME_OPEN = 5;
 const HOME_SECTORS = 5;
 
-const STEPS = [
-  {
-    title: 'Browse for free',
-    body: `Profiles, names, links and counts from public records are open to everyone. Rounds, deal values, fund terms and licensed data need a free account, which shows the first ${PREVIEW_LIMIT} rows of each section.`,
-  },
-  {
-    title: 'Contribute a fact',
-    body: 'Add a funding round, a founder, an investor or a correction, with a source. A moderator reviews every submission before it goes live.',
-  },
-  {
-    title: 'Unlock everything',
-    body: `Once a contribution is accepted, every profile opens in full — complete funding histories, fund terms, every investor and person — for ${CONTRIBUTION_WINDOW_DAYS} days.`,
-  },
-] as const;
+/** The steps. The window is a live admin setting, so it streams in
+ *  (`period`, from the featured read's `access.windowDays`); the loading shell
+ *  says it without the number. */
+const steps = (period: ReactNode) =>
+  [
+    {
+      title: 'Browse for free',
+      body: 'Profiles, names, links and counts from public records are open to everyone. Rounds, deal values, fund terms and licensed data need a free account, which shows a preview of each section.',
+    },
+    {
+      title: 'Contribute a fact',
+      body: 'Add a funding round, a founder, an investor or a correction, with a source. A moderator reviews every submission before it goes live.',
+    },
+    {
+      title: 'Unlock everything',
+      body: (
+        <>
+          Once a contribution is accepted, every profile opens in full — complete funding histories, fund
+          terms, every investor and person — for {period}.
+        </>
+      ),
+    },
+  ] as const;
+
+/** Without the number (loading shell, or before it streams in). */
+const WINDOW_FALLBACK = 'a rolling window';
 
 /** One featured draw per request, shared by AccessNote and PopularCompanies —
     two calls would also be two different random samples. Landing shop window:
@@ -97,8 +108,10 @@ export function StatStripSkeleton() {
 // ---------------------------------------------------------------------------
 // How it works
 
-/** `note` is the viewer's access line (streamed, `AccessNote`), or nothing. */
-export function HowItWorks({ note }: { note?: ReactNode }) {
+/** `note` is the viewer's access line (streamed, `AccessNote`), or nothing;
+ *  `period` the contribution window (streamed, `WindowDays`), or the phrase
+ *  without a number. */
+export function HowItWorks({ note, period = WINDOW_FALLBACK }: { note?: ReactNode; period?: ReactNode }) {
   return (
     <section
       id="how-it-works"
@@ -106,7 +119,7 @@ export function HowItWorks({ note }: { note?: ReactNode }) {
     >
       <SectionHeader title="How it works" note={note} />
       <ol className="mt-6 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line max-[900px]:grid-cols-1">
-        {STEPS.map((step, i) => (
+        {steps(period).map((step, i) => (
           <li key={step.title} className="flex flex-col gap-2.5 bg-surface p-[22px]">
             <span className="font-mono text-xs tracking-[0.14em] text-graphite-500">
               {String(i + 1).padStart(2, '0')}
@@ -121,6 +134,15 @@ export function HowItWorks({ note }: { note?: ReactNode }) {
     </section>
   );
 }
+
+/** "30 days" — the live contribution window, off the featured read's access. */
+export async function WindowDays() {
+  const { access } = await loadFeatured();
+  return <>{access.windowDays} days</>;
+}
+
+/** What `HowItWorks` shows while `WindowDays` streams. */
+export const WindowDaysFallback = () => <>{WINDOW_FALLBACK}</>;
 
 /** "Full access until …" for an unlocked viewer; nothing for a locked one. */
 export async function AccessNote() {
@@ -238,7 +260,10 @@ export async function PopularCompanies() {
       companies={open}
       locked={
         gated.length > 0
-          ? { companies: gated, overlay: <UnlockPanel signedIn={Boolean(token)} /> }
+          ? {
+              companies: gated,
+              overlay: <UnlockPanel signedIn={Boolean(token)} windowDays={access.windowDays} />,
+            }
           : undefined
       }
     />
@@ -258,7 +283,7 @@ export function PopularCompaniesSkeleton() {
 }
 
 /** The overlay on the blurred half of the landing company list. */
-function UnlockPanel({ signedIn }: { signedIn: boolean }) {
+function UnlockPanel({ signedIn, windowDays }: { signedIn: boolean; windowDays: number }) {
   return (
     <Card emphasis className="w-full max-w-md p-6 text-center">
       <Eyebrow>Contributor access</Eyebrow>
@@ -267,7 +292,7 @@ function UnlockPanel({ signedIn }: { signedIn: boolean }) {
       </p>
       <p className="mt-2 text-sm leading-relaxed text-graphite-700">
         One approved contribution opens every profile in full — every round, investor and person
-        — for {CONTRIBUTION_WINDOW_DAYS} days.
+        — for {windowDays} days.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-3">
         {signedIn ? (

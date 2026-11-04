@@ -3,6 +3,7 @@ import type { GateAccess } from './contributions';
 import type { Fund, InvestorCommitmentRow } from './fund';
 import type { EntityIdentifierRef } from './identifiers';
 import type { Citation } from './provenance';
+import type { GateView, UnlockBy } from './visibility';
 
 /** A first-class investor firm. Exists independently of any portfolio edge, so
  *  firms whose investments we don't know yet still have an identity and a page. */
@@ -29,6 +30,8 @@ export interface Investor {
   identifiers?: EntityIdentifierRef[];
   /** Same contract as Company.masked. */
   masked?: string[];
+  /** Same contract as Company.maskedUnlock. */
+  maskedUnlock?: Record<string, UnlockBy>;
   /** Same contract as Company.partnerOnly. */
   partnerOnly?: boolean;
 }
@@ -125,6 +128,8 @@ export interface InvestorDetailResponse extends InvestorSummary {
   /** The viewer's gate: each section above holds `gateLimit` rows, while every
    *  count (`portfolioCount`, `peopleCount`, …) covers all of them. */
   access: GateAccess;
+  /** How each section looks to this viewer. */
+  gate: GateView;
 }
 
 /** How many portfolio companies the profile lists — a large venture firm holds

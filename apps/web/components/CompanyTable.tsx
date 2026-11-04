@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { CompanyLogo } from '@/components/CompanyLogo';
-import { isMasked, SignInChip } from '@/components/Masked';
+import { isMasked, SignInChip, unlockOf } from '@/components/Masked';
 import { Badge } from '@/components/ui';
 import type { Company } from '@/lib/data';
 import { formatUsd } from '@/lib/format';
@@ -86,9 +86,12 @@ export function CompanyTable({
 }
 
 function CompanyCells({ company }: { company: Company }) {
-  // A value the API withheld from a signed-out viewer is blank in the payload:
-  // a plain chip stands in (the row is already a link, so it cannot be one).
-  const chip = <SignInChip next="/companies" link={false} />;
+  // A value the API withheld from this viewer is blank in the payload: a plain
+  // chip stands in (the row is already a link, so it cannot be one), saying
+  // what reveals it.
+  const chip = (field: string) => (
+    <SignInChip next="/companies" link={false} unlockBy={unlockOf(company, field)} />
+  );
   const masked = (field: string) => isMasked(company, field);
   return (
     <>
@@ -107,7 +110,7 @@ function CompanyCells({ company }: { company: Company }) {
         className="flex min-w-0 flex-col items-start gap-1.5 max-[700px]:flex-row max-[700px]:flex-wrap max-[700px]:items-center max-[700px]:gap-x-2 max-[700px]:gap-y-1"
         role="cell"
       >
-        {masked('stage') ? chip : <Badge variant="pill">{company.stage}</Badge>}
+        {masked('stage') ? chip('stage') : <Badge variant="pill">{company.stage}</Badge>}
         <span className="text-xs text-graphite-500">
           {masked('primarySector') ? null : (company.primarySector ?? company.industry[0])}
         </span>
@@ -117,14 +120,14 @@ function CompanyCells({ company }: { company: Company }) {
         role="cell"
       >
         <MobileLabel>Last valuation</MobileLabel>
-        {masked('lastValuationUsd') ? chip : formatUsd(company.lastValuationUsd)}
+        {masked('lastValuationUsd') ? chip('lastValuationUsd') : formatUsd(company.lastValuationUsd)}
       </span>
       <span
         className="text-right font-mono text-[15px] text-graphite-700 max-[700px]:flex max-[700px]:flex-col max-[700px]:items-start max-[700px]:gap-0.5"
         role="cell"
       >
         <MobileLabel>Total raised</MobileLabel>
-        {masked('totalRaisedUsd') ? chip : formatUsd(company.totalRaisedUsd)}
+        {masked('totalRaisedUsd') ? chip('totalRaisedUsd') : formatUsd(company.totalRaisedUsd)}
       </span>
     </>
   );

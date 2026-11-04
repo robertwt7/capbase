@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import type { PersonRole } from '@repo/api';
 
+import { AdminOnlyBadge } from '@/components/AdminOnlyBadge';
 import { Citation } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Identifiers } from '@/components/Identifiers';
@@ -13,6 +14,7 @@ import { StubProfile } from '@/components/StubProfile';
 import { Badge, SectionHeader } from '@/components/ui';
 import { getPerson } from '@/lib/data';
 import { formatCount } from '@/lib/format';
+import { isDisabled, sectionView } from '@/lib/gate';
 import { canonical } from '@/lib/metadata';
 import { personBreadcrumbJsonLd, personJsonLd } from '@/lib/schema';
 
@@ -84,6 +86,9 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
   const person = await getPerson(slug);
   if (!person) notFound();
   const path = `/people/${person.slug}`;
+  const rolesView = sectionView(person, 'personRoles');
+  // Switched off for visitors: no roles, and no counts of them either.
+  const rolesOn = !isDisabled(rolesView);
   if (person.partnerOnly) {
     return (
       <StubProfile
@@ -91,10 +96,14 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
         name={person.name}
         next={path}
         back={{ href: '/people', label: 'All people' }}
-        counts={[
-          { label: 'Roles', value: person.roleCount },
-          { label: 'Organisations', value: person.organisationCount },
-        ].filter((c) => c.value > 0)}
+        counts={
+          rolesOn
+            ? [
+                { label: 'Roles', value: person.roleCount },
+                { label: 'Organisations', value: person.organisationCount },
+              ].filter((c) => c.value > 0)
+            : []
+        }
       />
     );
   }
@@ -133,6 +142,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
         <h1 className="font-display text-[clamp(1.875rem,4vw,2.75rem)] leading-none font-extrabold tracking-[-0.035em] text-ink">
           {person.name}
         </h1>
+        {rolesOn && (
         <dl className="mt-5 flex flex-wrap gap-x-16 gap-y-3.5">
           <Metric
             label="Roles"
@@ -146,14 +156,21 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
           />
           {firstYear ? <Metric label="First recorded" value={String(firstYear)} /> : null}
         </dl>
+        )}
         {/* A Wikidata QID, when a source published one. Renders nothing when we
             hold none. */}
         <Identifiers identifiers={person.identifiers} className="mt-5" />
       </header>
 
+      {rolesOn && (
       <section className="border-t border-line py-8">
         <SectionHeader
-          title="Roles"
+          title={
+            <>
+              Roles
+              <AdminOnlyBadge view={rolesView} className="ml-3 align-middle" />
+            </>
+          }
           note={`${formatCount(person.roleCount)} across ${formatCount(person.organisationCount)} ${person.organisationCount === 1 ? 'organisation' : 'organisations'}`}
           size="md"
           className="mb-5 border-b-0 pb-0"
@@ -207,6 +224,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
         </ul>
         <LockedSection
           access={person.access}
+          view={rolesView}
           next={path}
           total={person.roleCount}
           shown={person.roles.length}
@@ -214,6 +232,7 @@ export default async function PersonProfile({ params }: { params: Promise<{ slug
           placeholder="row"
         />
       </section>
+      )}
 
       <footer className="mt-6 border-t border-line pt-7 pb-16 font-mono text-xs text-graphite-500">
         Is this about you, or is something wrong?{' '}

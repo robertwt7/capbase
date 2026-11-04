@@ -6,6 +6,7 @@ import { Prisma } from '@repo/db';
 import { InvestorsService } from './investors.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { UsersService } from '../users/users.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 /** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
 const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
@@ -139,7 +140,7 @@ describe('InvestorsService', () => {
       $transaction: transaction,
       $queryRaw: queryRaw,
     } as unknown as PrismaService;
-    service = new InvestorsService(prisma, unlockedUsers);
+    service = new InvestorsService(prisma, unlockedUsers, staticGatePolicy());
   });
 
   describe('findAll', () => {
@@ -471,7 +472,7 @@ describe('InvestorsService', () => {
     const as = (access: typeof signedOut) =>
       new InvestorsService((service as unknown as { prisma: PrismaService }).prisma, {
         accessFor: async () => access,
-      } as unknown as UsersService);
+      } as unknown as UsersService, staticGatePolicy());
 
     it('keeps partner-only firms and holdings out of signed-out lists while publishing prose', async () => {
       count.mockResolvedValue(1);
@@ -519,7 +520,8 @@ describe('InvestorsService', () => {
       // Counts are over everything.
       expect(res.portfolioCount).toBe(40);
       expect(res.commitmentCount).toBe(3);
-      expect(res.access).toMatchObject({ signedIn: false, previewLimit: 2 });
+      expect(res.access).toMatchObject({ signedIn: false });
+      expect(res.gate.sections.investorCommitments).toEqual({ disabled: false, unlockBy: 'signIn', adminOnly: false });
     });
 
     it('previews the commitments to a signed-in viewer, partner rows included', async () => {
@@ -666,7 +668,7 @@ describe('InvestorsService.proposeChange', () => {
       investor: { findFirst },
       investorChangeProposal: { create },
     } as unknown as PrismaService;
-    return { service: new InvestorsService(prisma, unlockedUsers), findFirst, create };
+    return { service: new InvestorsService(prisma, unlockedUsers, staticGatePolicy()), findFirst, create };
   }
 
   const input = (changes: Record<string, unknown>) =>

@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 
 import { getInvestor } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
+import { isDisabled, sectionView } from '@/lib/gate';
 import { loadOgFonts, OG, OG_SIZE, OgFallbackCard, OgMark, OgWordmark } from '@/lib/og';
 
 export const alt = 'Investor profile on Capbase';
@@ -26,8 +27,12 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   // and each stat appears only when it says something.
   const stats = [
     shown('assetsUsd') && investor.assetsUsd ? `${formatUsd(investor.assetsUsd)} FUND ASSETS` : null,
-    investor.portfolioCount > 0 ? `${formatCount(investor.portfolioCount)} PORTFOLIO` : null,
-    investor.namedFundCount > 0 ? `${formatCount(investor.namedFundCount)} FUNDS` : null,
+    investor.portfolioCount > 0 && !isDisabled(sectionView(investor, 'investorPortfolio'))
+      ? `${formatCount(investor.portfolioCount)} PORTFOLIO`
+      : null,
+    investor.namedFundCount > 0 && !isDisabled(sectionView(investor, 'investorFunds'))
+      ? `${formatCount(investor.namedFundCount)} FUNDS`
+      : null,
   ].filter((s): s is string => Boolean(s));
   // Form ADV legal names run long ("… Management, L.P."), hence the extra step
   // below the company card's three.

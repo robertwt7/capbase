@@ -1,10 +1,12 @@
 import Link from 'next/link';
-import type { Citation as CitationRow, Company, CompanyAccess } from '@repo/api';
+import type { Citation as CitationRow, Company, CompanyAccess, GateView } from '@repo/api';
 
+import { AdminOnlyBadge } from '@/components/AdminOnlyBadge';
 import { Citation } from '@/components/Citation';
 import { LockedSection } from '@/components/LockedSection';
 import { SectionHeader } from '@/components/ui';
 import { formatDate } from '@/lib/format';
+import { sectionView } from '@/lib/gate';
 
 const outbound = 'text-ink underline underline-offset-[3px] hover:text-graphite-700 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink';
 
@@ -12,12 +14,17 @@ const outbound = 'text-ink underline underline-offset-[3px] hover:text-graphite-
 export function CompanyTechnology({
   company,
   access,
+  gate,
   citations,
 }: {
   company: Company;
   access: CompanyAccess;
+  /** The detail response's section views (`companyTechnologies`, `companyApps`). */
+  gate: GateView | undefined;
   citations: CitationRow[];
 }) {
+  const techView = sectionView({ gate }, 'companyTechnologies');
+  const appView = sectionView({ gate }, 'companyApps');
   const technologies = company.companyTechnologies ?? [];
   const apps = company.companyApps ?? [];
   if (!technologies.length && !apps.length) return null;
@@ -34,7 +41,10 @@ export function CompanyTechnology({
       </p>
       {technologies.length > 0 && (
         <div className="mt-6">
-          <h3 className="font-display text-base font-semibold text-ink">Website technologies</h3>
+          <h3 className="font-display text-base font-semibold text-ink">
+            Website technologies
+            <AdminOnlyBadge view={techView} className="ml-3 align-middle" />
+          </h3>
           <ul className="mt-3 divide-y divide-line border-y border-line">
             {technologies.map((technology) => (
               <li key={technology.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-5 gap-y-1 py-3 max-[600px]:grid-cols-1">
@@ -54,13 +64,16 @@ export function CompanyTechnology({
               </li>
             ))}
           </ul>
-          <LockedSection {...lock} shown={technologies.length}
+          <LockedSection {...lock} view={techView} shown={technologies.length}
             total={access.totals.companyTechnologies ?? technologies.length} noun="website technologies" />
         </div>
       )}
       {apps.length > 0 && (
         <div className="mt-6">
-          <h3 className="font-display text-base font-semibold text-ink">Mobile apps</h3>
+          <h3 className="font-display text-base font-semibold text-ink">
+            Mobile apps
+            <AdminOnlyBadge view={appView} className="ml-3 align-middle" />
+          </h3>
           <p className="mt-2 text-sm text-graphite-700">Verified store links from the company&apos;s website.</p>
           <ul className="mt-3 divide-y divide-line border-y border-line">
             {apps.map((app) => (
@@ -79,7 +92,7 @@ export function CompanyTechnology({
               </li>
             ))}
           </ul>
-          <LockedSection {...lock} shown={apps.length}
+          <LockedSection {...lock} view={appView} shown={apps.length}
             total={access.totals.companyApps ?? apps.length} noun="mobile apps" />
         </div>
       )}

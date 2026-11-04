@@ -21,6 +21,7 @@ export function AdminNav({ counts }: { counts: AdminNavCounts }) {
     { href: '/admin/reports', label: 'Reports', count: counts.reports },
     { href: '/admin/merges', label: 'Merges', count: counts.merges },
     { href: '/admin/users', label: 'Users', count: 0 },
+    { href: '/admin/visibility', label: 'Visibility', count: 0 },
   ];
 
   return (

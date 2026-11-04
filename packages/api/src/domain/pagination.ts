@@ -3,12 +3,28 @@
 
 import type { CompanyStatus, FundStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
 import type { CountryCode } from './geography';
+import type { UnlockBy } from './visibility';
 
 export interface Paginated<T> {
   items: T[];
   total: number;
   page: number; // 1-based
   pageSize: number;
+}
+
+/** A directory page (`/companies`, `/investors`, `/funds`, `/people`): one page
+ *  plus the filter and sort params the API ignored for this viewer — the read
+ *  gate locks them when the field they match on is hidden — so the web can
+ *  render them as locked controls. */
+export interface DirectoryPage<T> extends Paginated<T> {
+  locked: {
+    /** Filter params (`stage`, `sector`, …) this viewer may not use. */
+    filters: string[];
+    /** Sort params (`raised`, …) this viewer may not use. */
+    sorts: string[];
+    /** What would let this viewer use each locked param. */
+    unlockBy: Record<string, UnlockBy>;
+  };
 }
 
 export const DEFAULT_PAGE_SIZE = 25;

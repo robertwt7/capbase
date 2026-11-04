@@ -2,33 +2,36 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_PAGE_SIZE,
   FUND_COMMITMENT_PREVIEW,
-  PREVIEW_LIMIT,
   SITEMAP_PAGE_SIZE,
   fundIndexable,
   gateLimit,
+  gateView,
   partnerVisible,
+  sectionPartnerRows,
+  type DirectoryPage,
   type FundDetailResponse,
   type FundListQuery,
   type FundSlugEntry,
   type FundSummary,
   type FundTerms,
-  type Paginated,
   type Role,
 } from '@repo/api';
 import type { Prisma } from '@repo/db';
 
 import {
   FUND_BLANKS,
+  directoryFilters,
+  gateFields,
+  gateRowFields,
   limitRows,
-  listAccess,
+  listAccessFor,
   maskFields,
-  maskPartnerFields,
   publicRowsWhere,
   rowVisible,
   stubFor,
   takeFor,
-  unmaskedFilters,
 } from '../gate/gate';
+import { GatePolicyService } from '../gate/gate-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PUBLIC_INVESTOR } from '../prisma/public-filters';
 import { toCitation } from '../provenance/citation.mapper';
@@ -77,8 +80,8 @@ const INDEXABLE_FUND = {
  * `moderationStatus` so it matches every sibling table and a later ticket can
  * open contributions without touching this file.
  */
-/** The terms only a contributor sees (`GATED_SECTIONS.fundTerms`). Region
- *  focus is a description, not a term, and stays with the facts. */
+/** The terms block (`fundTerms`, contributors by default). Region focus is a
+ *  description, not a term, and stays with the facts. */
 const GATED_TERMS = [
   'launchDate',
   'latestCloseDate',
@@ -92,6 +95,19 @@ const GATED_TERMS = [
   'targetIrrGrossMinPct',
   'targetIrrGrossMaxPct',
 ] as const satisfies readonly (keyof FundTerms)[];
+
+/** The stored columns behind `FundMandate`. */
+const MANDATE_COLUMNS = [
+  'detailedStrategy',
+  'industries',
+  'verticals',
+  'geographicFocus',
+  'geographicExposure',
+  'domicile',
+  'structure',
+  'legalStructure',
+  'mandateReportedOn',
+];
 
 /** Every fund fact a partner-only stub withholds: all but its name, slug and
  *  manager. */
@@ -112,34 +128,42 @@ export class FundsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
+    private readonly gatePolicy: GatePolicyService,
   ) {}
 
   /**
-   * One page of funds. A signed-out viewer never sees a partner-only fund, a
-   * partner-written value (masked) or a filter match on one; the status filter
-   * — a partner-only column — is ignored for them outright.
+   * One page of funds. A signed-out viewer never sees a partner-only fund.
+   * Every value follows its field policy: masked, a filter on it ignored or
+   * narrowed (`directoryFilters` — the status filter, a partner-only column,
+   * is ignored below its partner audience), a sort on it falling back to name.
    */
-  async findAll(query: FundListQuery = {}, viewer?: { id: string; role: Role }): Promise<Paginated<FundSummary>> {
+  async findAll(query: FundListQuery = {}, viewer?: { id: string; role: Role }): Promise<DirectoryPage<FundSummary>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
-    const access = listAccess(viewer);
-    const status = partnerVisible(access) ? query.status : undefined;
+    const policy = this.gatePolicy.current();
+    const access = await listAccessFor(viewer, policy, 'fund', (v) => this.users.accessFor(v));
+    const dir = directoryFilters(policy, 'fund', access, {
+      strategy: Boolean(query.strategy),
+      status: Boolean(query.status),
+    });
+    // The default sort (size) is itself a sort on gross assets / capital closed.
+    const sort = dir.sortLocked(query.sort ?? 'size') ? 'name' : query.sort;
 
     const where: Prisma.FundWhereInput = {
       ...PUBLIC_FUND,
       ...(partnerVisible(access) ? {} : { partnerOnly: false }),
       ...(query.q && { name: { contains: query.q, mode: 'insensitive' as const } }),
-      ...(query.strategy && { strategy: query.strategy }),
-      ...(status && { status }),
+      ...(query.strategy && dir.use('strategy') && { strategy: query.strategy }),
+      ...(query.status && dir.use('status') && { status: query.status }),
       ...(query.manager && { manager: { slug: query.manager } }),
-      AND: unmaskedFilters(access, [query.strategy && 'strategy']),
+      AND: dir.and,
     };
 
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.fund.count({ where }),
       this.prisma.fund.findMany({
         where,
-        orderBy: fundOrderBy(query.sort),
+        orderBy: fundOrderBy(sort),
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: { manager: MANAGER_SELECT },
@@ -147,10 +171,13 @@ export class FundsService {
     ]);
 
     return {
-      items: rows.map((r) => maskPartnerFields(toFundSummary(r as FundWithManager), r.partnerFields, access, FUND_BLANKS)),
+      items: rows.map((r) =>
+        gateFields('fund', toFundSummary(r as FundWithManager), r.partnerFields, access, policy, FUND_BLANKS),
+      ),
       total,
       page,
       pageSize,
+      locked: dir.locked,
     };
   }
 
@@ -158,22 +185,25 @@ export class FundsService {
    * The fund page: facts, terms, the largest commitments, metrics, and the
    * citations SEC funds carry. 404 for an unknown or unpublished fund.
    *
-   * Gated: commitments and metrics are previewed (`gateLimit`, no partner rows
-   * signed out) against counts over all of them; the terms are a contributor's
-   * (`termsHidden`); the reported mandate is one `members` block
-   * (`mandateHidden`); partner-written facts are masked signed out; a
-   * partner-only fund is a stub for a signed-out viewer.
+   * Gated by the policy: commitments and metrics are capped (`gateLimit`, the
+   * partner's rows only above the section's partner audience) against counts
+   * over all of them; the terms (`termsHidden`) and the reported mandate
+   * (`mandateHidden`) are blocks, whole or withheld; every fact follows its
+   * field policy; a partner-only fund is a stub for a signed-out viewer. A
+   * block switched off for everyone is withheld without saying so.
    */
   async findOne(slug: string, viewer?: { id: string; role: Role }): Promise<FundDetailResponse> {
+    const policy = this.gatePolicy.current();
     const access = await this.users.accessFor(viewer);
+    const limit = (section: Parameters<typeof gateLimit>[0]) => gateLimit(section, access, policy);
     const row = await this.prisma.fund.findFirst({
       where: { slug, ...PUBLIC_FUND },
       include: {
         manager: MANAGER_SELECT,
         commitments: {
-          where: { ...PUBLIC_FUND_COMMITMENTS, ...publicRowsWhere(access) },
+          where: { ...PUBLIC_FUND_COMMITMENTS, ...publicRowsWhere(access, policy, 'fundCommitments') },
           orderBy: [{ amountUsd: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
-          take: takeFor(Math.min(FUND_COMMITMENT_PREVIEW, gateLimit('fundCommitments', access))),
+          take: takeFor(Math.min(FUND_COMMITMENT_PREVIEW, limit('fundCommitments'))),
           include: { investor: { select: { slug: true, name: true, type: true } } },
         },
         // A handful per fund: loaded whole, so the count covers every one.
@@ -187,7 +217,7 @@ export class FundsService {
     const terms = toFundTerms(row);
     const mandate = toFundMandate(row);
     const commitmentCount = row._count.commitments;
-    const gate = { ...access, previewLimit: PREVIEW_LIMIT };
+    const gate = gateView(policy, 'fund', access);
     const base = {
       commitmentCount,
       metricCount: row.metrics.length,
@@ -202,7 +232,8 @@ export class FundsService {
           finalCloseDate: terms.finalCloseDate,
           managementFeePct: terms.managementFeePct,
         }),
-      access: gate,
+      access,
+      gate,
     };
 
     if (stubFor(row.partnerOnly, access)) {
@@ -220,13 +251,42 @@ export class FundsService {
       };
     }
 
+    // A switched-off block is withheld without a lock (nothing to unlock).
+    const termsWithheld = limit('fundTerms') === 0;
     const termsHidden =
-      gateLimit('fundTerms', access) === 0 && GATED_TERMS.some((t) => terms[t] !== null && terms[t] !== undefined);
-    const mandateHidden = gateLimit('fundMandate', access) === 0 && mandate !== null;
-    let fund = maskPartnerFields({ ...summary, ...terms }, row.partnerFields, access, FUND_BLANKS);
-    if (gateLimit('fundTerms', access) === 0) {
+      termsWithheld &&
+      !gate.sections.fundTerms?.disabled &&
+      GATED_TERMS.some((t) => terms[t] !== null && terms[t] !== undefined);
+    // Every mandate column is the partner's: below the block's partner
+    // audience it is withheld like a gated block (sign in reveals it).
+    const mandateWithheld =
+      limit('fundMandate') === 0 ||
+      (!sectionPartnerRows(policy, 'fundMandate', access) &&
+        MANDATE_COLUMNS.some((c) => (row.partnerFields ?? []).includes(c)));
+    const mandateHidden = mandateWithheld && !gate.sections.fundMandate?.disabled && mandate !== null;
+    // Facts follow the fund field policy; the terms, the terms section's partner audience.
+    const termSet = new Set<string>(GATED_TERMS);
+    const partnerFields = row.partnerFields ?? [];
+    let fund = gateFields(
+      'fund',
+      { ...summary, ...terms },
+      partnerFields.filter((f) => !termSet.has(f)),
+      access,
+      policy,
+      FUND_BLANKS,
+    );
+    if (termsWithheld) {
       fund = { ...fund };
       for (const t of GATED_TERMS) fund[t] = null;
+    } else {
+      fund = gateRowFields(
+        fund,
+        partnerFields.filter((f) => termSet.has(f)),
+        access,
+        policy,
+        'fundTerms',
+        FUND_BLANKS,
+      );
     }
 
     const citations = await this.prisma.citation.findMany({
@@ -239,11 +299,11 @@ export class FundsService {
       fund,
       commitments: row.commitments.map((c) => toFundCommitmentRow(c as CommitmentWithInvestor)),
       metrics: limitRows(
-        row.metrics.filter((m) => rowVisible(m, access)),
-        gateLimit('fundMetrics', access),
+        row.metrics.filter((m) => rowVisible(m, access, policy, 'fundMetrics')),
+        limit('fundMetrics'),
       ).map(toFundMetricRow),
       termsHidden,
-      mandate: mandateHidden ? null : mandate,
+      mandate: mandateWithheld ? null : mandate,
       mandateHidden,
       citations: citations.map(toCitation),
     };

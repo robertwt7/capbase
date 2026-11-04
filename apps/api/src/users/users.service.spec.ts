@@ -3,6 +3,9 @@ import { NotFoundException } from '@nestjs/common';
 
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { DEFAULT_GATE_POLICY } from '@repo/api';
+
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 const MODELS = [
   'company',
@@ -32,52 +35,71 @@ describe('UsersService.accessFor (the contribution gate)', () => {
 
   it('is locked for an anonymous viewer, without a query', async () => {
     const prisma = prismaWith({});
-    await expect(new UsersService(prisma).accessFor()).resolves.toEqual({
+    await expect(new UsersService(prisma, staticGatePolicy()).accessFor()).resolves.toEqual({
       unlocked: false,
       signedIn: false,
       unlockedUntil: null,
+      admin: false,
+      windowDays: 30,
     });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
   });
 
   it('is unlocked for an admin, without a query', async () => {
     const prisma = prismaWith({});
-    const access = await new UsersService(prisma).accessFor({ id: 'a1', role: 'ADMIN' });
-    expect(access).toEqual({ unlocked: true, signedIn: true, unlockedUntil: null });
+    const access = await new UsersService(prisma, staticGatePolicy()).accessFor({ id: 'a1', role: 'ADMIN' });
+    expect(access).toEqual({ unlocked: true, signedIn: true, unlockedUntil: null, admin: true, windowDays: 30 });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
   });
 
   it('is unlocked for a contributor, without a query', async () => {
     const prisma = prismaWith({});
-    const access = await new UsersService(prisma).accessFor({ id: 'c1', role: 'CONTRIBUTOR' });
-    expect(access).toEqual({ unlocked: true, signedIn: true, unlockedUntil: null });
+    const access = await new UsersService(prisma, staticGatePolicy()).accessFor({ id: 'c1', role: 'CONTRIBUTOR' });
+    expect(access).toEqual({ unlocked: true, signedIn: true, unlockedUntil: null, admin: false, windowDays: 30 });
     expect(findFirstOf(prisma, 'company')).not.toHaveBeenCalled();
   });
 
   it('is unlocked inside the window and reports when it lapses', async () => {
     const last = new Date(Date.now() - 5 * DAY);
-    const service = new UsersService(prismaWith({ fundingRound: { createdAt: last } }));
+    const service = new UsersService(prismaWith({ fundingRound: { createdAt: last } }), staticGatePolicy());
     await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
       unlocked: true,
       signedIn: true,
       unlockedUntil: new Date(last.getTime() + 30 * DAY).toISOString(),
+      admin: false,
+      windowDays: 30,
+    });
+  });
+
+  it('reads the window from the policy, for every user at once', async () => {
+    const last = new Date(Date.now() - 5 * DAY);
+    const policy = { ...DEFAULT_GATE_POLICY, contributionWindowDays: 3 };
+    const service = new UsersService(prismaWith({ fundingRound: { createdAt: last } }), staticGatePolicy(policy));
+    await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
+      unlocked: false,
+      signedIn: true,
+      unlockedUntil: new Date(last.getTime() + 3 * DAY).toISOString(),
+      admin: false,
+      windowDays: 3,
     });
   });
 
   it('re-locks after the window but still reports the expiry', async () => {
     const last = new Date(Date.now() - 31 * DAY);
-    const service = new UsersService(prismaWith({ personRole: { createdAt: last } }));
+    const service = new UsersService(prismaWith({ personRole: { createdAt: last } }), staticGatePolicy());
     const access = await service.accessFor({ id: 'u1', role: 'USER' });
     expect(access.unlocked).toBe(false);
     expect(access.unlockedUntil).toBe(new Date(last.getTime() + 30 * DAY).toISOString());
   });
 
   it('is locked for a user who never contributed', async () => {
-    const service = new UsersService(prismaWith({}));
+    const service = new UsersService(prismaWith({}), staticGatePolicy());
     await expect(service.accessFor({ id: 'u1', role: 'USER' })).resolves.toEqual({
       unlocked: false,
       signedIn: true,
       unlockedUntil: null,
+      admin: false,
+      windowDays: 30,
     });
   });
 });
@@ -90,36 +112,35 @@ describe('UsersService.hasRecentContribution', () => {
   });
 
   it('is true when any model has a contribution at/after the cutoff', async () => {
-    const service = new UsersService(prismaWith({ fundingRound: { createdAt: new Date() } }));
+    const service = new UsersService(prismaWith({ fundingRound: { createdAt: new Date() } }), staticGatePolicy());
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
   });
 
   it('is false when the only contribution predates the cutoff', async () => {
     const old = new Date(Date.now() - 60 * 86_400_000);
-    const service = new UsersService(prismaWith({ personRole: { createdAt: old } }));
+    const service = new UsersService(prismaWith({ personRole: { createdAt: old } }), staticGatePolicy());
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(false);
   });
 
   it('is false when the user has no contributions at all', async () => {
-    const service = new UsersService(prismaWith({}));
+    const service = new UsersService(prismaWith({}), staticGatePolicy());
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(false);
   });
 
   it('counts an edit proposal as a contribution', async () => {
-    const service = new UsersService(prismaWith({ changeProposal: { createdAt: new Date() } }));
+    const service = new UsersService(prismaWith({ changeProposal: { createdAt: new Date() } }), staticGatePolicy());
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
   });
 
   it('counts an approved investor edit like any other contribution', async () => {
     const service = new UsersService(
-      prismaWith({ investorChangeProposal: { createdAt: new Date() } }),
-    );
+      prismaWith({ investorChangeProposal: { createdAt: new Date() } }), staticGatePolicy(),);
     await expect(service.hasRecentContribution('u1', since)).resolves.toBe(true);
   });
 
   it('only counts APPROVED contributions, on every model', async () => {
     const prisma = prismaWith({});
-    await new UsersService(prisma).hasRecentContribution('u1', since);
+    await new UsersService(prisma, staticGatePolicy()).hasRecentContribution('u1', since);
     for (const m of MODELS) {
       const { findFirst } = (
         prisma as unknown as Record<(typeof MODELS)[number], { findFirst: jest.Mock }>
@@ -157,7 +178,7 @@ function watchlistPrisma(overrides: {
       count: jest.fn<(args: unknown) => Promise<number>>(async () => overrides.savedCount ?? 0),
     },
   };
-  return { prisma, service: new UsersService(prisma as unknown as PrismaService) };
+  return { prisma, service: new UsersService(prisma as unknown as PrismaService, staticGatePolicy()) };
 }
 
 describe('UsersService saved companies', () => {

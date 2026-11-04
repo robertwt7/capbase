@@ -1,76 +1,35 @@
 // Shapes for contribution-gated reads and the user's own contribution history.
 //
 // Two rules decide what a viewer receives, both applied in the API so a hidden
-// value never reaches the browser:
-//   1. By section — every profile section has a tier (`GATED_SECTIONS`):
-//      `open` previews to everyone, `members` previews only to a signed-in
-//      viewer, `contributors` shows nothing until unlocked. Full access is earned
-//      by an approved contribution and kept alive by a rolling window.
-//   2. By provenance — anything the licensed partner wrote is `members` at
-//      least (`partnerVisible`), except public company/firm prose (`oneLiner`,
-//      `description`), which every viewer receives.
+// value never reaches the browser, both configurable by an admin (the policy
+// and its defaults live in `visibility.ts`):
+//   1. By section — every profile section gives each tier (signed out / signed
+//      in / unlocked) `hidden`, a `preview` of N rows, or `full`
+//      (`SECTION_REGISTRY`, `gateLimit`). Full access is earned by an approved
+//      contribution and kept alive by a rolling window.
+//   2. By provenance — the partner's rows follow their section's
+//      `partnerAudience`, the partner's values each field's (`FIELD_REGISTRY`);
+//      partner-only ENTITIES are fixed: a stub signed out (`partnerVisible`).
 
 import type { Company, ReviewStatus } from './company';
 import type { ReviewableType } from './moderation';
 import type { Citation } from './provenance';
+import { sectionLimit, type GatedSection, type GatePolicy, type GateView } from './visibility';
 
-// Rows shown per detail section to a locked (non-contributing) viewer.
-export const PREVIEW_LIMIT = 2;
-// Rolling window: a contribution keeps full access alive for this many days.
-export const CONTRIBUTION_WINDOW_DAYS = 30;
-
-export type GateTier = 'open' | 'members' | 'contributors';
-
-/**
- * The tier of every gated profile section. Signed out / signed in but locked /
- * unlocked see: `open` 2 / 2 / all, `members` 0 / 2 / all, `contributors`
- * 0 / 0 / all. Counts are never gated — a count says rows exist, not what they
- * say, and it is what invites the sign-in.
- */
-export const GATED_SECTIONS = {
-  companyRounds: 'members',
-  companyDiversity: 'members',
-  companyAcquisitions: 'members',
-  companyExits: 'members',
-  companyInvestors: 'open',
-  companyPeople: 'open',
-  companyTechnologies: 'open',
-  companyApps: 'open',
-  investorPortfolio: 'open',
-  investorPeople: 'open',
-  investorFunds: 'open',
-  investorCommitments: 'members',
-  // A block of ≤ 2 role rows (manager, LP): signed in sees all of it.
-  investorFocus: 'members',
-  fundCommitments: 'members',
-  fundMetrics: 'members',
-  fundTerms: 'contributors',
-  // One block: signed in sees all of it.
-  fundMandate: 'members',
-  personRoles: 'open',
-} as const satisfies Record<string, GateTier>;
-
-export type GatedSection = keyof typeof GATED_SECTIONS;
-
-/** Rows of `section` this viewer may receive. Infinity when unlocked. */
-export function gateLimit(section: GatedSection, access: ViewerAccess): number {
-  if (access.unlocked) return Infinity;
-  const tier: GateTier = GATED_SECTIONS[section];
-  if (tier === 'contributors') return 0;
-  if (tier === 'members' && !access.signedIn) return 0;
-  return PREVIEW_LIMIT;
+/** Rows of `section` this viewer may receive under `policy`. Infinity = all. */
+export function gateLimit(section: GatedSection, access: ViewerAccess, policy: GatePolicy): number {
+  return sectionLimit(policy, section, access);
 }
 
-/** Non-prose partner data is `members` at minimum: hidden signed out. */
+/** The ENTITY-level partner rule, fixed: a partner-only company, firm, fund or
+ *  person is a stub signed out and absent from signed-out directories, search
+ *  and the sitemap. (Partner rows and values follow the policy instead.) */
 export const partnerVisible = (access: ViewerAccess): boolean => access.signedIn || access.unlocked;
 
-/** `ViewerAccess` plus the preview size, for a read that truncates sections. */
-export interface GateAccess extends ViewerAccess {
-  /** Rows shown per previewed section when locked. */
-  previewLimit: number;
-}
+/** The access a detail read carries. */
+export type GateAccess = ViewerAccess;
 
-export interface CompanyAccess extends GateAccess {
+export interface CompanyAccess extends ViewerAccess {
   /** Full section counts — every approved row, partner rows included — so a
    *  locked UI can say "2 of N". */
   totals: {
@@ -94,6 +53,10 @@ export interface ViewerAccess {
   signedIn: boolean;
   /** ISO timestamp full access expires (latest contribution + window), or null. */
   unlockedUntil: string | null;
+  /** An admin: every section and value, whatever the policy. */
+  admin: boolean;
+  /** Days an approved contribution keeps a user unlocked (the live setting). */
+  windowDays: number;
 }
 
 /** `/companies/featured`: the landing sample, plus the viewer's gate state so
@@ -107,12 +70,14 @@ export interface CompanyDetailResponse {
   /** Every public-record company, plus partner-only companies with non-empty
    *  oneLiner or description. The sitemap uses the same rule. */
   indexable: boolean;
-  /** Sections are already truncated per `gateLimit` when access is locked. */
+  /** Sections are already truncated per `gateLimit`. */
   company: Company;
   access: CompanyAccess;
   /** The funding summary line everyone may read: the latest round this viewer
    *  may see the name and date of (a public one, for a signed-out viewer). */
   latestRound: { stage: string; date: string } | null;
+  /** How each section looks to this viewer (`visibility.ts` `sectionView`). */
+  gate: GateView;
   /** Every citation attaching to the company row or a child row *in this
       response*, flat. The client indexes by `entityId` + `field`. Truncated
       rows contribute none, so a locked viewer learns nothing extra from them. */

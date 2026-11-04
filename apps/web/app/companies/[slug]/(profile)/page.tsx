@@ -1,8 +1,9 @@
-import { canViewCompanyHistory } from '@repo/api';
+import { canViewCompanyHistory, type GatedSection, type SectionView } from '@repo/api';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { AdminOnlyBadge } from '@/components/AdminOnlyBadge';
 import { Citation, companyEntityId } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { CompanyTechnology } from '@/components/CompanyTechnology';
@@ -10,12 +11,13 @@ import { FundingLadder } from '@/components/FundingLadder';
 import { Identifiers } from '@/components/Identifiers';
 import { JsonLd } from '@/components/JsonLd';
 import { LockedSection } from '@/components/LockedSection';
-import { isMasked, Masked, SignInChip } from '@/components/Masked';
+import { isMasked, Masked, SignInChip, unlockOf, unlockOfAny } from '@/components/Masked';
 import { SaveCompanyButton } from '@/components/SaveCompanyButton';
 import { StubProfile } from '@/components/StubProfile';
 import { Badge, Button, EmptyState, SectionHeader, Stat } from '@/components/ui';
 import { getSession } from '@/lib/auth';
 import { getCompanyDetail } from '@/lib/data';
+import { isDisabled, sectionView } from '@/lib/gate';
 import {
   countryName,
   formatCount,
@@ -91,6 +93,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
   const { company, access, citations, latestRound } = result;
   const path = `/companies/${company.slug}`;
+  const v = (key: GatedSection) => sectionView(result, key);
   if (company.partnerOnly) {
     return (
       <>
@@ -109,10 +112,12 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           next={path}
           back={{ href: '/companies', label: 'All companies' }}
           counts={[
-            { label: 'Funding rounds', value: access.totals.rounds },
-            { label: 'Investors', value: access.totals.investors },
-            { label: 'People', value: access.totals.people },
-          ].filter((c) => c.value > 0)}
+            { label: 'Funding rounds', value: access.totals.rounds, view: v('companyRounds') },
+            { label: 'Investors', value: access.totals.investors, view: v('companyInvestors') },
+            { label: 'People', value: access.totals.people, view: v('companyPeople') },
+          ]
+            .filter((c) => c.value > 0 && !isDisabled(c.view))
+            .map(({ label, value }) => ({ label, value }))}
         />
       </>
     );
@@ -204,7 +209,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               ))}
               {masked('industry') && (
                 <span className="flex items-center gap-2 font-mono text-xs text-graphite-500">
-                  Industry <SignInChip next={path} />
+                  Industry <SignInChip next={path} unlockBy={unlockOf(company, 'industry')} />
                 </span>
               )}
             </div>
@@ -213,16 +218,21 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
             company.linkedinUrl ||
             company.twitterUrl ||
             masked('websiteUrl') ||
-            masked('linkedinUrl')) && (
+            masked('linkedinUrl') ||
+            masked('twitterUrl')) && (
             <div className="mt-4 flex flex-wrap items-center gap-4">
               {company.websiteUrl && <OutboundLink href={company.websiteUrl}>Website</OutboundLink>}
               {company.linkedinUrl && (
                 <OutboundLink href={company.linkedinUrl}>LinkedIn</OutboundLink>
               )}
               {company.twitterUrl && <OutboundLink href={company.twitterUrl}>Twitter</OutboundLink>}
-              {(masked('websiteUrl') || masked('linkedinUrl')) && (
+              {(masked('websiteUrl') || masked('linkedinUrl') || masked('twitterUrl')) && (
                 <span className="flex items-center gap-2 font-mono text-xs text-graphite-500">
-                  Links <SignInChip next={path} />
+                  Links{' '}
+                  <SignInChip
+                    next={path}
+                    unlockBy={unlockOfAny(company, ['websiteUrl', 'linkedinUrl', 'twitterUrl'])}
+                  />
                 </span>
               )}
             </div>
@@ -306,10 +316,11 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         </p>
       </section>
 
-      <CompanyTechnology company={company} access={access} citations={citations} />
+      <CompanyTechnology company={company} access={access} gate={result.gate} citations={citations} />
 
       <Block
         title="Funding rounds"
+        view={v('companyRounds')}
         note={
           access.totals.rounds > 0
             ? `${formatCount(access.totals.rounds)} ${access.totals.rounds === 1 ? 'round' : 'rounds'}`
@@ -345,6 +356,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         ) : null}
         <LockedSection
           {...lock}
+          view={v('companyRounds')}
           shown={company.rounds?.length ?? 0}
           total={access.totals.rounds}
           noun="rounds"
@@ -354,6 +366,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
 
       <Block
         title="Investors"
+        view={v('companyInvestors')}
         note={access.totals.investors > 0 ? `${access.totals.investors} on file` : undefined}
       >
         {company.investors && company.investors.length > 0 ? (
@@ -417,6 +430,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         ) : null}
         <LockedSection
           {...lock}
+          view={v('companyInvestors')}
           shown={company.investors?.length ?? 0}
           total={access.totals.investors}
           noun="investors"
@@ -424,7 +438,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         />
       </Block>
 
-      <Block title="People" note={access.totals.people > 0 ? 'Leadership' : undefined}>
+      <Block title="People" view={v('companyPeople')} note={access.totals.people > 0 ? 'Leadership' : undefined}>
         {company.people && company.people.length > 0 ? (
           <div className={`${panel} grid-cols-3 max-[860px]:grid-cols-1`}>
             {company.people.map((person) => (
@@ -468,6 +482,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         ) : null}
         <LockedSection
           {...lock}
+          view={v('companyPeople')}
           shown={company.people?.length ?? 0}
           total={access.totals.people}
           noun="people"
@@ -478,6 +493,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
       <div className="grid grid-cols-2 gap-10 max-[860px]:grid-cols-1 max-[860px]:gap-0">
         <Block
           title="Acquisitions"
+          view={v('companyAcquisitions')}
           note={access.totals.acquisitions > 0 ? `${access.totals.acquisitions} deals` : undefined}
         >
           {company.acquisitions && company.acquisitions.length > 0 ? (
@@ -503,6 +519,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           ) : null}
           <LockedSection
             {...lock}
+            view={v('companyAcquisitions')}
             shown={company.acquisitions?.length ?? 0}
             total={access.totals.acquisitions}
             noun="acquisitions"
@@ -510,7 +527,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           />
         </Block>
 
-        <Block title="Exits">
+        <Block title="Exits" view={v('companyExits')}>
           {company.exits && company.exits.length > 0 ? (
             <ul className={`${panel} grid-cols-1`}>
               {company.exits.map((exit) => (
@@ -531,6 +548,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           ) : null}
           <LockedSection
             {...lock}
+            view={v('companyExits')}
             shown={company.exits?.length ?? 0}
             total={access.totals.exits}
             noun="exits"
@@ -539,7 +557,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         </Block>
       </div>
 
-      <Block title="Diversity investments">
+      <Block title="Diversity investments" view={v('companyDiversity')}>
         {company.diversity && company.diversity.length > 0 ? (
           <div className={`${panel} grid-cols-3 max-[860px]:grid-cols-1`}>
             {company.diversity.map((d) => (
@@ -565,6 +583,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         ) : null}
         <LockedSection
           {...lock}
+          view={v('companyDiversity')}
           shown={company.diversity?.length ?? 0}
           total={access.totals.diversity}
           noun="signals"
@@ -651,18 +670,33 @@ function Deal({
   );
 }
 
+/** A gated section. Not rendered at all when the API says it is switched off
+ *  for visitors; tagged for an admin who still sees it. */
 function Block({
   title,
   note,
+  view,
   children,
 }: {
   title: string;
   note?: string;
+  view?: SectionView;
   children: React.ReactNode;
 }) {
+  if (isDisabled(view)) return null;
   return (
     <section className="border-t border-line py-8">
-      <SectionHeader title={title} note={note} size="md" className="mb-5 border-b-0 pb-0" />
+      <SectionHeader
+        title={
+          <>
+            {title}
+            <AdminOnlyBadge view={view} className="ml-3 align-middle" />
+          </>
+        }
+        note={note}
+        size="md"
+        className="mb-5 border-b-0 pb-0"
+      />
       {children}
     </section>
   );

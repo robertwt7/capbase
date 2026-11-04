@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { FUND_STATUSES, FUND_STRATEGIES, type FundSummary, type Paginated } from '@repo/api';
+import { FUND_STATUSES, FUND_STRATEGIES, type DirectoryPage, type FundSummary } from '@repo/api';
 
 import {
   Badge,
@@ -18,7 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui';
-import { isMasked, Masked, SignInChip } from '@/components/Masked';
+import { LockedFilter } from '@/components/LockedFilter';
+import { isMasked, Masked, SignInChip, unlockOf } from '@/components/Masked';
 import { formatCount, formatUsd } from '@/lib/format';
 
 import { FUND_COLUMNS } from './columns';
@@ -43,14 +44,14 @@ const isSort = (v: string | undefined): v is Sort =>
 export function FundDirectory({
   result,
   initial,
-  signedIn,
 }: {
-  result: Paginated<FundSummary>;
+  /** `locked`: the filters and sorts the API ignores for this viewer (status,
+   *  signed out, by default) — rendered as `LockedFilter`s / left out. */
+  result: DirectoryPage<FundSummary>;
   initial: Record<string, string | undefined>;
-  /** Signed out, status is licensed data: the API ignores its filter, so the
-   *  control is a sign-in prompt instead. */
-  signedIn: boolean;
 }) {
+  const { locked } = result;
+  const sorts = SORTS.filter((s) => !locked.sorts.includes(s.value));
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
@@ -120,6 +121,7 @@ export function FundDirectory({
           aria-label="Search funds"
           className="h-11 max-w-xs flex-1 basis-56"
         />
+        {!locked.filters.includes('strategy') && (
         <Select value={strategy} onValueChange={setStrategy}>
           <SelectTrigger className="w-[190px]" aria-label="All strategies">
             <SelectValue />
@@ -133,7 +135,8 @@ export function FundDirectory({
             ))}
           </SelectContent>
         </Select>
-        {signedIn ? (
+        )}
+        {!locked.filters.includes('status') ? (
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger className="w-[160px]" aria-label="Any status">
               <SelectValue />
@@ -148,16 +151,23 @@ export function FundDirectory({
             </SelectContent>
           </Select>
         ) : (
-          <Button variant="outline" shape="box" size="sm" href={`/login?next=${encodeURIComponent('/funds')}`} className="self-center">
-            Sign in to filter by status
-          </Button>
+          <LockedFilter entity="fund" param="status" unlockBy={locked.unlockBy.status} next="/funds" />
         )}
-        <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
+        {(['strategy'] as const)
+          .filter((param) => locked.filters.includes(param))
+          .map((param) => (
+            <LockedFilter key={param} entity="fund" param={param} unlockBy={locked.unlockBy[param]} next="/funds" />
+          ))}
+        {/* A locked sort is left out; the API answers it in name order. */}
+        <Select
+          value={sorts.some((s) => s.value === sort) ? sort : (sorts[0]?.value ?? 'name')}
+          onValueChange={(v) => setSort(v as Sort)}
+        >
           <SelectTrigger className="w-[170px]" aria-label="Sort by">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {SORTS.map((s) => (
+            {sorts.map((s) => (
               <SelectItem key={s.value} value={s.value}>
                 {s.label}
               </SelectItem>
@@ -235,7 +245,7 @@ export function FundDirectory({
                   )}
                   {isMasked(fund, 'status') && (
                     <span className="self-start">
-                      <SignInChip next="/funds" />
+                      <SignInChip next="/funds" unlockBy={unlockOf(fund, 'status')} />
                     </span>
                   )}
                 </span>
@@ -250,7 +260,7 @@ export function FundDirectory({
                 </Link>
                 <span role="cell">
                   {isMasked(fund, 'strategy') ? (
-                    <SignInChip next="/funds" />
+                    <SignInChip next="/funds" unlockBy={unlockOf(fund, 'strategy')} />
                   ) : fund.strategy ? (
                     <Badge variant="pill" mono>
                       {fund.strategy}
@@ -273,8 +283,12 @@ export function FundDirectory({
                   className="text-right font-mono text-base font-medium text-ink max-[820px]:text-left"
                   role="cell"
                 >
-                  {fund.grossAssetsUsd == null && isMasked(fund, 'closedUsd') ? (
-                    <SignInChip next="/funds" />
+                  {isMasked(fund, 'grossAssetsUsd') ||
+                  (fund.grossAssetsUsd == null && isMasked(fund, 'closedUsd')) ? (
+                    <SignInChip
+                      next="/funds"
+                      unlockBy={unlockOf(fund, isMasked(fund, 'grossAssetsUsd') ? 'grossAssetsUsd' : 'closedUsd')}
+                    />
                   ) : (
                     formatUsd(fund.grossAssetsUsd ?? fund.closedUsd ?? null)
                   )}

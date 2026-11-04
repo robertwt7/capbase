@@ -17,6 +17,8 @@ import {
   TopSectors,
   TopSectorsSection,
   TopSectorsSkeleton,
+  WindowDays,
+  WindowDaysFallback,
 } from './sections';
 
 export const metadata: Metadata = { ...canonical('/') };
@@ -41,6 +43,11 @@ export default function Home() {
         note={
           <Suspense fallback={null}>
             <AccessNote />
+          </Suspense>
+        }
+        period={
+          <Suspense fallback={<WindowDaysFallback />}>
+            <WindowDays />
           </Suspense>
         }
       />

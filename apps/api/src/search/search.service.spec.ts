@@ -4,6 +4,7 @@ import { Prisma } from '@repo/db';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { escapeLike, SearchService } from './search.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 type Row = Record<string, unknown>;
 
@@ -43,7 +44,7 @@ describe('SearchService', () => {
       $queryRaw: queryRaw,
       personRole: { findMany: roleFindMany },
     } as unknown as PrismaService;
-    service = new SearchService(prisma);
+    service = new SearchService(prisma, {} as never, staticGatePolicy());
   });
 
   it.each(['', 'a', ' a ', '   '])(
@@ -107,17 +108,25 @@ describe('SearchService', () => {
         fragments().find((s) => s.includes(`FROM "${t}"`))!,
       );
       expect(company).toContain('NOT "partnerOnly"');
-      expect(company).toContain('ANY("partnerFields")');
       expect(investor).toContain('NOT "partnerOnly"');
       expect(person).toContain('NOT "identifierOnly"');
     });
 
+    it('blanks a partner-written domain or meta signed out, never signed in', async () => {
+      companies = [{ slug: 'acme', name: 'Acme', domain: 'acme.com', meta: 'Fintech', partnerFields: ['domain', 'primarySector'] }];
+      investors = [{ slug: 'acme-vc', name: 'Acme VC', domain: 'acme.vc', meta: 'Venture', partnerFields: ['type'] }];
+      const out = await service.search('acme');
+      expect(out.companies).toEqual([{ slug: 'acme', name: 'Acme', domain: null, meta: null }]);
+      expect(out.investors).toEqual([{ slug: 'acme-vc', name: 'Acme VC', domain: 'acme.vc', meta: null }]);
+      const signedIn = await service.search('acme', { id: 'u1', role: 'USER' });
+      expect(signedIn.companies).toEqual([{ slug: 'acme', name: 'Acme', domain: 'acme.com', meta: 'Fintech' }]);
+    });
+
     it('searches everything for a signed-in viewer', async () => {
-      await service.search('acme', { id: 'u1' });
+      await service.search('acme', { id: 'u1', role: 'USER' });
       for (const s of fragments()) {
         expect(s).not.toContain('partnerOnly');
         expect(s).not.toContain('identifierOnly');
-        expect(s).not.toContain('partnerFields');
       }
     });
   });

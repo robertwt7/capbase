@@ -34,7 +34,14 @@ function ReportedOn({ date }: { date: string | null }) {
  * strategy, industries, verticals, target geography and reported exposure.
  * Labels as published. Renders nothing when no row has a value.
  */
-export function FundMandateSection({ mandate }: { mandate: FundMandate }) {
+export function FundMandateSection({
+  mandate,
+  badge,
+}: {
+  mandate: FundMandate;
+  /** Beside the title (the admin's "Hidden from visitors" tag). */
+  badge?: ReactNode;
+}) {
   const rows = [
     mandate.detailedStrategy
       ? { label: 'Strategy', node: <span className="font-mono text-sm text-ink">{mandate.detailedStrategy}</span> }
@@ -48,7 +55,16 @@ export function FundMandateSection({ mandate }: { mandate: FundMandate }) {
 
   return (
     <section className="border-t border-line py-8">
-      <SectionHeader title="Investment mandate" size="md" className="mb-5 border-b-0 pb-0" />
+      <SectionHeader
+        title={
+          <>
+            Investment mandate
+            {badge}
+          </>
+        }
+        size="md"
+        className="mb-5 border-b-0 pb-0"
+      />
       <dl className="grid grid-cols-[12rem_minmax(0,1fr)] gap-x-6 gap-y-4 max-[600px]:grid-cols-1 max-[600px]:gap-y-1.5">
         {rows.map((r) => (
           <div key={r.label} className="contents">
@@ -69,7 +85,14 @@ export function FundMandateSection({ mandate }: { mandate: FundMandate }) {
  * not the header's location), its structure and its legal form. Renders
  * nothing when none is reported.
  */
-export function FundStructureSection({ mandate }: { mandate: FundMandate }) {
+export function FundStructureSection({
+  mandate,
+  badge,
+}: {
+  mandate: FundMandate;
+  /** Beside the title (the admin's "Hidden from visitors" tag). */
+  badge?: ReactNode;
+}) {
   const facts = [
     { label: 'Domicile', value: mandate.domicile },
     { label: 'Structure', value: mandate.structure },
@@ -79,7 +102,16 @@ export function FundStructureSection({ mandate }: { mandate: FundMandate }) {
 
   return (
     <section className="border-t border-line py-8">
-      <SectionHeader title="Fund structure" size="md" className="mb-5 border-b-0 pb-0" />
+      <SectionHeader
+        title={
+          <>
+            Fund structure
+            {badge}
+          </>
+        }
+        size="md"
+        className="mb-5 border-b-0 pb-0"
+      />
       <dl className="grid grid-cols-[repeat(3,auto)] justify-start gap-x-8 gap-y-4 max-[600px]:grid-cols-[repeat(2,auto)]">
         {facts.map((f) => (
           <Fact key={f.label} label={f.label} value={f.value} />

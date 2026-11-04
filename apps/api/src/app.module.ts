@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { validateEnv } from './config/env';
 import { CompaniesModule } from './companies/companies.module';
 import { FundsModule } from './funds/funds.module';
+import { GateModule } from './gate/gate.module';
 import { InvestorsModule } from './investors/investors.module';
 import { MarketModule } from './market/market.module';
 import { PeopleModule } from './people/people.module';
@@ -34,6 +35,7 @@ import { HealthController } from './health.controller';
       errorMessage: THROTTLE_MESSAGE,
     }),
     PrismaModule,
+    GateModule,
     UsersModule,
     AuthModule,
     CompaniesModule,

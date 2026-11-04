@@ -3,6 +3,7 @@ import { HttpException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
 import { InvestorsService } from './investors.service';
 import type { UsersService } from '../users/users.service';
+import { staticGatePolicy } from '../gate/gate-policy.service';
 
 /** Gate-neutral by default: an unlocked viewer sees what these tests describe. */
 const unlockedUsers = { accessFor: async () => ({ unlocked: true, signedIn: true, unlockedUntil: null }) } as unknown as UsersService;
@@ -44,7 +45,7 @@ function serviceWith(
     entityIdentifier: { findMany: jest.fn(async () => []) },
   } as unknown as PrismaService;
 
-  return new InvestorsService(prisma, unlockedUsers);
+  return new InvestorsService(prisma, unlockedUsers, staticGatePolicy());
 }
 
 async function statusOf(fn: () => Promise<unknown>): Promise<{ status: number; body: unknown }> {

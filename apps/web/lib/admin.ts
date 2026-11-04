@@ -1,5 +1,8 @@
 import type {
   AdminUser,
+  AdminVisibilityResponse,
+  FieldPolicy,
+  SectionPolicy,
   AdminUserDetail,
   IdentifiableType,
   MergeQueueResponse,
@@ -191,3 +194,38 @@ export async function resolveReport(id: string, input: ResolveReportInput): Prom
     cache: 'no-store',
   });
 }
+
+// --- Visibility (`/admin/visibility`) ---------------------------------------
+
+/** One authenticated, uncached call to `/admin/visibility…`. */
+async function visibility(path = '', init: RequestInit = {}): Promise<AdminVisibilityResponse> {
+  const token = await getToken();
+  return apiFetch<AdminVisibilityResponse>(`/admin/visibility${path}`, {
+    ...init,
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** Every read-gate setting: default, current value and who last changed it. */
+export const getVisibility = (): Promise<AdminVisibilityResponse> => visibility();
+
+export const updateSectionPolicy = (section: string, policy: SectionPolicy) =>
+  visibility(`/sections/${encodeURIComponent(section)}`, { method: 'PUT', body: JSON.stringify(policy) });
+
+export const resetSectionPolicy = (section: string) =>
+  visibility(`/sections/${encodeURIComponent(section)}`, { method: 'DELETE' });
+
+export const updateFieldPolicy = (entity: string, field: string, policy: FieldPolicy) =>
+  visibility(`/fields/${encodeURIComponent(entity)}/${encodeURIComponent(field)}`, {
+    method: 'PUT',
+    body: JSON.stringify(policy),
+  });
+
+export const resetFieldPolicy = (entity: string, field: string) =>
+  visibility(`/fields/${encodeURIComponent(entity)}/${encodeURIComponent(field)}`, { method: 'DELETE' });
+
+export const updateContributionWindow = (days: number) =>
+  visibility('/settings/contribution-window', { method: 'PUT', body: JSON.stringify({ days }) });
+
+export const resetContributionWindow = () => visibility('/settings/contribution-window', { method: 'DELETE' });
