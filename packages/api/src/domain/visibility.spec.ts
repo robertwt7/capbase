@@ -4,12 +4,15 @@ import {
   GATED_SECTION_KEYS,
   SECTION_REGISTRY,
   crawlerView,
+  directoryParamLabel,
   fieldGate,
   fieldUnlockBy,
   gateView,
   meets,
   needsContributionLookup,
   resolveGatePolicy,
+  sectionFilterGate,
+  sectionFiltersNeedLookup,
   sectionLimit,
   sectionPartnerRows,
   sectionView,
@@ -266,5 +269,54 @@ describe('helpers', () => {
     expect(needsContributionLookup(DEFAULT_GATE_POLICY, 'company')).toBe(false);
     expect(needsContributionLookup(withField('company', 'stage', { audience: 'contributors', partnerAudience: 'contributors' }), 'company')).toBe(true);
     expect(needsContributionLookup(withSection('investorPortfolio', { partnerAudience: 'contributors' }), 'investor')).toBe(true);
+  });
+});
+
+describe('section-backed directory filters', () => {
+  const P = DEFAULT_GATE_POLICY;
+  const withSection = (section: GatedSection, p: Partial<SectionPolicy>): GatePolicy => ({
+    ...P,
+    sections: { ...P.sections, [section]: { ...P.sections[section], ...p } },
+  });
+
+  it('needs FULL access under the defaults (companyRounds: hidden / preview / full)', () => {
+    expect(sectionFilterGate(P, 'companyRounds', signedOut)).toEqual({ use: false, disabled: false, unlockBy: 'contribute' });
+    expect(sectionFilterGate(P, 'companyRounds', locked)).toEqual({ use: false, disabled: false, unlockBy: 'contribute' });
+    expect(sectionFilterGate(P, 'companyRounds', unlocked)).toEqual({ use: true, disabled: false, unlockBy: null });
+    expect(sectionFilterGate(P, 'companyRounds', admin)).toEqual({ use: true, disabled: false, unlockBy: null });
+    // An `open` section previews to everyone, so its filter is still contributors-only.
+    expect(sectionFilterGate(P, 'companyInvestors', signedOut).unlockBy).toBe('contribute');
+  });
+
+  it('is disabled when every tier is hidden, and admins still use it', () => {
+    const off = withSection('companyRounds', { signedOut: 'hidden', signedIn: 'hidden', unlocked: 'hidden' });
+    expect(sectionFilterGate(off, 'companyRounds', unlocked)).toEqual({ use: false, disabled: true, unlockBy: null });
+    expect(sectionFilterGate(off, 'companyRounds', admin).use).toBe(true);
+  });
+
+  it('is disabled for a viewer when no tier gets full', () => {
+    const preview = withSection('companyRounds', { unlocked: 'preview', signedIn: 'preview' });
+    expect(sectionFilterGate(preview, 'companyRounds', locked)).toEqual({ use: false, disabled: true, unlockBy: null });
+  });
+
+  it('opens to the signed-in tier when an override gives it full', () => {
+    const open = withSection('companyRounds', { signedIn: 'full' });
+    expect(sectionFilterGate(open, 'companyRounds', locked).use).toBe(true);
+    expect(sectionFilterGate(open, 'companyRounds', signedOut).unlockBy).toBe('signIn');
+  });
+
+  it('needs the contribution lookup only when the signed-in tier differs or partner rows are contributors-only', () => {
+    expect(sectionFiltersNeedLookup(P, ['companyRounds'])).toBe(true);
+    const same = withSection('companyRounds', { signedIn: 'full' });
+    expect(sectionFiltersNeedLookup(same, ['companyRounds'])).toBe(false);
+    const partner = withSection('companyRounds', { signedIn: 'full', partnerAudience: 'contributors' });
+    expect(sectionFiltersNeedLookup(partner, ['companyRounds'])).toBe(true);
+  });
+
+  it('labels section filters and range keys', () => {
+    expect(directoryParamLabel('company', 'round')).toBe('Financing');
+    expect(directoryParamLabel('company', 'investor')).toBe('Investor');
+    expect(directoryParamLabel('company', 'raised')).toBe('Total raised');
+    expect(directoryParamLabel('company', 'founded')).toBe('Founded');
   });
 });

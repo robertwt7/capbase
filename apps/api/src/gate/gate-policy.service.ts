@@ -8,6 +8,7 @@ import {
   SECTION_REGISTRY,
   defaultFieldPolicy,
   defaultSectionPolicy,
+  sectionFilter,
   fieldInfo,
   isGatedEntity,
   isGatedField,
@@ -102,6 +103,7 @@ export class GatePolicyService implements OnModuleInit {
           entity: spec.entity,
           label: spec.label,
           kind: spec.kind,
+          filter: sectionFilter(section)?.param ?? null,
           default: defaultSectionPolicy(section),
           current: policy.sections[section],
           // A stored row the resolver dropped (logged at load) still names

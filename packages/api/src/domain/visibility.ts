@@ -100,15 +100,31 @@ interface SectionSpec {
   /** `block`: one unit, shown whole or not at all — `preview` is rejected. */
   kind: 'rows' | 'block';
   default: SectionPolicy;
+  /** The directory filter that matches on this section's rows (`round` on the
+   *  company directory). It needs FULL access to the section: under a preview
+   *  tier, membership would reveal rows past the preview cut. */
+  filter?: { param: string; label: string };
 }
 
 /** Every gated section: its page, its label (admin UI), its shape and its default. */
 export const SECTION_REGISTRY = {
-  companyRounds: { entity: 'company', label: 'Funding rounds', kind: 'rows', default: members() },
+  companyRounds: {
+    entity: 'company',
+    label: 'Funding rounds',
+    kind: 'rows',
+    default: members(),
+    filter: { param: 'round', label: 'Financing' },
+  },
   companyDiversity: { entity: 'company', label: 'Diversity', kind: 'rows', default: members() },
   companyAcquisitions: { entity: 'company', label: 'Acquisitions', kind: 'rows', default: members() },
   companyExits: { entity: 'company', label: 'Exits', kind: 'rows', default: members() },
-  companyInvestors: { entity: 'company', label: 'Investors', kind: 'rows', default: open() },
+  companyInvestors: {
+    entity: 'company',
+    label: 'Investors',
+    kind: 'rows',
+    default: open(),
+    filter: { param: 'investor', label: 'Investor' },
+  },
   companyPeople: { entity: 'company', label: 'People', kind: 'rows', default: open() },
   companyTechnologies: { entity: 'company', label: 'Technologies', kind: 'rows', default: open() },
   companyApps: { entity: 'company', label: 'Apps', kind: 'rows', default: open() },
@@ -130,7 +146,8 @@ export const GATED_SECTION_KEYS = Object.keys(SECTION_REGISTRY) as GatedSection[
 
 interface FieldSpec {
   label: string;
-  /** The directory filter param that matches on this column. */
+  /** The directory filter key that matches on this column. A range key
+   *  (`raised`) covers its `SCREEN_RANGES` params (`raisedMin`, `raisedMax`). */
   filter?: string;
   /** The directory sort param that orders on this column. */
   sort?: string;
@@ -149,10 +166,10 @@ const prose = (label: string): FieldSpec => ({ label, default: { partnerAudience
  *  never configurable; neither are counts. */
 export const FIELD_REGISTRY = {
   company: {
-    totalRaisedUsd: { label: 'Total raised', sort: 'raised' },
-    lastValuationUsd: { label: 'Last valuation', sort: 'valuation' },
-    headcount: { label: 'Headcount' },
-    founded: { label: 'Founded' },
+    totalRaisedUsd: { label: 'Total raised', filter: 'raised', sort: 'raised' },
+    lastValuationUsd: { label: 'Last valuation', filter: 'valuation', sort: 'valuation' },
+    headcount: { label: 'Headcount', filter: 'headcount' },
+    founded: { label: 'Founded', filter: 'founded' },
     hq: { label: 'Headquarters' },
     legalName: { label: 'Legal name' },
     stage: { label: 'Stage', filter: 'stage' },
@@ -201,6 +218,17 @@ export type GatedField<E extends GatedEntity> = keyof (typeof FIELD_REGISTRY)[E]
 const fieldSpec = (entity: GatedEntity, field: string): FieldSpec | undefined =>
   (FIELD_REGISTRY[entity] as Record<string, FieldSpec>)[field];
 
+/** The directory filter a section backs, if any. */
+export const sectionFilter = (section: GatedSection): { param: string; label: string } | null =>
+  (SECTION_REGISTRY[section] as SectionSpec).filter ?? null;
+
+/** The sections of `entity` that back a directory filter. */
+export const sectionFiltersOf = (entity: SectionEntity): { section: GatedSection; param: string; label: string }[] =>
+  GATED_SECTION_KEYS.flatMap((section) => {
+    const f = sectionFilter(section);
+    return f && SECTION_REGISTRY[section].entity === entity ? [{ section, ...f }] : [];
+  });
+
 export const isGatedSection = (key: string): key is GatedSection =>
   Object.prototype.hasOwnProperty.call(SECTION_REGISTRY, key);
 
@@ -229,6 +257,9 @@ export const fieldInfo = (
 export const directoryParamLabel = (entity: GatedEntity, param: string): string => {
   for (const spec of Object.values(FIELD_REGISTRY[entity]) as FieldSpec[]) {
     if (spec.filter === param || spec.sort === param) return spec.label;
+  }
+  for (const f of sectionFiltersOf(entity)) {
+    if (f.param === param) return f.label;
   }
   return param;
 };
@@ -481,6 +512,42 @@ export function needsContributionLookup(policy: GatePolicy, entity: SectionEntit
   return fieldsNeed || (section !== undefined && policy.sections[section].partnerAudience === 'contributors');
 }
 
+/**
+ * Whether this viewer may apply the directory filter backed by `section`. It
+ * needs FULL access to the section (a preview tier would let membership reveal
+ * rows past the preview cut):
+ *   - an admin always may;
+ *   - a section hidden from every tier is `disabled` (render nothing);
+ *   - a viewer whose tier gets `full` may;
+ *   - otherwise `unlockBy` names the lowest tier above that gets `full` — and
+ *     when none does, the filter is disabled for this viewer.
+ */
+export function sectionFilterGate(
+  policy: GatePolicy,
+  section: GatedSection,
+  access: ViewerAccess,
+): { use: boolean; disabled: boolean; unlockBy: UnlockBy | null } {
+  if (access.admin) return { use: true, disabled: false, unlockBy: null };
+  const p = policy.sections[section];
+  if (sectionDisabled(p)) return { use: false, disabled: true, unlockBy: null };
+  const tier = viewerTier(access);
+  if (p[tier] === 'full') return { use: true, disabled: false, unlockBy: null };
+  const above = tiersAbove(tier).find((t) => p[t] === 'full');
+  return above
+    ? { use: false, disabled: false, unlockBy: unlockFor(above) }
+    : { use: false, disabled: true, unlockBy: null };
+}
+
+/** Whether applying the directory filters backed by `sections` needs the
+ *  viewer's contribution state: a signed-in tier that differs from the
+ *  unlocked one, or a `contributors` partner audience. */
+export function sectionFiltersNeedLookup(policy: GatePolicy, sections: readonly GatedSection[]): boolean {
+  return sections.some((s) => {
+    const p = policy.sections[s];
+    return p.signedIn !== p.unlocked || p.partnerAudience === 'contributors';
+  });
+}
+
 /** Admin UI: the audience ranks, for disabling a partner option below the audience. */
 export const audienceAtLeast = (a: Audience, min: Audience): boolean => AUDIENCE_RANK[a] >= AUDIENCE_RANK[min];
 
@@ -497,6 +564,8 @@ export interface AdminSectionPolicyRow {
   entity: SectionEntity;
   label: string;
   kind: 'rows' | 'block';
+  /** The directory filter param this section also locks (`round`), or null. */
+  filter: string | null;
   default: SectionPolicy;
   current: SectionPolicy;
   override: PolicyOverrideMeta | null;

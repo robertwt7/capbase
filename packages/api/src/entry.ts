@@ -4,6 +4,7 @@ export * from './domain/person';
 export * from './domain/fund';
 export * from './domain/market';
 export * from './domain/pagination';
+export * from './domain/screening';
 export * from './domain/inputs';
 export * from './domain/auth';
 export * from './domain/api-keys';

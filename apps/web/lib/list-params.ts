@@ -14,6 +14,7 @@ import {
   PERSON_SORTS,
   SECTORS,
   STAGES,
+  parseCompanyScreen,
   type CompanyListQuery,
   type FundListQuery,
   type InvestorListQuery,
@@ -34,6 +35,10 @@ const pageOf = (v: string | undefined): number | undefined => {
   return Number.isInteger(n) && n >= 1 ? n : undefined;
 };
 
+/** The directory query, screening criteria included. The screening params
+ *  degrade the same lenient way (`parseCompanyScreen`): an inverted pair drops
+ *  both bounds, `roundWithin` wins over fixed dates, `investorOn` without
+ *  `investor` is dropped — a hand-edited URL never 400s. */
 export function companyListQuery(sp: SearchParams): CompanyListQuery {
   return {
     q: sp.q?.trim() || undefined,
@@ -41,9 +46,20 @@ export function companyListQuery(sp: SearchParams): CompanyListQuery {
     stage: pick(sp.stage, STAGES),
     status: pick(sp.status, COMPANY_STATUSES),
     country: countryOf(sp.country),
+    ...parseCompanyScreen((param) => sp[param]),
     sort: pick(sp.sort, COMPANY_SORTS),
     page: pageOf(sp.page),
   };
+}
+
+/** Optional company-table columns (`?cols=country,founded`): a view
+ *  preference, not a filter — "Clear filters" keeps it. */
+export const COMPANY_EXTRA_COLUMNS = ['country', 'founded', 'headcount'] as const;
+export type CompanyExtraColumn = (typeof COMPANY_EXTRA_COLUMNS)[number];
+
+export function companyColumnsParam(v: string | undefined): CompanyExtraColumn[] {
+  const wanted = new Set((v ?? '').split(',').map((s) => s.trim()));
+  return COMPANY_EXTRA_COLUMNS.filter((c) => wanted.has(c));
 }
 
 export function investorListQuery(sp: SearchParams): InvestorListQuery {

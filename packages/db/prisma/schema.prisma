@@ -474,6 +474,8 @@ model FundingRound {
 
   @@unique([externalSource, externalId])
   @@index([companyId])
+  /// Company screening's financing window (an EXISTS with a date range).
+  @@index([date])
   @@index([moderationStatus, createdAt, id])
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])

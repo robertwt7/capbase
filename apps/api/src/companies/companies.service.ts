@@ -27,18 +27,27 @@ import {
   type CompanyDetailResponse,
   type CompanyEditFields,
   type CompanyHistoryResponse,
+  type CompanyDirectoryPage,
   type CompanyListQuery,
+  type CompanyScreenContext,
   type CompanySlugEntry,
   type CountryFacet,
-  type DirectoryPage,
   type EntityIdentifierRef,
   type FeaturedCompaniesResponse,
   type GatePolicy,
+  type GatedSection,
+  type InvestorScope,
+  type MatchedRound,
   type Revision,
   type RevisionAction,
   type RevisionActor,
   type Role,
+  type RoundKind,
   type ViewerAccess,
+  resolveRoundWindow,
+  screenApplied,
+  sectionFiltersNeedLookup,
+  validateCompanyScreen,
 } from '@repo/api';
 import type { Company as DbCompany, Prisma } from '@repo/db';
 import {
@@ -59,9 +68,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { toFacets } from '../prisma/country-facets';
 import { MAX_MERGE_HOPS, PUBLIC_COMPANY } from '../prisma/public-filters';
+import { resolveInvestorSurvivor, type InvestorSurvivor } from '../prisma/merge-chain';
 import { toCitation } from '../provenance/citation.mapper';
 import { toEntityIdentifiers } from '../provenance/identifier.mapper';
 import { loadCompanyTechnology } from './company-technology.reader';
+import { INVESTOR_LINK_CAP, companyScreenWhere, investorLinkReads, roundCriteriaWhere } from './company-screen';
 import { toCompany, toCompanyEditFields } from './company.mapper';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
@@ -176,6 +187,9 @@ function companyStub(row: DbCompany, access: ViewerAccess, policy: GatePolicy): 
 }
 
 const dateOnly = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** The sections the screening filters match on. */
+const SCREEN_SECTIONS: readonly GatedSection[] = ['companyRounds', 'companyInvestors'];
 
 const money = (v: number | null | undefined): bigint | null =>
   v === null || v === undefined ? null : BigInt(v);
@@ -325,11 +339,23 @@ export class CompaniesService {
   async findAllApproved(
     query: CompanyListQuery = {},
     viewer?: { id: string; role: Role },
-  ): Promise<DirectoryPage<Company>> {
+  ): Promise<CompanyDirectoryPage> {
+    // Cross-field rules (inverted ranges, mixed windows, unreal dates) the DTO
+    // decorators can't express. Here, not in a controller, so the website and
+    // `/v1` share it. The message names params only.
+    const invalid = validateCompanyScreen(query);
+    if (invalid) throw new BadRequestException(invalid);
+
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     const policy = this.gatePolicy.current();
-    const access = await listAccessFor(viewer, policy, 'company', (v) => this.users.accessFor(v));
+    const applied = screenApplied(query);
+    // A section-backed filter needs FULL section access, which for a USER
+    // depends on their contribution — looked up only when one is applied and
+    // the policy makes it matter, so a plain directory stays one query.
+    const force =
+      (applied.round || applied.investor) && sectionFiltersNeedLookup(policy, SCREEN_SECTIONS);
+    const access = await listAccessFor(viewer, policy, 'company', (v) => this.users.accessFor(v), force);
     const signedOut = !partnerVisible(access);
     const dir = directoryFilters(policy, 'company', access, {
       sector: Boolean(query.sector),
@@ -337,8 +363,43 @@ export class CompaniesService {
       status: Boolean(query.status),
       country: Boolean(query.country),
       domain: query.domain !== undefined,
+      ...applied,
     });
     const use = (param: string, value: unknown) => Boolean(value) && dir.use(param);
+    const locked = { ...dir.locked, filters: [...dir.locked.filters], unlockBy: { ...dir.locked.unlockBy } };
+
+    // The investor filter's relationship scope. "On the matching financing"
+    // needs the round filter too: locked → the investor filter is locked with
+    // the stricter unlock; switched off → it is ignored, like the round filter.
+    let investorScope: InvestorScope | null = null;
+    if (applied.investor && dir.use('investor')) {
+      if (query.investorOn === 'round') {
+        if (dir.use('round')) {
+          investorScope = 'round';
+        } else if (!locked.disabled.includes('round')) {
+          locked.filters.push('investor');
+          locked.unlockBy.investor = locked.unlockBy.round ?? 'contribute';
+        }
+      } else {
+        investorScope = dir.use('round') ? 'holdingsAndRounds' : 'holdings';
+      }
+    }
+    const investor =
+      investorScope && query.investor ? await this.screenInvestor(query.investor, signedOut) : null;
+    const window = applied.round && dir.use('round') ? resolveRoundWindow(query, new Date()) : null;
+    const investorIds = investorScope ? (investor ? [investor.id] : []) : null;
+    const inputs = {
+      query,
+      dir,
+      window,
+      investorIds,
+      investorScope,
+      investorCompanyIds:
+        investorScope === 'holdingsAndRounds' && investorIds?.length
+          ? await this.investorCompanies(dir, investorIds)
+          : null,
+    };
+    const roundWhere = roundCriteriaWhere(inputs);
 
     const where: Prisma.CompanyWhereInput = {
       ...PUBLIC_COMPANY,
@@ -362,7 +423,8 @@ export class CompaniesService {
         dir.use('domain') && {
           domain: { in: domainVariants(query.domain) },
         }),
-      AND: dir.and,
+      // Screening criteria append to the same AND, so an unfiltered query keeps its shape.
+      AND: [...dir.and, ...companyScreenWhere(inputs)],
     };
 
     const sort = dir.sortLocked(query.sort) ? undefined : query.sort;
@@ -383,13 +445,112 @@ export class CompaniesService {
       }),
     ]);
 
+    const screenApplies =
+      investorScope !== null || window !== null || roundWhere !== null ||
+      (['raised', 'valuation', 'founded', 'headcount'] as const).some((k) => applied[k] && dir.use(k));
+    const screen: CompanyScreenContext | null = screenApplies
+      ? {
+          investor: investor && investorScope ? { slug: investor.slug, name: investor.name, scope: investorScope } : null,
+          investorNotFound: investorScope !== null && !investor,
+          window: window ? { from: window.from ? dateOnly(window.from) : null, to: query.roundTo ?? null } : null,
+          matches: roundWhere && rows.length ? await this.matchedRounds(rows, roundWhere, access, policy) : {},
+        }
+      : null;
+
     return {
       items: rows.map((row) => gateFields('company', toCompany(row), row.partnerFields, access, policy, COMPANY_BLANKS)),
       total,
       page,
       pageSize,
-      locked: dir.locked,
+      locked,
+      screen,
     };
+  }
+
+  /** The companies a firm is linked to (holdings ∪ rounds it is named on),
+   *  or null when either branch passes `INVESTOR_LINK_CAP` (the caller then
+   *  falls back to the EXISTS form). Two indexed reads instead of an OR of two
+   *  EXISTS, which no index serves (a full `Company` scan). */
+  private async investorCompanies(
+    dir: Parameters<typeof investorLinkReads>[0],
+    investorIds: string[],
+  ): Promise<string[] | null> {
+    const reads = investorLinkReads(dir, investorIds);
+    const [holdings, rounds] = await Promise.all([
+      this.prisma.investorHolding.findMany(reads.holdings) as Promise<{ companyId: string }[]>,
+      this.prisma.fundingRound.findMany(reads.rounds) as Promise<{ companyId: string }[]>,
+    ]);
+    if (holdings.length > INVESTOR_LINK_CAP || rounds.length > INVESTOR_LINK_CAP) return null;
+    return [...new Set([...holdings, ...rounds].map((r) => r.companyId))];
+  }
+
+  /** The firm an `investor` param names, merges followed — or null when no
+   *  visible firm has that slug. Signed out, a partner-only firm answers exactly
+   *  like an unknown slug (its existence is partner data). */
+  private async screenInvestor(slug: string, signedOut: boolean): Promise<InvestorSurvivor | null> {
+    const firm = await resolveInvestorSurvivor(this.prisma, slug);
+    return firm && !(signedOut && firm.partnerOnly) ? firm : null;
+  }
+
+  /**
+   * The latest round per row that satisfies the round predicate — the exact
+   * predicate the filter used, so the context always agrees with membership.
+   * ≤ pageSize indexed `LIMIT 1` reads on `(companyId)`, then one bounded
+   * citation query. Gated like the profile's funding section.
+   */
+  private async matchedRounds(
+    rows: { id: string; slug: string }[],
+    roundWhere: Prisma.FundingRoundWhereInput,
+    access: ViewerAccess,
+    policy: GatePolicy,
+  ): Promise<Record<string, MatchedRound>> {
+    const found = await this.prisma.$transaction(
+      rows.map((c) =>
+        this.prisma.fundingRound.findFirst({
+          where: { companyId: c.id, ...roundWhere },
+          orderBy: [{ date: 'desc' }, { id: 'desc' }],
+          select: {
+            id: true,
+            name: true,
+            date: true,
+            kind: true,
+            amountUsd: true,
+            currency: true,
+            amountLocal: true,
+            partnerFields: true,
+          },
+        }),
+      ),
+    );
+    const ids = found.flatMap((r) => (r ? [r.id] : []));
+    const citations = ids.length
+      ? await this.prisma.citation.findMany({
+          where: { entityType: 'round', entityId: { in: ids } },
+          include: { source: true },
+          // A whole-row attestation ('') before a field-level one.
+          orderBy: [{ field: 'asc' }, { createdAt: 'asc' }],
+        })
+      : [];
+    const citationOf = new Map<string, Citation>();
+    for (const c of citations) if (!citationOf.has(c.entityId)) citationOf.set(c.entityId, toCitation(c));
+
+    const out: Record<string, MatchedRound> = {};
+    rows.forEach((company, i) => {
+      const r = found[i];
+      if (!r) return;
+      const round: MatchedRound = {
+        id: r.id,
+        name: r.name,
+        date: dateOnly(r.date),
+        kind: r.kind as RoundKind,
+        amountUsd: Number(r.amountUsd),
+        currency: r.currency,
+        amountLocal: r.amountLocal === null ? null : Number(r.amountLocal),
+        citation: citationOf.get(r.id) ?? null,
+      };
+      out[company.slug] = gateRowFields(round, r.partnerFields, access, policy, 'companyRounds', ROUND_BLANKS);
+    });
+    return out;
   }
 
   /**

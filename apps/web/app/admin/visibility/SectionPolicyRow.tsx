@@ -5,6 +5,7 @@ import {
   AUDIENCES,
   SECTION_LEVELS,
   crawlerView,
+  directoryParamLabel,
   type AdminSectionPolicyRow,
   type SectionLevel,
 } from '@repo/api';
@@ -99,6 +100,11 @@ export function SectionPolicyRow({ row }: { row: AdminSectionPolicyRow }) {
           <p className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase">
             Search engines see: {crawler}
           </p>
+          {row.filter && row.entity === 'company' ? (
+            <p className="text-[13px] text-graphite-600">
+              {`Also locks the ${directoryParamLabel('company', row.filter).toLowerCase()} filter on /companies (needs Full).`}
+            </p>
+          ) : null}
           {formError ? <FormError>{formError}</FormError> : null}
           <RowActions
             saving={form.formState.isSubmitting}

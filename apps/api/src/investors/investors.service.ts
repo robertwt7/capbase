@@ -52,8 +52,8 @@ import {
 import { GatePolicyService } from '../gate/gate-policy.service';
 import { toFacets } from '../prisma/country-facets';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveInvestorSurvivor } from '../prisma/merge-chain';
 import {
-  MAX_MERGE_HOPS,
   PUBLIC_COMPANY_RELATION,
   PUBLIC_INVESTOR,
 } from '../prisma/public-filters';
@@ -570,28 +570,11 @@ export class InvestorsService {
     throw new NotFoundException(`Investor "${slug}" not found`);
   }
 
-  /** Follow a chain of merges to the live row at the end of it, or null. Capped
-   *  so a cycle cannot hang the request. */
+  /** The slug of the live firm a merged-away slug now answers to, or null.
+   *  Capped so a cycle cannot hang the request (`resolveInvestorSurvivor`). */
   private async resolveMerged(slug: string): Promise<string | null> {
-    let row = await this.prisma.investor.findUnique({
-      where: { slug },
-      select: { slug: true, mergedIntoId: true, moderationStatus: true },
-    });
-    if (!row?.mergedIntoId) return null;
-
-    let next: string | null = row.mergedIntoId;
-    for (let hop = 0; hop < MAX_MERGE_HOPS && next; hop++) {
-      row = await this.prisma.investor.findUnique({
-        where: { id: next },
-        select: { slug: true, mergedIntoId: true, moderationStatus: true },
-      });
-      if (!row) return null;
-      if (!row.mergedIntoId) {
-        return row.moderationStatus === 'APPROVED' ? row.slug : null;
-      }
-      next = row.mergedIntoId;
-    }
-    return null;
+    const survivor = await resolveInvestorSurvivor(this.prisma, slug);
+    return survivor && survivor.slug !== slug ? survivor.slug : null;
   }
 
   /** The firm's external identifiers (CRD, CIK, LEI, QID) for the crosswalk

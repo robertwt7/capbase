@@ -3,6 +3,7 @@
 
 import type { CompanyStatus, FundStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
 import type { CountryCode } from './geography';
+import type { CompanyScreenQuery } from './screening';
 import type { UnlockBy } from './visibility';
 
 export interface Paginated<T> {
@@ -24,6 +25,9 @@ export interface DirectoryPage<T> extends Paginated<T> {
     sorts: string[];
     /** What would let this viewer use each locked param. */
     unlockBy: Record<string, UnlockBy>;
+    /** Filter params switched off for every visitor (the section they match on
+     *  is hidden from every tier): the API ignores them, the web renders nothing. */
+    disabled: string[];
   };
 }
 
@@ -53,7 +57,9 @@ export const COMPANY_SORTS: readonly CompanySort[] = ['name', 'raised', 'valuati
 export const DEFAULT_FEATURED_LIMIT = 8;
 export const MAX_FEATURED_LIMIT = 24;
 
-export interface CompanyListQuery {
+/** The company directory query: the basic filters plus the screening
+ *  criteria (`screening.ts`). */
+export interface CompanyListQuery extends CompanyScreenQuery {
   q?: string;
   sector?: Sector;
   stage?: Stage;

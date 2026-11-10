@@ -165,7 +165,13 @@ describe('directoryFilters', () => {
     const dir = directoryFilters(P, 'company', signedOut, { stage: true, sector: false });
     expect(dir.use('stage')).toBe(true);
     expect(dir.and).toEqual([{ NOT: { partnerFields: { has: 'stage' } } }]);
-    expect(dir.locked).toEqual({ filters: [], sorts: [], unlockBy: {} });
+    // The section-backed filters need full access: contributors only by default.
+    expect(dir.locked).toEqual({
+      filters: ['round', 'investor'],
+      sorts: [],
+      unlockBy: { round: 'contribute', investor: 'contribute' },
+      disabled: [],
+    });
     expect(directoryFilters(P, 'company', locked, { stage: true }).and).toEqual([]);
   });
 
@@ -174,13 +180,57 @@ describe('directoryFilters', () => {
     const dir = directoryFilters(p, 'company', locked, { stage: true });
     expect(dir.use('stage')).toBe(false);
     expect(dir.and).toEqual([]);
-    expect(dir.locked).toEqual({ filters: ['stage'], sorts: [], unlockBy: { stage: 'contribute' } });
+    expect(dir.locked).toMatchObject({ filters: ['stage', 'round', 'investor'], sorts: [], disabled: [] });
+    expect(dir.locked.unlockBy.stage).toBe('contribute');
 
     const raised = withField('totalRaisedUsd', 'signedIn', 'signedIn');
     const sorted = directoryFilters(raised, 'company', signedOut, {});
     expect(sorted.sortLocked('raised')).toBe(true);
     expect(sorted.sortLocked('name')).toBe(false);
-    expect(sorted.locked).toEqual({ filters: [], sorts: ['raised'], unlockBy: { raised: 'signIn' } });
+    expect(sorted.locked).toMatchObject({ sorts: ['raised'] });
+    expect(sorted.locked.unlockBy.raised).toBe('signIn');
+  });
+
+  it('locks a range key on a hidden field, and narrows it on a partner-gated one only when applied', () => {
+    const hidden = withField('totalRaisedUsd', 'signedIn', 'signedIn');
+    const dir = directoryFilters(hidden, 'company', signedOut, { raised: true });
+    expect(dir.use('raised')).toBe(false);
+    expect(dir.locked.filters).toContain('raised');
+    expect(dir.locked.unlockBy.raised).toBe('signIn');
+
+    // Default: a partner-written total is hidden signed out.
+    expect(directoryFilters(P, 'company', signedOut, { raised: true }).and).toEqual([
+      { NOT: { partnerFields: { has: 'totalRaisedUsd' } } },
+    ]);
+    expect(directoryFilters(P, 'company', signedOut, { raised: false }).and).toEqual([]);
+    expect(directoryFilters(P, 'company', locked, { raised: true }).and).toEqual([]);
+  });
+
+  it('reports a section filter switched off for every visitor as disabled, never locked', () => {
+    const off = {
+      ...P,
+      sections: { ...P.sections, companyRounds: { ...P.sections.companyRounds, signedOut: 'hidden', signedIn: 'hidden', unlocked: 'hidden' } },
+    } as GatePolicy;
+    const dir = directoryFilters(off, 'company', unlocked, { round: true });
+    expect(dir.use('round')).toBe(false);
+    expect(dir.locked.disabled).toEqual(['round']);
+    expect(dir.locked.filters).not.toContain('round');
+    expect(dir.use('investor')).toBe(true);
+    expect(directoryFilters(off, 'company', admin, { round: true }).use('round')).toBe(true);
+  });
+
+  it('hands the builder the section row filter and the partner criterion columns', () => {
+    const out = directoryFilters(P, 'company', signedOut, {});
+    expect(out.rows('companyRounds')).toEqual(publicRowsWhere(signedOut, P, 'companyRounds'));
+    expect(out.partnerColumns('companyRounds')).toEqual(['date', 'amountUsd', 'kind']);
+    const signedIn = directoryFilters(P, 'company', unlocked, {});
+    expect(signedIn.rows('companyRounds')).toEqual({});
+    expect(signedIn.partnerColumns('companyRounds')).toEqual([]);
+  });
+
+  it('has no section filters off the company directory', () => {
+    expect(directoryFilters(P, 'investor', signedOut, {}).locked.disabled).toEqual([]);
+    expect(directoryFilters(P, 'investor', signedOut, {}).locked.filters).toEqual([]);
   });
 
   it('drops a partner-only column filter rather than narrowing it', () => {
@@ -210,6 +260,14 @@ describe('list access', () => {
     await expect(listAccessFor(user, p, 'company', accessFor)).resolves.toBe(unlocked);
     await listAccessFor({ id: 'c', role: 'CONTRIBUTOR' }, p, 'company', accessFor);
     await listAccessFor(undefined, p, 'company', accessFor);
+    expect(accessFor).toHaveBeenCalledTimes(1);
+  });
+
+  it('looks a USER contribution up when forced, but never for a signed-out or unlocked viewer', async () => {
+    const accessFor = jest.fn(async () => unlocked);
+    await expect(listAccessFor({ id: 'u', role: 'USER' }, P, 'company', accessFor, true)).resolves.toBe(unlocked);
+    await listAccessFor(undefined, P, 'company', accessFor, true);
+    await listAccessFor({ id: 'c', role: 'CONTRIBUTOR' }, P, 'company', accessFor, true);
     expect(accessFor).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,13 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import type {
-  Company,
   CompanyDetailResponse,
+  CompanyDirectoryPage,
   CompanyHistoryResponse,
   CompanySlugEntry,
   SitemapCount,
   CountryFacet,
   FeaturedCompaniesResponse,
-  Paginated,
 } from '@repo/api';
 
 import { CurrentUser, type RequestUser } from '../auth/decorators/current-user.decorator';
@@ -42,7 +41,7 @@ export class CompaniesController {
   @SearchThrottle()
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  findAll(@Query() query: ListCompaniesDto, @CurrentUser() user?: RequestUser): Promise<Paginated<Company>> {
+  findAll(@Query() query: ListCompaniesDto, @CurrentUser() user?: RequestUser): Promise<CompanyDirectoryPage> {
     return this.companies.findAllApproved(query, user);
   }
 

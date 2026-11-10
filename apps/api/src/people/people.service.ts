@@ -162,7 +162,7 @@ export class PeopleService {
     });
 
     // People carry no configurable fact, so nothing is ever locked here.
-    return { items, total, page, pageSize, locked: { filters: [], sorts: [], unlockBy: {} } };
+    return { items, total, page, pageSize, locked: { filters: [], sorts: [], unlockBy: {}, disabled: [] } };
   }
 
   /**

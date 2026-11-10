@@ -355,7 +355,8 @@ describe('Configurable read gate (e2e)', () => {
     it('stage for contributors: the filter is ignored for a locked user, applied once they contributed', async () => {
       current = policyWith({ fields: [field('company', 'stage', 'contributors', 'contributors')] });
       const locked = (await get(`/companies?q=${q}&stage=Seed`, 'locked')).body;
-      expect(locked.locked.filters).toEqual(['stage']);
+      // The section-backed screening filters (round, investor) need full section access too.
+      expect(locked.locked.filters).toEqual(['stage', 'round', 'investor']);
       expect(locked.locked.unlockBy.stage).toBe('contribute');
       expect(locked.items.map((c: { slug: string }) => c.slug).sort()).toEqual([slugs.a, slugs.b].sort());
       expect(locked.items[0].stage).toBe('');
@@ -368,7 +369,13 @@ describe('Configurable read gate (e2e)', () => {
 
     it('defaults: nothing locked and the partner description public', async () => {
       const list = (await get(`/companies?q=${q}&stage=Seed`, 'signedOut')).body;
-      expect(list.locked).toEqual({ filters: [], sorts: [], unlockBy: {} });
+      // Only the section-backed screening filters, which default to contributors.
+      expect(list.locked).toEqual({
+        filters: ['round', 'investor'],
+        sorts: [],
+        unlockBy: { round: 'contribute', investor: 'contribute' },
+        disabled: [],
+      });
       expect(list.items.map((c: { slug: string }) => c.slug)).toEqual([slugs.a]);
       expect((await profile('signedOut')).company.description).toBe(S.description);
     });

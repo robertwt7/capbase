@@ -1,7 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SITEMAP_PAGE_SIZE } from '@repo/api';
+import { DEFAULT_GATE_POLICY, SITEMAP_PAGE_SIZE } from '@repo/api';
 
 import { CompaniesService } from './companies.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -890,5 +890,146 @@ describe('CompaniesService domain lookup (public API de-duplication)', () => {
     );
     const { data } = (create.mock.calls[0] as unknown[])[0] as { data: { domain: string } };
     expect(data.domain).toBe('acme.com');
+  });
+});
+
+describe('CompaniesService screening', () => {
+  const setup = (opts: { investor?: Record<string, unknown> | null; rows?: unknown[] } = {}) => {
+    const findMany = jest.fn(async () => opts.rows ?? []);
+    const count = jest.fn(async () => (opts.rows ?? []).length);
+    const findUnique = jest.fn(async () => opts.investor ?? null);
+    const findFirst = jest.fn(async () => ({
+      id: 'r1',
+      name: 'Series A',
+      date: new Date('2026-09-01T00:00:00Z'),
+      kind: 'Equity',
+      amountUsd: 3_000_000n,
+      currency: 'USD',
+      amountLocal: null,
+      partnerFields: [] as string[],
+    }));
+    const citations = jest.fn(async () => []);
+    const accessFor = jest.fn(async () => ({
+      unlocked: true,
+      signedIn: true,
+      unlockedUntil: null,
+      admin: false,
+      windowDays: 30,
+    }));
+    const prisma = {
+      company: { findMany, count },
+      investor: { findUnique },
+      investorHolding: { findMany: jest.fn(async () => [{ companyId: 'c1' }]) },
+      fundingRound: { findFirst, findMany: jest.fn(async () => []) },
+      citation: { findMany: citations },
+      $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    } as unknown as PrismaService;
+    const service = new CompaniesService(prisma, { accessFor } as unknown as UsersService, staticGatePolicy());
+    return { service, count, findUnique, findFirst, accessFor };
+  };
+
+  it('rejects an inverted range with a message naming params only', async () => {
+    const { service, count } = setup();
+    await expect(service.findAllApproved({ raisedMin: 9, raisedMax: 1 })).rejects.toThrow(
+      'raisedMin must not exceed raisedMax',
+    );
+    expect(count).not.toHaveBeenCalled();
+  });
+
+  it('answers an unfiltered query with no screen context and no contribution lookup', async () => {
+    const { service, accessFor } = setup();
+    const page = await service.findAllApproved({}, { id: 'u1', role: 'USER' });
+    expect(page.screen).toBeNull();
+    expect(page.locked.disabled).toEqual([]);
+    expect(accessFor).not.toHaveBeenCalled();
+  });
+
+  it('looks the contribution up only when a section-backed filter is applied', async () => {
+    const { service, accessFor } = setup();
+    await service.findAllApproved({ raisedMin: 1 }, { id: 'u1', role: 'USER' });
+    expect(accessFor).not.toHaveBeenCalled();
+    await service.findAllApproved({ roundKind: 'Equity' }, { id: 'u1', role: 'USER' });
+    expect(accessFor).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies the round filter for an unlocked USER and returns the matched round', async () => {
+    const { service, count } = setup({ rows: [dbCompany()] });
+    const page = await service.findAllApproved({ roundKind: 'Equity', roundWithin: '12m' }, { id: 'u1', role: 'USER' });
+    const where = (count.mock.calls[0] as unknown as [{ where: { AND: unknown[] } }])[0].where;
+    expect(JSON.stringify(where.AND)).toContain('"kind":"Equity"');
+    expect(page.screen?.window?.from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(page.screen?.window?.to).toBeNull();
+    expect(page.screen?.matches.helia).toMatchObject({ id: 'r1', date: '2026-09-01', amountUsd: 3_000_000, citation: null });
+  });
+
+  it('ignores the round filter signed out and reports it locked', async () => {
+    const { service, count } = setup();
+    const page = await service.findAllApproved({ roundKind: 'Equity' });
+    expect(count).toHaveBeenCalledWith({
+      where: { moderationStatus: 'APPROVED', mergedIntoId: null, partnerOnly: false, AND: [] },
+    });
+    expect(page.locked.filters).toEqual(expect.arrayContaining(['round', 'investor']));
+    expect(page.locked.unlockBy.round).toBe('contribute');
+    expect(page.screen).toBeNull();
+  });
+
+  it('answers a partner-only firm signed out exactly like an unknown slug', async () => {
+    const admin = { id: 'a1', role: 'ADMIN' as const };
+    // An admin bypasses the section gate, so the investor filter applies; the
+    // signed-out case is covered by the e2e suite under a stub policy.
+    const partner = setup({
+      investor: { id: 'i1', slug: 'n', name: 'N', partnerOnly: true, mergedIntoId: null, moderationStatus: 'APPROVED' },
+    });
+    const known = await partner.service.findAllApproved({ investor: 'n' }, admin);
+    expect(known.screen?.investor).toMatchObject({ slug: 'n', scope: 'holdingsAndRounds' });
+
+    // Signed out, a stub policy giving companyInvestors `full` to everyone.
+    const defaults = DEFAULT_GATE_POLICY;
+    const open = {
+      ...defaults,
+      sections: {
+        ...defaults.sections,
+        companyInvestors: { ...defaults.sections.companyInvestors, signedOut: 'full' as const, signedIn: 'full' as const },
+      },
+    };
+    const make = (investor: Record<string, unknown> | null) => {
+      const s = setup({ investor });
+      return new CompaniesService(
+        (s.service as unknown as { prisma: PrismaService }).prisma,
+        {} as UsersService,
+        { current: () => open } as never,
+      );
+    };
+    const hidden = await make({
+      id: 'i1', slug: 'n', name: 'N', partnerOnly: true, mergedIntoId: null, moderationStatus: 'APPROVED',
+    }).findAllApproved({ investor: 'n' });
+    const unknown = await make(null).findAllApproved({ investor: 'does-not-exist' });
+    expect(hidden.screen).toEqual(unknown.screen);
+    expect(hidden.screen).toMatchObject({ investor: null, investorNotFound: true });
+    // Rounds are locked signed out, so the investor matched on holdings only.
+    expect(hidden.items).toEqual([]);
+  });
+
+  it('follows an investor merge chain to the survivor', async () => {
+    const findUnique = jest.fn(async (args: { where: { slug?: string; id?: string } }) =>
+      args.where.slug === 'old'
+        ? { id: 'i0', slug: 'old', name: 'Old', partnerOnly: false, mergedIntoId: 'i1', moderationStatus: 'APPROVED' }
+        : { id: 'i1', slug: 'new', name: 'New', partnerOnly: false, mergedIntoId: null, moderationStatus: 'APPROVED' },
+    );
+    const count = jest.fn(async () => 0);
+    const holdings = jest.fn(async () => [{ companyId: 'c7' }]);
+    const prisma = {
+      company: { findMany: jest.fn(async () => []), count },
+      investor: { findUnique },
+      investorHolding: { findMany: holdings },
+      fundingRound: { findMany: jest.fn(async () => [{ companyId: 'c7' }, { companyId: 'c8' }]) },
+      $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    } as unknown as PrismaService;
+    const service = new CompaniesService(prisma, {} as UsersService, staticGatePolicy());
+    const page = await service.findAllApproved({ investor: 'old' }, { id: 'a', role: 'ADMIN' });
+    expect(page.screen?.investor).toEqual({ slug: 'new', name: 'New', scope: 'holdingsAndRounds' });
+    expect(JSON.stringify(holdings.mock.calls[0])).toContain('"in":["i1"]');
+    // The linked companies, deduplicated, replace an OR of two EXISTS.
+    expect(JSON.stringify(count.mock.calls[0])).toContain('"id":{"in":["c7","c8"]}');
   });
 });

@@ -12,6 +12,10 @@ import {
   MAX_PENDING_API_SUBMISSIONS,
   MAX_V1_LIST_DEPTH,
   MFA_REQUIRED,
+  ROUND_KINDS,
+  ROUND_WINDOWS,
+  SCREEN_FOUNDED_MAX,
+  SCREEN_FOUNDED_MIN,
 } from '@repo/api';
 
 import { Button, buttonVariants, PageContainer, SectionHeader } from '@/components/ui';
@@ -197,6 +201,42 @@ export default function DevelopersPage() {
             and stop at row {formatCount(MAX_V1_LIST_DEPTH)}: a page past it (<C>page × pageSize</C>)
             is a <C>400</C>. The API is for finding and adding specific records, not for copying a
             directory — use <C>q</C>, a filter, or <C>domain</C> to find what you need.
+          </p>
+        </section>
+
+        <section>
+          <h2 className={H2}>Screening companies</h2>
+          <p className={P}>
+            <C>/v1/companies</C> takes the same criteria as the directory&apos;s Filters panel, and
+            every criterion must hold:
+          </p>
+          <ul className="mt-3 list-disc space-y-2 pl-5 text-base leading-[1.65] text-graphite-900">
+            <li>
+              Ranges — <C>raisedMin</C>/<C>raisedMax</C>, <C>valuationMin</C>/<C>valuationMax</C>{' '}
+              (whole USD), <C>foundedMin</C>/<C>foundedMax</C> ({SCREEN_FOUNDED_MIN}–
+              {SCREEN_FOUNDED_MAX}), <C>headcountMin</C>/<C>headcountMax</C> — match a recorded value
+              only. A company with no recorded figure never matches, not even <C>raisedMin=0</C>.
+            </li>
+            <li>
+              Financing criteria — <C>roundWithin</C> ({ROUND_WINDOWS.join(', ')}) or{' '}
+              <C>roundFrom</C>/<C>roundTo</C> (<C>YYYY-MM-DD</C>, both inclusive),{' '}
+              <C>roundKind</C> ({ROUND_KINDS.join(', ')}), <C>roundMin</C>/<C>roundMax</C> — must all
+              hold for the same recorded round. An undisclosed amount never matches a size.{' '}
+              <C>roundWithin</C> is relative to the moment of the request, so the same URL tomorrow
+              covers a different window.
+            </li>
+            <li>
+              <C>investor</C> takes a firm&apos;s slug (a merged firm&apos;s old slug still works).
+              By default it matches a recorded holding or a name on a round;{' '}
+              <C>investorOn=round</C> ties it to the matching financing.
+            </li>
+          </ul>
+          <Code>{`curl "${SITE_URL}/v1/companies?country=AU&sector=Fintech&raisedMin=5000000&raisedMax=50000000&roundWithin=12m&roundKind=Equity" \\
+  -H "Authorization: Bearer ${API_KEY_PREFIX}…"`}</Code>
+          <p className={P}>
+            The response adds <C>screen</C>: the investor it resolved, the financing window it
+            applied, and for each row the latest round that met the financing criteria, with its
+            citation. An inverted range or an invalid date is a <C>400</C> naming the parameter.
           </p>
         </section>
 

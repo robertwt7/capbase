@@ -270,6 +270,25 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   the featured response carries the viewer's `access` (optional JWT, like the detail read) and
   lifts it for unlocked users/admins. The gate rule itself is `UsersService.accessFor` — the one
   definition the profile detail, `/auth/me/contributions` and the featured read all use.
+- `/companies` — the company directory and screener (`CompanyDirectory.tsx`). One `CompanyListQuery`
+  state mirrors the URL: typing in the search box `router.replace`s (debounced); every committed
+  change (a select, the **Filters** sheet's Apply, a chip's ×, "Clear filters") `router.push`es, so
+  Back steps through filter states; every change drops `page`. When the URL changes from outside
+  (Back/Forward, a deep link, a pagination link) the controls reset from it, adjusted during render
+  (`seen`/`written` keys) — never from a URL this component just wrote. The **Filters** sheet
+  (`ScreenSheet.tsx`, RHF + zod `lib/validation/screen.ts`, `parseMoneyInput` reads `5M`/`500k`)
+  holds the scale ranges, one matching **financing** (window, kind, round size), an **investor**
+  (`InvestorPicker`, a combobox on `/api/search`'s investors, stores the slug; Escape closes the list,
+  not the sheet) with "any recorded link" / "on the matching financing", and the optional columns.
+  **Active chips** (`ActiveFilters.tsx`, `screenChips`) list each applied criterion; a param in
+  `locked.filters`/`locked.disabled` never gets a chip. `?cols=country,founded,headcount` adds
+  `CompanyTable` columns (`companyColumns(extra, financing)` — literal track strings; the default call
+  is `COMPANY_COLUMNS`, unchanged for the landing/markets tables and skeletons) and is a view
+  preference ("Clear filters" keeps it). When financing criteria applied, a **Financing** column shows
+  `screen.matches[slug]` (label, kind, date, amount in its currency `≈ $`, a link-free `<Citation
+  link={false}>`, since the row is already a link). A hand-edited URL never 400s: the web parses the
+  screening params with the shared lenient `parseCompanyScreen` (an inverted pair drops both bounds,
+  `roundWithin` beats fixed dates, `investorOn` without `investor` is dropped).
 - `/companies/[slug]` — full company profile (funding ladder, investors, people,
   acquisitions, exits, diversity, financials). Missing sections render empty states
   that invite contribution (open-source angle). Each section is its gated rows plus a
@@ -627,6 +646,21 @@ inside the window, or the CONTRIBUTOR role). **Admins bypass everything** (`acce
      Company/firm stubs with prose are indexable and in the sitemap; bare stubs, funds and
      people stay `noindex`. `indexable`, canonical and the sitemap never depend on the policy.
 
+3. **Section-backed directory filters.** A `SECTION_REGISTRY` entry may carry `filter: { param, label
+   }` — `companyRounds` → `round` (every financing criterion), `companyInvestors` → `investor`. The
+   filter needs **full** access to its section (`sectionFilterGate`; a preview tier would let
+   membership reveal rows past the cut), so under the defaults both are contributors-only; the
+   lowest tier that gets `full` is its `unlockBy`. A section hidden from every tier (or one no tier
+   gets in full) puts its param in `DirectoryPage.locked.disabled` — the API ignores it and the web
+   renders nothing, not a lock. `directoryFilters` also hands the query builder `rows(section)`
+   (`publicRowsWhere`) and `partnerColumns(section)` (round columns a criterion may not match on below
+   the partner audience), so the builder never reads the policy. `listAccessFor(…, force)` runs the
+   contribution lookup for a signed-in USER only when such a filter is applied and
+   `sectionFiltersNeedLookup` says the tier matters — a plain directory stays one query. Range keys
+   (`raised`, `valuation`, `founded`, `headcount`) are ordinary `FIELD_REGISTRY` filter keys covering
+   their `…Min`/`…Max` params. The admin section row carries `filter` and says "Also locks the …
+   filter on /companies (needs Full)".
+
 **Counts and market aggregates stay public and unconfigurable**, partner rows included — a
 count says rows exist, not what they say, and it is the sign-in hook. Directory filters and sorts
 follow the field policy (`directoryFilters`): a filter on a field the viewer may not see is
@@ -677,12 +711,36 @@ response includes `access` (`CompanyDetailResponse`, `InvestorDetailResponse`,
 unlocked?" endpoint. The four detail responses also carry **`gate: { sections }`** — a
 `SectionView { disabled, unlockBy, adminOnly }` per section of that page, computed for this
 viewer by `sectionView` — and the four directory lists return **`DirectoryPage<T>`**
-(`Paginated<T>` plus `locked: { filters, sorts, unlockBy }`). `/v1` lists return the same
+(`Paginated<T>` plus `locked: { filters, sorts, unlockBy, disabled }`; `/companies` returns `CompanyDirectoryPage`, which adds `screen`). `/v1` lists return the same
 superset. **Don't add a guard for this**: the guards (`JwtAuthGuard`,
 `OptionalJwtAuthGuard`, `RolesGuard`, `VerifiedEmailGuard`, `PendingCapGuard`, `TurnstileGuard`)
 decide whether a request may proceed, whereas the gate decides how much a request *sees*. Load
 citations only for rows already in the response, so a locked viewer never receives a citation
 for a row they can't see. `/v1` passes the key owner — a CONTRIBUTOR/ADMIN, so always unlocked.
+
+**Company screening** (`GET /companies`, and so `/v1/companies`). The contract is one shared module,
+`@repo/api` `domain/screening.ts`: `CompanyScreenQuery` (which `CompanyListQuery` extends), the
+bounds, `validateCompanyScreen` (cross-field rules; the message names params only — run at the top
+of `findAllApproved`, so both controllers share it → 400), `resolveRoundWindow` (rolling windows
+resolved per request, month-end clamped; fixed `roundTo` inclusive), the lenient `parseCompanyScreen`
+and the canonical serialiser `companyQueryToParams` + `COMPANY_QUERY_VERSION` (saved searches persist
+exactly this). The `where` is built by the pure `apps/api/src/companies/company-screen.ts`:
+scale ranges match a **recorded** value only (`gt: 0` always — 0/`null` is the unknown sentinel);
+every financing criterion lands in **one** `rounds: { some }` (EXISTS: same-round semantics, no
+fan-out, `count` and pages agree), appended to the company `AND` (never a second top-level `OR`; `q`
+owns it). The investor resolves slug → live firm through merges (`prisma/merge-chain.ts`
+`resolveInvestorSurvivor`, shared with `InvestorsService`); signed out a partner-only firm answers
+like an unknown slug (`screen.investorNotFound`, empty page). Scope: `round` (named on the matching
+financing, inside the round predicate), `holdingsAndRounds` (default, when rounds are usable) or
+`holdings`. For `holdingsAndRounds` the service pre-resolves the linked company ids with two Prisma
+reads (`investorLinkReads`) and filters `id IN (…)`: an `OR` of two EXISTS scans every company (651
+ms for Y Combinator → 13 ms); past `INVESTOR_LINK_CAP` per branch it falls back to the EXISTS form.
+The response is `CompanyDirectoryPage` (`DirectoryPage<Company>` + `screen`: the resolved investor
+and scope, the window applied, and per row the latest matching round — read with the same predicate,
+≤ pageSize `LIMIT 1` reads, gated by `gateRowFields`, with its citation). `screen` is null when no
+screening param applied. No new sorts; `/v1` limits and `MAX_V1_LIST_DEPTH` unchanged.
+`test/company-screening.e2e-spec.ts` is the fixture suite (split rounds, duplicates, unknown figures,
+boundaries, grant vs equity, merges, namesakes, partner rows/fields, every tier, `/v1` parity).
 
 **`GET /companies/featured?limit=`** (default 8, max 24) is the landing shop window. There is
 no page-view tracking, so popularity is a score over data already held — saves ×5, approved
@@ -798,6 +856,11 @@ Company/FundingRound rows — and the ingest-only `Fund` — also have
 partner). People use `Person.identifierOnly`, the same signal (the partner is the only
 identifier-only source). `RoundInvestor.externalSource` says which source named a firm on a round.
 Ingest maintains them (Jobs → PARTNER); `make backfill-partner-provenance` reconstructs them.
+
+**`FundingRound_date_idx`** (`("date")`, migration `round_screening_index`) serves the screening
+financing window. Measured: a `(moderationStatus, kind, date)` index was equally fast with a kind
+but unusable for a window without one; plans are recorded in
+`thoughts/shared/plans/2026-11-11-advanced-company-screening.md` → Performance.
 
 **Directory sort counts**: `Person.roleCount` / `Person.companyCount` and
 `Investor.holdingCount` (indexed) are the `/people` and `/investors` sort keys and the "at

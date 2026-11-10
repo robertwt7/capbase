@@ -24,6 +24,8 @@ import {
   meets,
   needsContributionLookup,
   partnerVisible,
+  sectionFilterGate,
+  sectionFiltersOf,
   sectionPartnerRows,
   sectionPartnerUnlockBy,
   type DirectoryPage,
@@ -150,7 +152,7 @@ export const isMasked = (entity: { masked?: string[] }, field: string): boolean 
   entity.masked?.includes(field) ?? false;
 
 /** The provenance filter for rows that may be the partner's. */
-type PublicRows = { OR?: ({ externalSource: null } | { externalSource: { not: string } })[] };
+export type PublicRows = { OR?: ({ externalSource: null } | { externalSource: { not: string } })[] };
 
 const NOT_PARTNER: Required<PublicRows> = {
   OR: [{ externalSource: null }, { externalSource: { not: PARTNER_SOURCE } }],
@@ -207,7 +209,9 @@ export const listAccess = (viewer?: unknown, policy?: GatePolicy): ViewerAccess 
 /**
  * `listAccess`, plus the contribution lookup (`accessFor`, nine indexed
  * `findFirst`s) for a signed-in USER — but only while some setting of the
- * listed entities has a `contributors` audience. Otherwise a list stays one
+ * listed entities has a `contributors` audience, or when `force` is set (a
+ * section-backed directory filter is applied and the policy makes the
+ * contribution matter: `sectionFiltersNeedLookup`). Otherwise a list stays one
  * query for everyone.
  */
 export async function listAccessFor<V extends { role: string }>(
@@ -215,9 +219,11 @@ export async function listAccessFor<V extends { role: string }>(
   policy: GatePolicy,
   entities: SectionEntity | readonly SectionEntity[],
   accessFor: (viewer: V) => Promise<ViewerAccess>,
+  force = false,
 ): Promise<ViewerAccess> {
   const quick = listAccess(viewer, policy);
   if (!viewer || quick.unlocked) return quick;
+  if (force) return accessFor(viewer);
   const list = typeof entities === 'string' ? [entities] : entities;
   return list.some((e) => needsContributionLookup(policy, e)) ? accessFor(viewer) : quick;
 }
@@ -231,9 +237,19 @@ export interface DirectoryGate {
   and: { NOT: { partnerFields: { has: string } } }[];
   /** Whether the sort `param` is locked (fall back to the default sort). */
   sortLocked: (param: string | undefined) => boolean;
+  /** The child-row filter of a section-backed filter (`publicRowsWhere`), so a
+   *  query builder never reads the policy itself. */
+  rows: (section: GatedSection) => PublicRows;
+  /** Row columns the partner may have corrected that this viewer may not see
+   *  for `section`: a criterion on one of them never matches a partner-written
+   *  value (`NOT partnerFields has`). Empty when the partner rows are visible. */
+  partnerColumns: (section: GatedSection) => readonly string[];
   /** The locked params, for the response. */
   locked: DirectoryPage<never>['locked'];
 }
+
+/** The round columns a screening criterion matches on (and the partner may correct). */
+const ROUND_CRITERION_COLUMNS = ['date', 'amountUsd', 'kind'] as const;
 
 /**
  * The directory filters and sorts of `entity` under the field policy:
@@ -243,8 +259,12 @@ export interface DirectoryGate {
  *   - a filter on a field whose PARTNER value is hidden is narrowed to rows
  *     whose value the partner did not write (`and`);
  *   - a sort on a hidden field is locked (the caller falls back to its default
- *     sort). A sort on a partner-gated field keeps the accepted rank trade.
- * `applied`: which filter params the request carries.
+ *     sort). A sort on a partner-gated field keeps the accepted rank trade;
+ *   - a filter backed by a SECTION (`round`, `investor`) needs full access to
+ *     it (`sectionFilterGate`): otherwise it is ignored and reported locked, or
+ *     — switched off for every visitor — reported `disabled`.
+ * `applied`: which filter keys the request carries (a range key such as
+ * `raised` stands for its min/max params).
  */
 export function directoryFilters(
   policy: GatePolicy,
@@ -253,6 +273,7 @@ export function directoryFilters(
   applied: Record<string, boolean>,
 ): DirectoryGate {
   const ignored = new Set<string>();
+  const disabled = new Set<string>();
   const sorts = new Set<string>();
   const unlockBy: Record<string, UnlockBy> = {};
   const and: DirectoryGate['and'] = [];
@@ -277,11 +298,23 @@ export function directoryFilters(
       );
     }
   }
+  for (const { section, param } of sectionFiltersOf(entity)) {
+    const gate = sectionFilterGate(policy, section, access);
+    if (gate.use) continue;
+    if (gate.disabled) {
+      disabled.add(param);
+    } else {
+      ignored.add(param);
+      unlockBy[param] = gate.unlockBy ?? 'contribute';
+    }
+  }
   return {
-    use: (param) => !ignored.has(param),
+    use: (param) => !ignored.has(param) && !disabled.has(param),
     and,
     sortLocked: (param) => param !== undefined && sorts.has(param),
-    locked: { filters: [...ignored], sorts: [...sorts], unlockBy },
+    rows: (section) => publicRowsWhere(access, policy, section),
+    partnerColumns: (section) => (sectionPartnerRows(policy, section, access) ? [] : ROUND_CRITERION_COLUMNS),
+    locked: { filters: [...ignored], sorts: [...sorts], unlockBy, disabled: [...disabled] },
   };
 }
 

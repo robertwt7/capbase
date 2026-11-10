@@ -62,12 +62,16 @@ export function Citation({
   entityId,
   field,
   className,
+  link = true,
 }: {
   citations: CitationRow[];
   entityId: string;
   /** Column name for a field-level citation; omit to attest the whole row. */
   field?: string;
   className?: string;
+  /** False inside an element that is already a link (a directory row): the
+   *  publisher tag renders as plain text, since a link may not nest another. */
+  link?: boolean;
 }) {
   const matches = citationsFor(citations, entityId, field);
 
@@ -79,6 +83,18 @@ export function Citation({
       >
         <span className="sr-only">Uncited</span>
         <span aria-hidden="true">—</span>
+      </span>
+    );
+  }
+
+  if (!link) {
+    return (
+      <span className={`ml-1 inline-flex align-super gap-0.5 ${className ?? ''}`}>
+        {matches.map((c) => (
+          <span key={c.id} title={sourceTitle(c)} className="font-mono text-[10px] tracking-[0.04em] text-graphite-500">
+            <span className="sr-only">Source: </span>[{SOURCE_LABELS[c.source.sourceType] ?? 'SRC'}]
+          </span>
+        ))}
       </span>
     );
   }

@@ -19,6 +19,7 @@ import {
   type AcquisitionDeal,
   type Company,
   type CompanyDetailResponse,
+  type CompanyDirectoryPage,
   type CompanyHistoryResponse,
   type CompanyListQuery,
   type CountryFacet,
@@ -509,7 +510,7 @@ function allowMockFallback(label: string, err: unknown): void {
 }
 
 /** The offline fallback locks nothing (it is the unlocked mock data). */
-const NO_LOCKS: DirectoryPage<never>['locked'] = { filters: [], sorts: [], unlockBy: {} };
+const NO_LOCKS: DirectoryPage<never>['locked'] = { filters: [], sorts: [], unlockBy: {}, disabled: [] };
 
 /** Build a query string from defined params only. */
 function toSearchParams(query: object): string {
@@ -521,8 +522,9 @@ function toSearchParams(query: object): string {
   return qs ? `?${qs}` : '';
 }
 
-/** Offline fallback: apply the list query to the mock array client-side. */
-function paginateFallbackCompanies(query: CompanyListQuery): DirectoryPage<Company> {
+/** Offline fallback: apply the list query to the mock array client-side
+ *  (the basic filters only — screening needs the API). */
+function paginateFallbackCompanies(query: CompanyListQuery): CompanyDirectoryPage {
   const page = query.page ?? 1;
   const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
   const needle = (query.q ?? '').trim().toLowerCase();
@@ -552,12 +554,16 @@ function paginateFallbackCompanies(query: CompanyListQuery): DirectoryPage<Compa
     page,
     pageSize,
     locked: NO_LOCKS,
+    screen: null,
   };
 }
 
-export async function getCompanies(query: CompanyListQuery = {}): Promise<DirectoryPage<Company>> {
+export async function getCompanies(query: CompanyListQuery = {}): Promise<CompanyDirectoryPage> {
   try {
-    return await apiFetch<DirectoryPage<Company>>(`/companies${toSearchParams(query)}`, await listInit());
+    const page = await apiFetch<CompanyDirectoryPage>(`/companies${toSearchParams(query)}`, await listInit());
+    // Defaults for the screening fields, so a cached or older API response
+    // (without `locked.disabled` / `screen`) still renders.
+    return { ...page, locked: { ...NO_LOCKS, ...page.locked }, screen: page.screen ?? null };
   } catch (err) {
     allowMockFallback('getCompanies', err);
     return paginateFallbackCompanies(query);

@@ -10,7 +10,7 @@ import {
 import {
   MAX_PENDING_API_SUBMISSIONS,
   type ApiKeyWhoAmI,
-  type Company,
+  type CompanyDirectoryPage,
   type CompanyDetailResponse,
   type FundDetailResponse,
   type FundSummary,
@@ -101,25 +101,59 @@ export class V1ReadController {
     summary: 'List companies',
     description:
       'One page of public companies. Pass `domain` to check whether a company exists before ' +
-      'creating it.',
+      'creating it.\n\n' +
+      '**Screening.** Every criterion must hold. Ranges (`raisedMin`/`raisedMax`, `valuation…`, ' +
+      '`founded…`, `headcount…`) match a *recorded* value only: a company with no recorded figure ' +
+      'never matches, not even `raisedMin=0`. Financing criteria (`roundWithin` or ' +
+      '`roundFrom`/`roundTo`, `roundKind`, `roundMin`/`roundMax`) must all hold for the *same* ' +
+      'approved round; an undisclosed amount never matches a size, and a rolling `roundWithin` ' +
+      'window is resolved when the request runs. `investor` takes a firm slug (a merged slug ' +
+      'resolves to the surviving firm): `investorOn=any` (default) matches a recorded holding or a ' +
+      'name on an approved round, `investorOn=round` only the matching financing. `screen` reports ' +
+      'the resolved investor, the window applied and, per row, the latest matching round. A filter ' +
+      'your access does not cover is ignored and listed in `locked.filters`.',
   })
   @ApiOkResponse({
-    description: '`{ items: Company[], total, page, pageSize }`.',
+    description: '`{ items: Company[], total, page, pageSize, locked, screen }`.',
     schema: {
       example: {
         items: [{ slug: 'helia', name: 'Helia', domain: 'helia.com' }],
         total: 1,
         page: 1,
         pageSize: 25,
+        locked: { filters: [], sorts: [], unlockBy: {}, disabled: [] },
+        screen: {
+          investor: { slug: 'example-ventures', name: 'Example Ventures', scope: 'holdingsAndRounds' },
+          investorNotFound: false,
+          window: { from: '2025-11-11', to: null },
+          matches: {
+            helia: {
+              id: 'round-id',
+              name: 'Series A',
+              date: '2026-03-03',
+              kind: 'Equity',
+              amountUsd: 12000000,
+              currency: 'USD',
+              amountLocal: null,
+              citation: null,
+            },
+          },
+        },
       },
     },
   })
-  @ApiBadRequestResponse({ description: LIST_DEPTH_MESSAGE })
+  @ApiBadRequestResponse({
+    description:
+      `${LIST_DEPTH_MESSAGE} Also a 400 for an invalid screening query: an inverted range ` +
+      '(`raisedMin must not exceed raisedMax`), `roundWithin` mixed with `roundFrom`/`roundTo`, an ' +
+      'unreal date, a value out of bounds, or `investorOn` without `investor`. The message names ' +
+      'the params only.',
+  })
   @Get('companies')
   listCompanies(
     @Query() query: V1ListCompaniesDto,
     @CurrentUser() user: RequestUser,
-  ): Promise<Paginated<Company>> {
+  ): Promise<CompanyDirectoryPage> {
     assertListDepth(query);
     return this.companies.findAllApproved(query, user);
   }
