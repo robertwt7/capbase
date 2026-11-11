@@ -20,17 +20,18 @@ import {
 } from '@repo/api';
 import { z } from 'zod';
 
-const SUFFIX: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9, bn: 1e9, t: 1e12 };
+const SUFFIX: Record<string, number> = { k: 1e3, m: 1e6, mm: 1e6, b: 1e9, bn: 1e9, t: 1e12 };
 
 /**
  * A money amount as people type it — `5M`, `500k`, `1.5b`, `$5,000,000`,
- * `2 500 000` — to whole USD. Undefined for an empty input; null when it is
- * not an amount (or out of range).
+ * `2 500 000` — to whole USD. The suffix is the only unit: a bare number is
+ * dollars (`5` is $5, never $5M). Undefined for an empty input; null when it
+ * is not an amount (or out of range).
  */
 export function parseMoneyInput(raw: string): number | null | undefined {
   const s = raw.trim().toLowerCase().replace(/^\$/, '').replace(/[,\s_]/g, '');
   if (s === '') return undefined;
-  const m = /^(\d+(?:\.\d+)?)(k|m|b|bn|t)?$/.exec(s);
+  const m = /^(\d+(?:\.\d+)?)(k|mm|m|bn|b|t)?$/.exec(s);
   if (!m) return null;
   const n = Math.round(Number(m[1]) * (m[2] ? SUFFIX[m[2]]! : 1));
   return Number.isSafeInteger(n) && n >= 0 && n <= SCREEN_MONEY_MAX ? n : null;
@@ -77,7 +78,7 @@ export const screenFormSchema = z
     };
     const money = ['raisedMin', 'raisedMax', 'valuationMin', 'valuationMax', 'roundMin', 'roundMax'] as const;
     for (const f of money) {
-      if (parseMoneyInput(v[f]) === null) issue(f, 'Enter an amount such as 5M, 500k or 2,000,000.');
+      if (parseMoneyInput(v[f]) === null) issue(f, 'Enter digits, optionally ending in k, M or B: 500k, 5M, 2,000,000.');
     }
     for (const f of ['foundedMin', 'foundedMax'] as const) {
       if (parseIntInput(v[f], SCREEN_FOUNDED_MIN, SCREEN_FOUNDED_MAX) === null) {

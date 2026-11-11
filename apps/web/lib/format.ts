@@ -46,6 +46,11 @@ export function formatUsd(amount: number | null): string {
   return formatMoney(amount, 'USD');
 }
 
+/** Whole dollars, every digit: $5,000,000. For echoing back what was typed. */
+export function formatUsdExact(amount: number): string {
+  return `$${formatCount(amount)}`;
+}
+
 /** A reported range in its own currency: "$1M–$10M", "From $1M", "Up to $10M",
  *  "$5M" (equal bounds), or null when neither bound was reported. */
 export function formatMoneyRange(min: number | null, max: number | null, currency = 'USD'): string | null {

@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useRef, useState, type ReactNode } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch, type Control } from 'react-hook-form';
 
 import { ROUND_KINDS, type CompanyScreenQuery, type DirectoryPage } from '@repo/api';
 
@@ -23,8 +23,10 @@ import {
   SheetTrigger,
   TextField,
 } from '@/components/ui';
+import { formatUsdExact } from '@/lib/format';
 import { COMPANY_EXTRA_COLUMNS, type CompanyExtraColumn } from '@/lib/list-params';
 import {
+  parseMoneyInput,
   screenFormDefaults,
   screenFormSchema,
   toScreenFormValues,
@@ -89,6 +91,37 @@ const SCALE = [
 
 const hintClass = 'font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase';
 const legendClass = 'font-display text-[15px] font-semibold tracking-tight text-ink';
+
+type MoneyName = 'raisedMin' | 'raisedMax' | 'valuationMin' | 'valuationMax' | 'roundMin' | 'roundMax';
+
+/** A USD amount field that echoes the dollars it read (`5M` → `= $5,000,000`, `5` →
+ *  `= $5`), so the unit is never a guess. Nothing echoes while it is empty or invalid;
+ *  an invalid value gets the schema's message once the field is left. */
+function MoneyField({
+  control,
+  name,
+  label,
+  placeholder,
+}: {
+  control: Control<ScreenFormValues>;
+  name: MoneyName;
+  label: string;
+  placeholder: string;
+}) {
+  const value = useWatch({ control, name });
+  const amount = parseMoneyInput(value);
+  return (
+    <TextField
+      control={control}
+      name={name}
+      label={label}
+      inputMode="decimal"
+      placeholder={placeholder}
+      className="h-11 font-mono"
+      description={typeof amount === 'number' ? <span className="font-mono">= {formatUsdExact(amount)}</span> : null}
+    />
+  );
+}
 
 /**
  * The directory's advanced criteria in a sheet (full width on a phone): scale
@@ -155,6 +188,8 @@ function ScreenSheetBody({
   const form = useForm<ScreenFormValues>({
     resolver: zodResolver(screenFormSchema),
     defaultValues: toScreenFormValues(query, investorName),
+    // A typo is flagged when the field is left, not only on Apply.
+    mode: 'onTouched',
   });
   const [cols, setCols] = useState<CompanyExtraColumn[]>(columns);
   const listOpen = useRef(false);
@@ -188,7 +223,10 @@ function ScreenSheetBody({
     >
       <SheetHeader className="border-b border-line px-5 py-4">
         <SheetTitle className="text-lg">Filter companies</SheetTitle>
-        <SheetDescription>Every criterion must hold. Only recorded values match.</SheetDescription>
+        <SheetDescription>
+          Every criterion must hold. Only recorded values match. Amounts are US dollars: add k, M or B for thousands,
+          millions or billions (500k, 5M, 1.5B); a number without one is dollars.
+        </SheetDescription>
       </SheetHeader>
       <Form {...form}>
         <form onSubmit={submit} noValidate className="flex flex-1 flex-col">
@@ -199,23 +237,30 @@ function ScreenSheetBody({
                   <legend className={legendClass}>{g.legend}</legend>
                   {lockedFilter(g.key) ?? (
                     <>
-                      <div className="mt-2 grid grid-cols-2 gap-3">
-                        <TextField
-                          control={form.control}
-                          name={g.min}
-                          label="Min"
-                          inputMode={g.mode}
-                          placeholder={g.mode === 'decimal' ? 'e.g. 5M' : undefined}
-                          className="h-11 font-mono"
-                        />
-                        <TextField
-                          control={form.control}
-                          name={g.max}
-                          label="Max"
-                          inputMode={g.mode}
-                          placeholder={g.mode === 'decimal' ? 'e.g. 50M' : undefined}
-                          className="h-11 font-mono"
-                        />
+                      <div className="mt-2 grid grid-cols-2 items-start gap-3">
+                        {g.mode === 'decimal' ? (
+                          <>
+                            <MoneyField control={form.control} name={g.min} label="Min" placeholder="e.g. 5M" />
+                            <MoneyField control={form.control} name={g.max} label="Max" placeholder="e.g. 50M" />
+                          </>
+                        ) : (
+                          <>
+                            <TextField
+                              control={form.control}
+                              name={g.min}
+                              label="Min"
+                              inputMode={g.mode}
+                              className="h-11 font-mono"
+                            />
+                            <TextField
+                              control={form.control}
+                              name={g.max}
+                              label="Max"
+                              inputMode={g.mode}
+                              className="h-11 font-mono"
+                            />
+                          </>
+                        )}
                       </div>
                       <p className={hintClass}>{g.hint}</p>
                     </>
@@ -252,23 +297,9 @@ function ScreenSheetBody({
                         <TextField control={form.control} name="roundTo" label="To" type="date" className="h-11" />
                       </div>
                     ) : null}
-                    <div className="grid grid-cols-2 gap-3">
-                      <TextField
-                        control={form.control}
-                        name="roundMin"
-                        label="Round size min"
-                        inputMode="decimal"
-                        placeholder="e.g. 1M"
-                        className="h-11 font-mono"
-                      />
-                      <TextField
-                        control={form.control}
-                        name="roundMax"
-                        label="Round size max"
-                        inputMode="decimal"
-                        placeholder="e.g. 20M"
-                        className="h-11 font-mono"
-                      />
+                    <div className="grid grid-cols-2 items-start gap-3">
+                      <MoneyField control={form.control} name="roundMin" label="Round size min" placeholder="e.g. 1M" />
+                      <MoneyField control={form.control} name="roundMax" label="Round size max" placeholder="e.g. 20M" />
                     </div>
                     <p className={hintClass}>
                       Matches a single recorded round that meets every condition. Undisclosed amounts never match a

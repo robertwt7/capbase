@@ -10,6 +10,11 @@ import {
 } from '@/lib/validation/saved-search';
 import { applyServerErrors } from '@/lib/validation/utils';
 import { saveSearchAction } from '@/app/(account)/profile/saved-search-actions';
+/**
+ * The toolbar's Save search button, sized like Filters. Rendered as siblings inside the
+ * toolbar's wrapping flex row: the name form opens on its own full-width line below, and
+ * the status line takes no space until it has something to say.
+ */
 export function SaveSearch({ params }: { params: string }) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
@@ -19,10 +24,10 @@ export function SaveSearch({ params }: { params: string }) {
     defaultValues: savedSearchFormDefaults,
   });
   return (
-    <div>
+    <>
       <Button
-        size="sm"
         variant="outline"
+        shape="box"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
@@ -31,7 +36,7 @@ export function SaveSearch({ params }: { params: string }) {
       {open ? (
         <Form {...form}>
           <form
-            className="mt-3 flex flex-wrap items-end gap-3"
+            className="flex basis-full flex-wrap items-end gap-3"
             noValidate
             onSubmit={form.handleSubmit(async (values) => {
               setError(undefined);
@@ -48,11 +53,12 @@ export function SaveSearch({ params }: { params: string }) {
               }
             })}
           >
-            <TextField control={form.control} name="name" label="Search name" />
+            <div className="w-full max-w-xs">
+              <TextField control={form.control} name="name" label="Search name" autoFocus className="h-11" />
+            </div>
             <Button
               variant="primary"
               type="submit"
-              size="sm"
               disabled={form.formState.isSubmitting}
             >
               Save
@@ -61,9 +67,10 @@ export function SaveSearch({ params }: { params: string }) {
           </form>
         </Form>
       ) : null}
-      <p role="status" className="mt-1 text-xs text-graphite-500">
+      {/* Always mounted (a live region must exist before it changes); out of flow while empty. */}
+      <p role="status" className="basis-full text-xs text-graphite-500 empty:sr-only">
         {message}
       </p>
-    </div>
+    </>
   );
 }
