@@ -8,6 +8,8 @@ import { formatDate } from '../../../lib/format';
 import { getSavedCompanies } from '../../../lib/watchlist';
 import { logout } from '../actions';
 import { SavedCompanies } from './SavedCompanies';
+import { SavedSearches } from './SavedSearches';
+import { savedSearchesIfAvailable } from '@/lib/saved-searches';
 
 import styles from '../account.module.css';
 
@@ -16,11 +18,16 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ searchCursor?: string }>;
+}) {
   const user = await requireUser('/profile');
-  const [{ access, items }, savedCompanies] = await Promise.all([
+  const [{ access, items }, savedCompanies, searches] = await Promise.all([
     getMyContributions(),
     getSavedCompanies(),
+    savedSearchesIfAvailable((await searchParams).searchCursor),
   ]);
 
   return (
@@ -65,7 +72,17 @@ export default async function ProfilePage() {
         hasPending={items.some((i) => i.moderationStatus === 'PENDING')}
       />
 
-      <SavedCompanies items={savedCompanies} />
+      <SavedCompanies items={savedCompanies} canMonitor={searches !== null} />
+      {searches ? (
+        <>
+          <div className="mt-6">
+            <Button variant="outline" size="sm" href="/profile/updates">
+              Your updates
+            </Button>
+          </div>
+          <SavedSearches page={searches} />
+        </>
+      ) : null}
 
       <h2 className={styles.sectionTitle}>Your contributions</h2>
       {items.length === 0 ? (

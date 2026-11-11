@@ -33,6 +33,7 @@ import { formatCount } from '@/lib/format';
 import { companyColumnsParam, companyListQuery, type CompanyExtraColumn } from '@/lib/list-params';
 
 import { ActiveFilters, screenChips, type Chip } from './ActiveFilters';
+import { SaveSearch } from './SaveSearch';
 import { ScreenSheet } from './ScreenSheet';
 
 const ALL = 'all';
@@ -106,11 +107,13 @@ export function CompanyDirectory({
   result,
   countries,
   initial,
+  canSaveSearch = false,
 }: {
   /** `locked`: the filters and sorts the API ignores for this viewer; `screen`: what it applied. */
   result: CompanyDirectoryPage;
   countries: CountryFacet[];
   initial: Record<string, string | undefined>;
+  canSaveSearch?: boolean;
 }) {
   const { locked, screen } = result;
   const router = useRouter();
@@ -287,6 +290,7 @@ export function CompanyDirectory({
           columns={cols}
           onApply={applyScreen}
         />
+        {canSaveSearch ? <SaveSearch params={companyQueryToParams({ ...query, q: qInput.trim() || undefined }).toString()} /> : null}
       </div>
 
       <ActiveFilters chips={chips} onRemove={removeChip} onClear={clear} showClear={active} />

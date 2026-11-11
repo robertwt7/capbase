@@ -228,7 +228,8 @@ describe('UsersService saved companies', () => {
         },
       ],
     });
-    await expect(service.listSavedCompanies('u1')).resolves.toEqual([
+    jest.spyOn(service, 'accessFor').mockResolvedValue({ unlocked: false, signedIn: true, admin: false, unlockedUntil: null, windowDays: 30 });
+    await expect(service.listSavedCompanies('u1', { id: 'u1', role: 'USER' })).resolves.toEqual([
       {
         slug: 'acme',
         name: 'Acme',

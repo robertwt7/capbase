@@ -157,7 +157,7 @@ describe('Directory sort counts (e2e)', () => {
   });
 
   afterAll(async () => {
-    // By the ids this suite created only — see the e2e cleanup rule in CLAUDE.md.
+    // By the ids this suite created only — see the e2e cleanup rule in AGENTS.md.
     if (adminId) await prisma.mergeRecord.deleteMany({ where: { mergedById: adminId } });
     await prisma.revision.deleteMany({ where: { companyId: { in: companyIds } } });
     await prisma.personRole.deleteMany({ where: { companyId: { in: companyIds } } });

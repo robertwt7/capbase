@@ -12,6 +12,7 @@ import {
 } from '@repo/api';
 import type { DirectoryCountScope, MergeCandidate, Prisma } from '@repo/db';
 
+import { seedMergedRounds } from '../../monitoring/merge-monitoring';
 import { PrismaService } from '../../prisma/prisma.service';
 import { toEntityIdentifiers } from '../../provenance/identifier.mapper';
 import { toJsonValue } from '../../provenance/revision.util';
@@ -37,7 +38,8 @@ interface MovedRecord {
   /** EntityIdentifier ids whose `entityId` moved. */
   identifierIds: string[];
   /** Deleted because the survivor already held the same (userId, companyId). */
-  deletedSavedCompanies: { userId: string; createdAt: string }[];
+  deletedSavedCompanies: { userId: string; createdAt: string; monitoredAt?: string | null; monitorStatus?: string | null; evaluatedAt?: string | null }[];
+  survivorMonitoring?: { id: string; monitoredAt: string | null; monitorStatus: string | null; evaluatedAt: string | null }[];
   /** Deleted on the (sourceId, entityType, entityId, field) unique key. */
   deletedCitations: {
     sourceId: string;
@@ -451,6 +453,7 @@ export class MergeService {
     }
 
     const moved = emptyMoved();
+    await seedMergedRounds(tx, survivorId, losingId);
 
     for (const model of COMPANY_CHILDREN) {
       moved.remapped[model] = await remapByCompany(tx, model, losingId, survivorId);
@@ -460,7 +463,7 @@ export class MergeService {
     // A user who saved both rows would end up with two rows for one company.
     const [loserSaves, survivorSaves] = await Promise.all([
       tx.savedCompany.findMany({ where: { companyId: losingId } }),
-      tx.savedCompany.findMany({ where: { companyId: survivorId }, select: { userId: true } }),
+      tx.savedCompany.findMany({ where: { companyId: survivorId } }),
     ]);
     const alreadySaved = new Set(survivorSaves.map((s) => s.userId));
     const remapSaves: string[] = [];
@@ -469,7 +472,13 @@ export class MergeService {
         moved.deletedSavedCompanies.push({
           userId: save.userId,
           createdAt: save.createdAt.toISOString(),
+          monitoredAt: save.monitoredAt?.toISOString() ?? null, monitorStatus: save.monitorStatus, evaluatedAt: save.evaluatedAt?.toISOString() ?? null,
         });
+        const existing = survivorSaves.find(s => s.userId === save.userId)!;
+        if (save.monitoredAt && (!existing.monitoredAt || save.monitoredAt < existing.monitoredAt)) {
+          (moved.survivorMonitoring ??= []).push({ id: existing.id, monitoredAt: existing.monitoredAt?.toISOString() ?? null, monitorStatus: existing.monitorStatus, evaluatedAt: existing.evaluatedAt?.toISOString() ?? null });
+          await tx.savedCompany.update({ where: { id: existing.id }, data: { monitoredAt: save.monitoredAt, monitorStatus: 'active' } });
+        }
         await tx.savedCompany.delete({ where: { id: save.id } });
       } else {
         remapSaves.push(save.id);
@@ -798,8 +807,12 @@ export class MergeService {
     }
     for (const s of moved.deletedSavedCompanies) {
       await tx.savedCompany.create({
-        data: { userId: s.userId, companyId: losingId, createdAt: new Date(s.createdAt) },
+        data: { userId: s.userId, companyId: losingId, createdAt: new Date(s.createdAt), monitoredAt: s.monitoredAt ? new Date(s.monitoredAt) : null, monitorStatus: s.monitorStatus ?? null, evaluatedAt: s.evaluatedAt ? new Date(s.evaluatedAt) : null },
       });
+    }
+
+    for (const saved of moved.survivorMonitoring ?? []) {
+      await tx.savedCompany.updateMany({ where: { id: saved.id }, data: { monitoredAt: saved.monitoredAt ? new Date(saved.monitoredAt) : null, monitorStatus: saved.monitorStatus, evaluatedAt: saved.evaluatedAt ? new Date(saved.evaluatedAt) : null } });
     }
 
     if (moved.revisionCompanyIds.length > 0) {

@@ -80,6 +80,13 @@ export function validateEnv(env: Record<string, unknown>): Record<string, unknow
     errors.push('TECH_DETAILS_ENABLED must be true or false');
   }
 
+  for (const flag of ['MONITORING_ENABLED', 'MONITORING_EMAIL_ENABLED']) {
+    if (env[flag] !== undefined && env[flag] !== 'true' && env[flag] !== 'false') errors.push(`${flag} must be true or false`);
+  }
+  for (const key of ['MONITORING_CRON', 'MONITORING_DIGEST_CRON']) {
+    if (env[key] !== undefined) { try { new CronTime(str(key), 'UTC'); } catch { errors.push(`${key} must be a valid cron schedule`); } }
+  }
+
   const port = str('PORT');
   if (port && !/^\d+$/.test(port)) errors.push(`PORT must be a number, got "${port}"`);
 

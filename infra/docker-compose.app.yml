@@ -29,6 +29,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your env file}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       TECH_DETAILS_ENABLED: ${TECH_DETAILS_ENABLED:-false}
+      MONITORING_ENABLED: ${MONITORING_ENABLED:-false}
+      MONITORING_CRON: ${MONITORING_CRON:-0 * * * *}
+      MONITORING_EMAIL_ENABLED: ${MONITORING_EMAIL_ENABLED:-false}
+      MONITORING_DIGEST_CRON: ${MONITORING_DIGEST_CRON:-0 8 * * 1}
       # Encrypts authenticator-app secrets at rest (openssl rand -base64 32). Keep it with the
       # other secrets: losing it makes every enrolled authenticator app unreadable.
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?set MFA_ENCRYPTION_KEY in your env file}

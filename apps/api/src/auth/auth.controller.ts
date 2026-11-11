@@ -327,7 +327,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me/saved-companies')
   savedCompanies(@CurrentUser() current: RequestUser): Promise<SavedCompanyItem[]> {
-    return this.users.listSavedCompanies(current.id);
+    return this.users.listSavedCompanies(current.id, current);
   }
 
   @UseGuards(JwtAuthGuard)

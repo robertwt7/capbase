@@ -286,6 +286,7 @@ describe('AuthService.updateProfile', () => {
       role: 'USER',
       emailVerified: true,
       mfaEnabled: false,
+      digestOptInAt: null,
     });
     expect(users.update).toHaveBeenCalledWith('u1', { name: 'Renamed', email: 'me@example.com' });
     expect(users.createVerificationToken).not.toHaveBeenCalled();
@@ -303,6 +304,7 @@ describe('AuthService.updateProfile', () => {
       name: 'New',
       email: 'new@example.com',
       emailVerifiedAt: null,
+      digestOptInAt: null,
     });
     expect(result).toEqual({
       id: 'u1',
@@ -311,6 +313,7 @@ describe('AuthService.updateProfile', () => {
       role: 'USER',
       emailVerified: false,
       mfaEnabled: false,
+      digestOptInAt: null,
     });
     const [, email] = users.createVerificationToken.mock.calls[0]!;
     expect(email).toBe('new@example.com');

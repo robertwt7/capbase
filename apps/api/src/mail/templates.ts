@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { isSafeHtml, type SafeHtml } from './digest-rows';
+
 /**
  * Every transactional email: its subject and the placeholders its files use.
  * The bodies live in `./templates/<name>.{html,txt}` (see its README).
@@ -30,12 +32,16 @@ export const TEMPLATES = {
     subject: 'Security change on your Capbase account',
     vars: ['NAME', 'EVENT', 'WHEN', 'SETTINGS_URL'],
   },
+  'monitoring-digest': {
+    subject: 'Your Capbase updates this week',
+    vars: ['ROWS', 'FEED_URL', 'UNSUBSCRIBE_URL'],
+  },
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;
 export type TemplateVars<T extends TemplateName> = Record<
   (typeof TEMPLATES)[T]['vars'][number],
-  string
+  string | SafeHtml
 >;
 
 export const TEMPLATE_NAMES = Object.keys(TEMPLATES) as TemplateName[];
@@ -60,10 +66,12 @@ export function loadTemplate(name: TemplateName): { html: string; text: string }
  * (a user's name is user input). A placeholder with no value throws: a typo in a
  * template must fail the spec, never ship a literal `{{{NAME}}}` to an inbox.
  */
-export function fill(source: string, vars: Record<string, string>, html: boolean): string {
+/** A `SafeHtml` value (only `renderDigestRows` makes one) is inserted as already escaped. */
+export function fill(source: string, vars: Record<string, string | SafeHtml>, html: boolean): string {
   return source.replace(PLACEHOLDER, (_, key: string) => {
     const value = vars[key];
     if (value === undefined) throw new Error(`Template placeholder {{{${key}}}} has no value`);
+    if (isSafeHtml(value)) return html ? value.html : value.text;
     return html ? escapeHtml(value) : value;
   });
 }
@@ -77,9 +85,9 @@ export function placeholders(source: string): Set<string> {
 export function render(
   name: TemplateName,
   source: { html: string; text: string },
-  vars: Record<string, string>,
+  vars: Record<string, string | SafeHtml>,
 ): { subject: string; html: string; text: string } {
   const { subject } = TEMPLATES[name];
-  const all: Record<string, string> = { ...vars, SUBJECT: subject };
+  const all: Record<string, string | SafeHtml> = { ...vars, SUBJECT: subject };
   return { subject, html: fill(source.html, all, true), text: fill(source.text, all, false) };
 }

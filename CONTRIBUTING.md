@@ -18,6 +18,6 @@ opening a pull request you agree that your contribution is licensed under the sa
 
 Before opening a pull request:
 
-- read `CLAUDE.md` for the architecture and the design-system rules;
+- read `AGENTS.md` for the architecture and the design-system rules;
 - run `yarn lint` (warnings fail the run) and `yarn test`;
 - keep each pull request to one change, and explain the *why* in the description.

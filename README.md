@@ -57,7 +57,7 @@ Live at **[capbase.fyi](https://capbase.fyi)**.
 
 The web UI is deliberately monochrome (graphite ramp) so company logos are the only color.
 Tokens in `apps/web/app/globals.css`; fonts Archivo / IBM Plex Sans / IBM Plex Mono. All
-money/number formatting goes through `apps/web/lib/format.ts`. See `CLAUDE.md` for details.
+money/number formatting goes through `apps/web/lib/format.ts`. See `AGENTS.md` for details.
 
 ## Quick start
 

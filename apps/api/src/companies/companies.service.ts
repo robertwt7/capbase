@@ -356,76 +356,7 @@ export class CompaniesService {
     const force =
       (applied.round || applied.investor) && sectionFiltersNeedLookup(policy, SCREEN_SECTIONS);
     const access = await listAccessFor(viewer, policy, 'company', (v) => this.users.accessFor(v), force);
-    const signedOut = !partnerVisible(access);
-    const dir = directoryFilters(policy, 'company', access, {
-      sector: Boolean(query.sector),
-      stage: Boolean(query.stage),
-      status: Boolean(query.status),
-      country: Boolean(query.country),
-      domain: query.domain !== undefined,
-      ...applied,
-    });
-    const use = (param: string, value: unknown) => Boolean(value) && dir.use(param);
-    const locked = { ...dir.locked, filters: [...dir.locked.filters], unlockBy: { ...dir.locked.unlockBy } };
-
-    // The investor filter's relationship scope. "On the matching financing"
-    // needs the round filter too: locked → the investor filter is locked with
-    // the stricter unlock; switched off → it is ignored, like the round filter.
-    let investorScope: InvestorScope | null = null;
-    if (applied.investor && dir.use('investor')) {
-      if (query.investorOn === 'round') {
-        if (dir.use('round')) {
-          investorScope = 'round';
-        } else if (!locked.disabled.includes('round')) {
-          locked.filters.push('investor');
-          locked.unlockBy.investor = locked.unlockBy.round ?? 'contribute';
-        }
-      } else {
-        investorScope = dir.use('round') ? 'holdingsAndRounds' : 'holdings';
-      }
-    }
-    const investor =
-      investorScope && query.investor ? await this.screenInvestor(query.investor, signedOut) : null;
-    const window = applied.round && dir.use('round') ? resolveRoundWindow(query, new Date()) : null;
-    const investorIds = investorScope ? (investor ? [investor.id] : []) : null;
-    const inputs = {
-      query,
-      dir,
-      window,
-      investorIds,
-      investorScope,
-      investorCompanyIds:
-        investorScope === 'holdingsAndRounds' && investorIds?.length
-          ? await this.investorCompanies(dir, investorIds)
-          : null,
-    };
-    const roundWhere = roundCriteriaWhere(inputs);
-
-    const where: Prisma.CompanyWhereInput = {
-      ...PUBLIC_COMPANY,
-      ...(signedOut && { partnerOnly: false }),
-      ...(query.slugs && { slug: { in: query.slugs.split(',').filter(Boolean) } }),
-      ...(query.q && {
-        OR: [
-          { name: { contains: query.q, mode: 'insensitive' as const } },
-          {
-            oneLiner: { contains: query.q, mode: 'insensitive' as const },
-          },
-        ],
-      }),
-      ...(use('sector', query.sector) && { primarySector: query.sector }),
-      ...(use('stage', query.stage) && { stage: query.stage }),
-      ...(use('status', query.status) && { status: query.status }),
-      ...(use('country', query.country) && { countryCode: query.country }),
-      // Public API only (V1ListCompaniesDto). Stored domains are normalised on write; the
-      // `www.` variant catches rows written before that. An input with no host matches nothing.
-      ...(query.domain !== undefined &&
-        dir.use('domain') && {
-          domain: { in: domainVariants(query.domain) },
-        }),
-      // Screening criteria append to the same AND, so an unfiltered query keeps its shape.
-      AND: [...dir.and, ...companyScreenWhere(inputs)],
-    };
+    const { where, locked, dir, investorScope, investor, window, roundWhere } = await this.directoryWhere(query, access, policy);
 
     const sort = dir.sortLocked(query.sort) ? undefined : query.sort;
     const orderBy: Prisma.CompanyOrderByWithRelationInput =
@@ -466,6 +397,104 @@ export class CompaniesService {
       screen,
     };
   }
+
+  /** One membership predicate for directory pages and monitored searches. */
+  private async directoryWhere(query: CompanyListQuery, access: ViewerAccess, policy: GatePolicy, now = new Date()) {
+    const applied = screenApplied(query);
+    const signedOut = !partnerVisible(access);
+    const dir = directoryFilters(policy, 'company', access, {
+      sector: Boolean(query.sector),
+      stage: Boolean(query.stage),
+      status: Boolean(query.status),
+      country: Boolean(query.country),
+      domain: query.domain !== undefined,
+      ...applied,
+    });
+    const use = (param: string, value: unknown) => Boolean(value) && dir.use(param);
+    const locked = { ...dir.locked, filters: [...dir.locked.filters], unlockBy: { ...dir.locked.unlockBy } };
+
+    // The investor filter's relationship scope. "On the matching financing"
+    // needs the round filter too: locked → the investor filter is locked with
+    // the stricter unlock; switched off → it is ignored, like the round filter.
+    let investorScope: InvestorScope | null = null;
+    if (applied.investor && dir.use('investor')) {
+      if (query.investorOn === 'round') {
+        if (dir.use('round')) {
+          investorScope = 'round';
+        } else if (!locked.disabled.includes('round')) {
+          locked.filters.push('investor');
+          locked.unlockBy.investor = locked.unlockBy.round ?? 'contribute';
+        }
+      } else {
+        investorScope = dir.use('round') ? 'holdingsAndRounds' : 'holdings';
+      }
+    }
+    const investor =
+      investorScope && query.investor ? await this.screenInvestor(query.investor, signedOut) : null;
+    const window = applied.round && dir.use('round') ? resolveRoundWindow(query, now) : null;
+    const investorIds = investorScope ? (investor ? [investor.id] : []) : null;
+    const inputs = {
+      query,
+      dir,
+      window,
+      investorIds,
+      investorScope,
+      investorCompanyIds:
+        investorScope === 'holdingsAndRounds' && investorIds?.length
+          ? await this.investorCompanies(dir, investorIds)
+          : null,
+    };
+    const roundWhere = roundCriteriaWhere(inputs);
+
+    const where: Prisma.CompanyWhereInput = {
+      ...PUBLIC_COMPANY,
+      ...(signedOut && { partnerOnly: false }),
+      ...(query.slugs && { slug: { in: query.slugs.split(',').filter(Boolean) } }),
+      ...(query.q && {
+        OR: [
+          { name: { contains: query.q, mode: 'insensitive' as const } },
+          {
+            oneLiner: { contains: query.q, mode: 'insensitive' as const },
+          },
+        ],
+      }),
+      ...(use('sector', query.sector) && { primarySector: query.sector }),
+      ...(use('stage', query.stage) && { stage: query.stage }),
+      ...(use('status', query.status) && { status: query.status }),
+      ...(use('country', query.country) && { countryCode: query.country }),
+      // Public API only (V1ListCompaniesDto). Stored domains are normalised on write; the
+      // `www.` variant catches rows written before that. An input with no host matches nothing.
+      ...(query.domain !== undefined &&
+        dir.use('domain') && {
+          domain: { in: domainVariants(query.domain) },
+        }),
+      // Screening criteria append to the same AND, so an unfiltered query keeps its shape.
+      AND: [...dir.and, ...companyScreenWhere(inputs)],
+    };
+
+    return { where, locked, dir, investorScope, investor, window, roundWhere };
+  }
+
+  /**
+   * A saved search's membership predicate, as every full-access viewer sees it (the audience
+   * ceiling is `contributors`, so an unlocked non-admin sees every field and partner value).
+   * Built once per evaluation: it resolves the investor and its linked companies.
+   * `available: false` when the policy now ignores a param the query sets — run broader never.
+   */
+  async monitorSelection(query: CompanyListQuery, policy: GatePolicy, now: Date) {
+    const access: ViewerAccess = { unlocked: true, signedIn: true, admin: false, unlockedUntil: null, windowDays: policy.contributionWindowDays };
+    const selection = await this.directoryWhere(query, access, policy, now);
+    const applied = { sector: Boolean(query.sector), stage: Boolean(query.stage), status: Boolean(query.status), country: Boolean(query.country), ...screenApplied(query) };
+    const unavailable = [...selection.locked.filters, ...selection.locked.disabled].some(k => applied[k as keyof typeof applied]);
+    return unavailable ? ({ available: false } as const) : ({ available: true, where: selection.where } as const);
+  }
+
+  /** One keyset page of ids matching a `monitorSelection` predicate. */
+  async companyIdsPage(where: Prisma.CompanyWhereInput, afterId: string | undefined, take: number): Promise<string[]> {
+    const rows = await this.prisma.company.findMany({ where: { ...where, ...(afterId ? { id: { gt: afterId } } : {}) }, select: { id: true }, orderBy: { id: 'asc' }, take });
+    return rows.map(r => r.id);
+  }
+
 
   /** The companies a firm is linked to (holdings ∪ rounds it is named on),
    *  or null when either branch passes `INVESTOR_LINK_CAP` (the caller then

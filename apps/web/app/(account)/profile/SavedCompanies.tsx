@@ -4,12 +4,20 @@ import Link from 'next/link';
 import { useTransition } from 'react';
 import type { SavedCompanyItem } from '@repo/api';
 
+import { MonitoringToggle } from './MonitoringToggle';
+import { Masked } from '@/components/Masked';
 import { setSavedAction } from '@/app/companies/[slug]/actions';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Badge, Button, SectionHeader } from '@/components/ui';
 import { formatUsd } from '@/lib/format';
 
-function SavedRow({ item }: { item: SavedCompanyItem }) {
+function SavedRow({
+  item,
+  canMonitor,
+}: {
+  item: SavedCompanyItem;
+  canMonitor: boolean;
+}) {
   const [pending, startTransition] = useTransition();
 
   return (
@@ -25,12 +33,29 @@ function SavedRow({ item }: { item: SavedCompanyItem }) {
             {item.name}
           </Link>
           <Badge variant="box" mono>
-            {item.stage}
+            <Masked entity={item} field="stage" next="/profile">
+              {item.stage}
+            </Masked>
           </Badge>
         </div>
-        <p className="truncate text-[13px] text-graphite-500">{item.oneLiner}</p>
+        <p className="truncate text-[13px] text-graphite-500">
+          <Masked entity={item} field="oneLiner" next="/profile">
+            {item.oneLiner}
+          </Masked>
+        </p>
+        {canMonitor && item.monitor ? (
+          <MonitoringToggle
+            kind="company"
+            id={item.slug}
+            monitor={item.monitor}
+          />
+        ) : null}
       </div>
-      <span className="shrink-0 font-mono text-sm text-ink">{formatUsd(item.totalRaisedUsd)}</span>
+      <span className="shrink-0 font-mono text-sm text-ink">
+        <Masked entity={item} field="totalRaisedUsd" next="/profile">
+          {formatUsd(item.totalRaisedUsd)}
+        </Masked>
+      </span>
       <Button
         variant="ghost"
         size="sm"
@@ -48,7 +73,13 @@ function SavedRow({ item }: { item: SavedCompanyItem }) {
 }
 
 /** Watchlist section on the profile page — Tailwind only, no CSS modules. */
-export function SavedCompanies({ items }: { items: SavedCompanyItem[] }) {
+export function SavedCompanies({
+  items,
+  canMonitor = false,
+}: {
+  items: SavedCompanyItem[];
+  canMonitor?: boolean;
+}) {
   return (
     <section className="mt-10">
       <SectionHeader
@@ -63,7 +94,7 @@ export function SavedCompanies({ items }: { items: SavedCompanyItem[] }) {
       ) : (
         <div className="mt-2">
           {items.map((item) => (
-            <SavedRow key={item.slug} item={item} />
+            <SavedRow key={item.slug} item={item} canMonitor={canMonitor} />
           ))}
         </div>
       )}

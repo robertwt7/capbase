@@ -5,6 +5,8 @@ import { VerifyEmailBanner } from '@/components/VerifyEmailBanner';
 import { getMfaStatus } from '@/lib/account';
 import { requireUser } from '@/lib/auth';
 
+import { DigestPreference } from './DigestPreference';
+import { canSaveSearches } from '@/lib/saved-searches';
 import { SecuritySection } from './SecuritySection';
 import { SettingsForms } from './SettingsForms';
 
@@ -16,7 +18,10 @@ export const metadata = {
 export default async function SettingsPage() {
   const user = await requireUser('/profile/settings');
   // The Security section is left out (not the page) if the API can't answer.
-  const mfa = await getMfaStatus().catch(() => null);
+  const [mfa, fullAccess] = await Promise.all([
+    getMfaStatus().catch(() => null),
+    canSaveSearches(),
+  ]);
 
   return (
     <div className="mx-auto w-full max-w-[560px] px-(--page-pad) pt-8 pb-20">
@@ -33,6 +38,10 @@ export default async function SettingsPage() {
         <div className="mt-7">
           <SettingsForms user={user} />
         </div>
+        <DigestPreference
+          enabled={Boolean(user.digestOptInAt)}
+          canEnable={fullAccess && user.emailVerified}
+        />
         {mfa ? (
           <div className="mt-12">
             <SecuritySection status={mfa} />

@@ -19,6 +19,7 @@ export default function robots(): MetadataRoute.Robots {
         '/companies/*/contribute',
         '/report/',
         '/verify-email',
+        '/unsubscribe',
         // The key-authenticated API: every route but its docs answers 401 to a crawler.
         '/v1/',
       ],

@@ -144,6 +144,9 @@ model User {
   /// The last accepted TOTP time step; a code at or below it is a replay.
   totpLastStep  Int?
 
+  digestOptInAt DateTime?
+  monitorDigests MonitorDigest[]
+
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
   webauthnCredentials     WebAuthnCredential[]
@@ -160,6 +163,9 @@ model User {
   diversity      DiversitySignal[]
   proposals      ChangeProposal[]
   savedCompanies SavedCompany[]
+  savedSearches SavedSearch[]
+  monitorSeenRounds MonitorSeenRound[]
+  monitorEvents MonitorEvent[]
   citations      Citation[]
   revisions      Revision[]
   funds          Fund[]
@@ -322,6 +328,8 @@ model Company {
   revisions    Revision[]
   websiteScans CompanyWebsiteScan[]
   appLinks     CompanyApp[]
+  monitorSeenCompanies MonitorSeenCompany[]
+  monitorEvents MonitorEvent[]
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
@@ -359,6 +367,10 @@ model SavedCompany {
 
   @@unique([userId, companyId])
   @@index([userId])
+  monitoredAt DateTime?
+  monitorStatus String?
+  evaluatedAt DateTime?
+
 }
 
 // A proposed correction to an existing Company's fields. `changes` holds only
@@ -471,6 +483,8 @@ model FundingRound {
   reviewedById String?
 
   investors RoundInvestor[]
+  monitorSeen MonitorSeenRound[]
+  monitorEvents MonitorEvent[]
 
   @@unique([externalSource, externalId])
   @@index([companyId])
@@ -1445,4 +1459,78 @@ model SiteSetting {
   value       Json
   updatedAt   DateTime @updatedAt
   updatedById String
+}
+
+
+/// Private canonical company-directory criteria. Saving never enables monitoring.
+model SavedSearch {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name String
+  version Int
+  params String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  monitoredAt DateTime?
+  monitorStatus String?
+  evaluatedAt DateTime?
+  seen MonitorSeenCompany[]
+  events MonitorEvent[]
+  @@index([userId, createdAt])
+}
+
+model MonitorSeenCompany {
+  searchId String
+  search SavedSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@id([searchId, companyId])
+}
+model MonitorSeenRound {
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roundId String
+  round FundingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  @@id([userId, roundId])
+}
+model MonitorEvent {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind String
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  searchId String?
+  search SavedSearch? @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  roundId String?
+  round FundingRound? @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  observedAt DateTime @default(now())
+  @@unique([searchId, companyId])
+  @@unique([userId, roundId])
+  @@index([userId, observedAt, id])
+}
+
+/// Frozen weekly message, retried only under the same provider idempotency key.
+model MonitorDigest {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekStart DateTime @db.Date
+  status String @default("pending")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  subject String
+  html String
+  text String
+  providerId String?
+  lastError String?
+  /// When assembled; also the window end, so the next digest starts here.
+  createdAt DateTime @default(now())
+  /// First provider request. The 23 h retry limit (inside Resend's 24 h idempotency window)
+  /// counts from here, not from assembly, so a long send queue never expires unsent rows.
+  firstAttemptAt DateTime?
+  sentAt DateTime?
+  @@unique([userId, weekStart])
+  @@index([status, nextAttemptAt])
 }

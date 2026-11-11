@@ -32,6 +32,8 @@ export interface AuthUser {
   emailVerified: boolean;
   /** True while the account has a second factor (an authenticator app or a passkey). */
   mfaEnabled: boolean;
+  /** Existing account setting; opt-out remains available after access lapses. */
+  digestOptInAt?: string | null;
 }
 
 export interface AuthResponse {
@@ -237,3 +239,6 @@ export interface UpdateUserInput {
   banned?: boolean;
   role?: Role;
 }
+
+/** Saved searches, monitoring and digest enrollment need the contribution unlock. */
+export const FULL_ACCESS_REQUIRED = 'FULL_ACCESS_REQUIRED';

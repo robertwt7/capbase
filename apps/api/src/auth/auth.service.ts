@@ -39,6 +39,7 @@ type UserRecord = MfaUser & {
   tokenVersion: number;
   bannedAt: Date | null;
   emailVerifiedAt: Date | null;
+  digestOptInAt?: Date | null;
 };
 
 const RESET_TTL_MS = 60 * 60 * 1000;
@@ -52,7 +53,7 @@ const VERIFY_COOLDOWN_MS = 60 * 1000;
 
 /** The client-facing view of a user row. */
 export const toAuthUser = (
-  user: Pick<UserRecord, 'id' | 'email' | 'name' | 'role' | 'emailVerifiedAt' | 'mfaEnabledAt'>,
+  user: Pick<UserRecord, 'id' | 'email' | 'name' | 'role' | 'emailVerifiedAt' | 'mfaEnabledAt' | 'digestOptInAt'>,
 ): AuthUser => ({
   id: user.id,
   email: user.email,
@@ -60,6 +61,7 @@ export const toAuthUser = (
   role: user.role,
   emailVerified: user.emailVerifiedAt !== null,
   mfaEnabled: user.mfaEnabledAt !== null,
+  digestOptInAt: user.digestOptInAt?.toISOString() ?? null,
 });
 
 @Injectable()
@@ -237,7 +239,7 @@ export class AuthService {
     const user = await this.users.update(userId, {
       name: dto.name,
       email: dto.email,
-      ...(emailChanged && { emailVerifiedAt: null }),
+      ...(emailChanged && { emailVerifiedAt: null, digestOptInAt: null }),
     });
     if (emailChanged) await this.issueVerification(user, siteUrl);
     return toAuthUser(user);

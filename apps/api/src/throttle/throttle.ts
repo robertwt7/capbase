@@ -31,6 +31,10 @@ export const AuthThrottle = () => Throttle({ default: AUTH_LIMIT });
 /** The paginated directory endpoints (`GET /companies`, `/investors`, `/people`, `/funds`)
  *  and the header typeahead (`GET /search`). */
 export const SearchThrottle = () => Throttle({ default: SEARCH_LIMIT });
+/** The digest's one-click unsubscribe: mail providers POST from a few shared IPs, so a
+ *  per-IP limit must sit well above a Monday burst. The token is an HMAC; this is a backstop. */
+export const UNSUBSCRIBE_LIMIT = { ttl: MINUTE, limit: 1000 };
+export const UnsubscribeThrottle = () => Throttle({ default: UNSUBSCRIBE_LIMIT });
 
 /** Where ApiThrottlerGuard leaves a resolved API key's scope on the request, for the
  *  per-scope limits below. Set before the limits are read (in `shouldSkip`). */

@@ -5,6 +5,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import { renderDigestRows } from './digest-rows';
 import { loadTemplate, render, TEMPLATE_NAMES, type TemplateName, type TemplateVars } from './templates';
 
 const SITE_URL = 'http://localhost:3001';
@@ -46,6 +47,40 @@ const SAMPLES: { [T in TemplateName]: TemplateVars<T> } = {
     EVENT: 'A recovery code was used to sign in. You have 9 left.',
     WHEN: '21 Oct 2026, 09:44 UTC',
     SETTINGS_URL: `${SITE_URL}/profile/settings`,
+  },
+  'monitoring-digest': {
+    // One of each row kind, an escaped name, and an undisclosed amount.
+    ROWS: renderDigestRows(
+      [
+        {
+          id: 'preview-match',
+          kind: 'match',
+          company: { slug: 'example', name: 'Example <script> & Partners' } as never,
+          search: { name: 'Fintech — Australia', path: '/companies?sector=Fintech&country=AU' },
+          round: null,
+          observedAt: '2026-11-10T00:00:00Z',
+        },
+        {
+          id: 'preview-funding',
+          kind: 'funding',
+          company: { slug: 'helia', name: 'Helia Research' } as never,
+          search: null,
+          round: { name: 'Series A', date: '2015-01-01', amountUsd: 1000000, amountLocal: null, currency: 'USD' } as never,
+          observedAt: '2026-11-10T00:00:00Z',
+        },
+        {
+          id: 'preview-undisclosed',
+          kind: 'funding',
+          company: { slug: 'helia', name: 'Helia Research' } as never,
+          search: null,
+          round: { name: 'Seed', date: '2014-03-01', amountUsd: 0, amountLocal: null, currency: 'USD' } as never,
+          observedAt: '2026-11-10T00:00:00Z',
+        },
+      ],
+      SITE_URL,
+    ),
+    FEED_URL: `${SITE_URL}/profile/updates`,
+    UNSUBSCRIBE_URL: `${SITE_URL}/unsubscribe?u=preview&t=not-a-real-token`,
   },
 };
 

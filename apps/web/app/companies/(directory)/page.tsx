@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { PageContainer, SectionHeader } from '@/components/ui';
+import { canSaveSearches } from '@/lib/saved-searches';
 import { getCompanies, getCompanyCountries } from '@/lib/data';
 import { formatCount } from '@/lib/format';
 import { companyListQuery, directoryCanonical } from '@/lib/list-params';
@@ -26,15 +27,16 @@ export default async function CompaniesPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
-  const [result, countries] = await Promise.all([
+  const [result, countries, canSave] = await Promise.all([
     getCompanies(companyListQuery(sp)),
     getCompanyCountries(),
+    canSaveSearches(),
   ]);
 
   return (
     <PageContainer className="pt-14 pb-20">
       <SectionHeader title="Companies" note={`${formatCount(result.total)} profiles`} />
-      <CompanyDirectory result={result} countries={countries} initial={sp} />
+      <CompanyDirectory result={result} countries={countries} initial={sp} canSaveSearch={canSave} />
     </PageContainer>
   );
 }

@@ -680,7 +680,7 @@ describe('MergeService.listCandidates (paging)', () => {
 describe('MergeService directory counts', () => {
   /** The id arrays a refresh statement was scoped to, by the table it updates. */
   const scoped = (refreshed: { sql: string; values: unknown[] }[]) =>
-    refreshed.map((q) => ({
+    refreshed.filter(q => q.sql?.includes('UPDATE "Person"') || q.sql?.includes('UPDATE "Investor"')).map((q) => ({
       table: q.sql.includes('UPDATE "Person"') ? 'Person' : 'Investor',
       ids: q.values.filter(Array.isArray),
     }));

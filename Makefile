@@ -668,3 +668,7 @@ enrich-technologies: ## Scan website technologies (LIMIT=5 DRY_RUN=1 SLUG=...)
 
 enrich-technologies-prod: ## [VPS] Bounded website scan inside deployed jobs stack
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-technologies.js --limit $(or $(LIMIT),5) $(if $(filter 1,$(DRY_RUN)),--dry-run) $(if $(SLUG),--slug $(SLUG))
+
+.PHONY: test-monitoring-integration
+test-monitoring-integration: ## Saved searches, monitoring and digest in a throwaway PostgreSQL database
+	@scripts/test-monitoring-integration.sh

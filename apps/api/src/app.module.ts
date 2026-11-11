@@ -4,6 +4,8 @@ import { APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 
+import { MonitoringModule } from './monitoring/monitoring.module';
+import { SavedSearchesModule } from './saved-searches/saved-searches.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { validateEnv } from './config/env';
@@ -47,6 +49,8 @@ import { HealthController } from './health.controller';
     AdminModule,
     ReportsModule,
     V1Module,
+    SavedSearchesModule,
+    MonitoringModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

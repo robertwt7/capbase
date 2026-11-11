@@ -7,6 +7,7 @@ templates and nothing to copy into the Resend dashboard.
 
 | Template              | Sent when                                                   | Placeholders                                                |
 | --------------------- | ----------------------------------------------------------- | ----------------------------------------------------------- |
+| `monitoring-digest` | Monday weekly email, after explicit verified-address opt-in | `ROWS` (escaped renderer), `FEED_URL`, `UNSUBSCRIBE_URL` |
 | `verify-email`        | on register, on resend, and after an email change           | `NAME`, `LINK`                                              |
 | `password-reset`      | on forgot-password                                          | `NAME`, `LINK`                                              |
 | `welcome`             | once, when an account first verifies its email              | `NAME`, `SITE_URL`                                          |
@@ -24,6 +25,7 @@ Subjects live in the `TEMPLATES` registry in `../templates.ts`, not in the files
   file can be pasted into the Resend dashboard unchanged if that's ever wanted. `{{{SUBJECT}}}`
   is filled automatically (the HTML `<title>`); every other placeholder must be listed in the
   template's `vars` in `TEMPLATES`. `templates.spec.ts` fails if a file and the registry drift.
+- `ROWS` in the monitoring digest accepts a branded `SafeHtml` from `renderDigestRows` only; its variables are escaped there. Ordinary strings always remain escaped.
 - Values are **HTML-escaped** in the `.html` body (a user's name is user input) and inserted
   verbatim in the `.txt` body. A placeholder with no value throws rather than shipping a literal
   `{{{NAME}}}` to an inbox.

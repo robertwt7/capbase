@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  type MonitorStatus,
   type MyContribution,
   type ReviewableType,
   type ReviewStatus,
@@ -9,6 +10,7 @@ import {
   type ViewerAccess,
 } from '@repo/api';
 
+import { COMPANY_BLANKS, gateFields } from '../gate/gate';
 import { GatePolicyService } from '../gate/gate-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PUBLIC_COMPANY, PUBLIC_COMPANY_RELATION } from '../prisma/public-filters';
@@ -44,7 +46,7 @@ export class UsersService {
 
   update(
     id: string,
-    data: { name?: string; email?: string; passwordHash?: string; emailVerifiedAt?: Date | null },
+    data: { name?: string; email?: string; passwordHash?: string; emailVerifiedAt?: Date | null; digestOptInAt?: Date | null },
   ) {
     return this.prisma.user.update({ where: { id }, data });
   }
@@ -174,31 +176,20 @@ export class UsersService {
   }
 
   /** The user's saved companies (approved only), newest first. */
-  async listSavedCompanies(userId: string): Promise<SavedCompanyItem[]> {
+  async listSavedCompanies(userId: string, viewer?: { id: string; role: Role }): Promise<SavedCompanyItem[]> {
+    const current = viewer ?? await this.findById(userId);
+    if (!current) throw new NotFoundException('User not found');
+    const access = await this.accessFor(current);
+    const policy = this.gatePolicy.current();
     const rows = await this.prisma.savedCompany.findMany({
       where: { userId, company: PUBLIC_COMPANY_RELATION },
-      include: {
-        company: {
-          select: {
-            slug: true,
-            name: true,
-            domain: true,
-            oneLiner: true,
-            stage: true,
-            totalRaisedUsd: true,
-          },
-        },
-      },
+      include: { company: { select: { slug: true, name: true, domain: true, oneLiner: true, stage: true, totalRaisedUsd: true, partnerFields: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((r) => ({
-      slug: r.company.slug,
-      name: r.company.name,
-      domain: r.company.domain,
-      oneLiner: r.company.oneLiner,
-      stage: r.company.stage as SavedCompanyItem['stage'],
-      totalRaisedUsd: Number(r.company.totalRaisedUsd),
+      ...gateFields('company', { slug: r.company.slug, name: r.company.name, domain: r.company.domain, oneLiner: r.company.oneLiner, stage: r.company.stage as SavedCompanyItem['stage'], totalRaisedUsd: Number(r.company.totalRaisedUsd) }, r.company.partnerFields, access, policy, COMPANY_BLANKS),
       savedAt: r.createdAt.toISOString(),
+      ...(access.unlocked ? { monitor: { enabled: r.monitoredAt !== null, status: r.monitorStatus as MonitorStatus | null } } : {}),
     }));
   }
 
@@ -293,7 +284,7 @@ export class UsersService {
    * every user at once). `unlockedUntil` is reported even after it lapses, so the UI
    * can say when access expired.
    */
-  async accessFor(viewer?: { id: string; role: Role }): Promise<ViewerAccess> {
+  async accessFor(viewer?: { id: string; role: Role }, now = new Date()): Promise<ViewerAccess> {
     const windowDays = this.gatePolicy.current().contributionWindowDays;
     const base = { admin: viewer?.role === 'ADMIN', windowDays };
     if (!viewer) return { ...base, unlocked: false, signedIn: false, unlockedUntil: null };
@@ -303,7 +294,7 @@ export class UsersService {
     const last = await this.lastContributionAt(viewer.id);
     if (!last) return { ...base, unlocked: false, signedIn: true, unlockedUntil: null };
     const until = new Date(last.getTime() + windowDays * DAY_MS);
-    return { ...base, unlocked: Date.now() < until.getTime(), signedIn: true, unlockedUntil: until.toISOString() };
+    return { ...base, unlocked: now.getTime() < until.getTime(), signedIn: true, unlockedUntil: until.toISOString() };
   }
 
   /** A user's own submissions across every type, any status, newest first. */

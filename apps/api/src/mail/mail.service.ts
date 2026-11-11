@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as Sentry from '@sentry/nestjs';
 import { Resend } from 'resend';
 
+import { classifyDigestError, type DigestSendResult } from './digest-retry';
 import {
   loadTemplate,
   render,
@@ -20,6 +21,9 @@ export interface QueueEmailVars {
   /** "3 days", "19 hours". */
   OLDEST: string;
 }
+
+/** Bound on one digest send request. */
+const DIGEST_SEND_TIMEOUT_MS = 15_000;
 
 @Injectable()
 export class MailService {
@@ -113,6 +117,38 @@ export class MailService {
       WHEN: `${when} UTC`,
       SETTINGS_URL: `${this.siteUrl}/profile/settings`,
     });
+  }
+
+  /**
+   * Result-bearing digest transport (account mail stays best-effort, below). Resend's send
+   * options take no abort signal, so the 15 s bound is a race: a request still in flight is
+   * reported as a retry, which is safe because every retry reuses the idempotency key.
+   */
+  async sendDigest(
+    to: string,
+    payload: { subject: string; html: string; text: string },
+    opts: { idempotencyKey: string; headers: Record<string, string> },
+  ): Promise<DigestSendResult> {
+    if (!this.resend) {
+      this.logger.log('Monitoring digest skipped: mail provider is not configured');
+      return { status: 'disabled' };
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<DigestSendResult>((resolve) => {
+      timer = setTimeout(() => resolve({ status: 'retry', reason: 'network_or_timeout' }), DIGEST_SEND_TIMEOUT_MS);
+    });
+    const send = this.resend.emails
+      .send({ from: this.from, to, ...payload, headers: opts.headers }, { idempotencyKey: opts.idempotencyKey })
+      .then(
+        (result): DigestSendResult =>
+          result.data?.id ? { status: 'sent', providerId: result.data.id } : classifyDigestError(result.error ?? {}),
+        (): DigestSendResult => ({ status: 'retry', reason: 'network_or_timeout' }),
+      );
+    try {
+      return await Promise.race([send, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Render and send one template. Never throws — mail failure must not fail the request. */

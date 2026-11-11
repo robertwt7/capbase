@@ -44,6 +44,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-docker-stack-jwt-secret-not-for-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       TECH_DETAILS_ENABLED: ${TECH_DETAILS_ENABLED:-false}
+      MONITORING_ENABLED: ${MONITORING_ENABLED:-false}
+      MONITORING_CRON: ${MONITORING_CRON:-0 * * * *}
+      MONITORING_EMAIL_ENABLED: ${MONITORING_EMAIL_ENABLED:-false}
+      MONITORING_DIGEST_CRON: ${MONITORING_DIGEST_CRON:-0 8 * * 1}
       # Production also requires a 32-byte key for authenticator-app secrets; this default
       # is for THIS local stack only. 2FA enforcement is off here unless you set the roles
       # (ADMIN,CONTRIBUTOR rehearses production).

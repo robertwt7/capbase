@@ -12,7 +12,7 @@
    Emphasis comes from weight, size, hairline rules, and the mono numerals —
    never hue.
    The one sanctioned exception is validation/error feedback, which uses the
-   `--destructive` red (see CLAUDE.md); destructive *actions* stay monochrome.
+   `--destructive` red (see AGENTS.md); destructive *actions* stay monochrome.
    Light-only by design (no dark mode); the `dark` variant is declared so
    shadcn primitives compile, but the ramp does not branch.
    ────────────────────────────────────────────────────────────────────────── */
@@ -49,7 +49,7 @@
   --muted-foreground: var(--graphite-500);
   --accent: var(--graphite-200);
   --accent-foreground: var(--ink);
-  --destructive: #b42318; /* validation/error red — the one sanctioned hue (see CLAUDE.md) */
+  --destructive: #b42318; /* validation/error red — the one sanctioned hue (see AGENTS.md) */
   --destructive-foreground: var(--paper);
   --border: var(--line);
   --input: var(--line);

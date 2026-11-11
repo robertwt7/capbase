@@ -385,6 +385,23 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   "Add a passkey" or an authenticator app, then the recovery codes, then `next`; redirects to
   `/login` without the `capbase_mfa` cookie; `noindex`, under the robots-disallowed `/login`).
   `/admin/login` runs the same step with `admin`.
+- `/profile` — besides contributions and the watchlist (`SavedCompanies.tsx`, every signed-in
+  user; masked values through `Masked`), a full-access viewer gets **Saved searches**
+  (`SavedSearches.tsx`: rerun link, inline rename, delete), a monitor toggle on each saved search
+  and saved company (`MonitoringToggle.tsx`: Preparing / On / Paused), and a link to
+  **`/profile/updates`** (the monitoring feed, `noindex`, `no-store`, cursor pages; 403 says
+  "needs full access", any other failure "could not be loaded"). `/profile/settings` adds the
+  **Weekly email** toggle (`DigestPreference.tsx`; turning it on needs full access and a verified
+  address, turning it off is always offered). The web decides whether to show any of this by
+  calling the feature itself (`canSaveSearches()` → `GET /auth/me/saved-searches?limit=1`; 200 =
+  show), never a separate access endpoint; signed out makes no request. `/companies` shows **Save
+  search** (`SaveSearch.tsx`) on the same check, saving the current controls' canonical params.
+  `lib/saved-searches.ts` / `lib/monitoring.ts` are the seams (`no-store`, no mock fallback).
+- `/unsubscribe` — a route handler, not a page (no layout, analytics or scripts; `noindex`,
+  `no-referrer`, `no-store`, robots-disallowed). GET is inert: a minimal HTML confirm form. POST
+  takes the token from the query (RFC 8058 one-click from a mail client) or the form body and
+  forwards it to API `POST /monitoring/unsubscribe`. It never claims a success it did not get: an
+  API failure is a 503 "try again", a malformed link a 400.
 - `/profile/api-keys` — self-serve API keys for the public API (`/v1`, see Backend). A `USER`
   sees an `EmptyState` saying admins grant access; an unverified contributor sees
   `VerifyEmailBanner` and no form; a verified `CONTRIBUTOR`/`ADMIN` sees their active keys
@@ -531,7 +548,11 @@ Resend hosted templates. Emails **hardcode the ledger hex values**, the one exce
 no-hex rule, because email clients have no CSS variables. `nest-cli.json` `assets` copies
 the files into `dist/`; `templates.spec.ts` fails if a file and the registry drift;
 `make mail-preview` renders them to `apps/api/.mail-preview/`. Conventions:
-`src/mail/templates/README.md`.
+`src/mail/templates/README.md`. Every send is best-effort (`deliver` never throws) **except**
+`sendDigest`, the monitoring digest's result-bearing transport (`sent | retry | failed |
+disabled`, Resend idempotency key, a 15 s `Promise.race` bound — Resend's send options take no
+abort signal). Repeated rows go through `renderDigestRows`, the only constructor of the branded
+`SafeHtml` that `fill` inserts unescaped; every other value is escaped.
 
 **Moderation emails.** `AdminService.moderate` emails the contributor once per decision
 (`submission-approved` / `submission-rejected`, built in `src/admin/submission-notice.ts`).
@@ -742,6 +763,59 @@ screening param applied. No new sorts; `/v1` limits and `MAX_V1_LIST_DEPTH` unch
 `test/company-screening.e2e-spec.ts` is the fixture suite (split rounds, duplicates, unknown figures,
 boundaries, grant vs equity, merges, namesakes, partner rows/fields, every tier, `/v1` parity).
 
+**Saved searches and monitoring** (`src/saved-searches/`, `src/monitoring/`; plan
+`thoughts/shared/plans/2026-11-11-saved-searches-and-monitoring.md`). Every route needs **current full
+access** (`ViewerAccess.unlocked`): `JwtAuthGuard` + `FullAccessGuard`, which answers `403 { code:
+FULL_ACCESS_REQUIRED }` and attaches what it resolved (`CurrentAccess`) so the service reuses it
+rather than re-running `accessFor`. Another user's id is a 404. The two exceptions only turn email
+**off**: `DELETE /auth/me/digest` (JWT only) and `POST /monitoring/unsubscribe` (no auth; HMAC token
+`digestUnsubscribeToken`, HKDF of `JWT_SECRET`, nothing stored, every link ever sent stays valid;
+`UnsubscribeThrottle` 1,000/min because mail providers POST from shared IPs).
+- **Saved search** = `name` + `version` (`COMPANY_QUERY_VERSION`) + `params`, the canonical
+  `companyQueryToParams` string (every screening param included). Saving is **strict**
+  (`decodeSavedParams`: unknown or repeated keys, `page`/`pageSize`/`slugs`/`domain` → 400; then
+  `ListCompaniesDto` + `validateCompanyScreen`); directory URLs stay lenient. Criteria are not
+  editable (rename/delete only). An unknown version is never run or monitored, and never run
+  unfiltered. Routes: `GET|POST /auth/me/saved-searches`, `PATCH|DELETE /:id`.
+- **Monitoring** is opt-in per source (`PUT|DELETE /auth/me/saved-searches/:id/monitoring`,
+  `…/saved-companies/:slug/monitoring`; saving never enrols) and records a silent **baseline**.
+  `MonitoringService.runOnce(now)` runs hourly in the API (`MONITORING_ENABLED`, `MONITORING_CRON`;
+  an in-process flag stops overlap; every write is `ON CONFLICT DO NOTHING`, so a re-run never
+  duplicates). A search's members come from `CompaniesService.monitorSelection` — the directory's
+  own `directoryWhere` for a synthetic **unlocked non-admin** viewer (the audience ceiling is
+  `contributors`, so that is what every full-access owner sees), built once per evaluation and
+  paged by id (`companyIdsPage`). If the policy now ignores a param the search sets, the search is
+  `unavailable`, never run broader. Seen sets ignore visibility (`MonitorSeenCompany` per search,
+  `MonitorSeenRound` per user), so a policy change never creates events. Funding is one SQL
+  statement per 200 owners (data-modifying CTEs share a snapshot: a round is evented and marked
+  seen together or not at all) and covers APPROVED Equity/Debt only; grants are marked seen and
+  never reported. An owner without full access is skipped and their sources reset to
+  `baselining`, so regaining access never replays the gap. Turning a search on baselines ≤ 10k
+  matches inline; a broader one finishes on the next run. A merge marks both companies' rounds
+  seen for their monitors and copies each search's seen loser onto the survivor
+  (`merge-monitoring.ts`); saves carry `monitoredAt` through merge/unmerge.
+- **Events** (`MonitorEvent`) hold references only (company, search, round ids) — unique
+  `(searchId, companyId)` and `(userId, roundId)`. A company a search reported once is never
+  reported by that search again, even after monitoring is turned off and on. `UpdatesService.
+  resolve` re-gates every event for the reader's current access and policy at render (follows
+  `mergedIntoId`; drops non-approved rows, deleted or unmonitored sources, and any round unless
+  `companyRounds` is **full** for the reader; `gateFields`/`gateRowFields`), and shows one match
+  per (search, canonical company). Feed: `GET /auth/me/updates` (newest first, 25, max 100). Copy
+  says "Newly recorded funding" with the round's own date; 0 with no local amount reads
+  "Undisclosed", never "$0".
+- **Weekly digest** (`DigestService`, `MONITORING_EMAIL_ENABLED`, `MONITORING_DIGEST_CRON`, UTC;
+  independent of `MONITORING_ENABLED`): opt-in `PUT /auth/me/digest` (`User.digestOptInAt`; needs a
+  verified address). `updateProfile` clears it on an email change. One `MonitorDigest` per user per
+  UTC ISO week, holding the frozen subject/html/text. Its window runs from the previous digest
+  (or opt-in, at most 7 days back) to the assembly time, newest 50 visible events, none → no row.
+  The dispatcher (every 5 min, up to 4 min of 10-row batches) re-checks eligibility (opted in
+  before assembly, verified, unbanned, unlocked) and sends with key `monitor-digest/<id>` and
+  `List-Unsubscribe` / `List-Unsubscribe-Post`. Retries 429/5xx/timeouts at 1 m, 5 m, 30 m, 2 h,
+  8 h; it stops after 6 attempts or 23 h from `firstAttemptAt` (persisted before the first request,
+  inside Resend's 24 h key window) → `failed`. It never resends a `sent` or `failed` row; a row
+  never attempted within 7 days is `skipped`. The body is frozen, so a retraction after assembly
+  may still go out — the documented delivery boundary.
+
 **`GET /companies/featured?limit=`** (default 8, max 24) is the landing shop window. There is
 no page-view tracking, so popularity is a score over data already held — saves ×5, approved
 investor holdings ×3, non-grant rounds ×1 (each capped), +4 for a round in the last 18 months,
@@ -856,6 +930,13 @@ Company/FundingRound rows — and the ingest-only `Fund` — also have
 partner). People use `Person.identifierOnly`, the same signal (the partner is the only
 identifier-only source). `RoundInvestor.externalSource` says which source named a firm on a round.
 Ingest maintains them (Jobs → PARTNER); `make backfill-partner-provenance` reconstructs them.
+
+**Saved searches and monitoring tables** (migrations `saved_searches`, `monitoring`,
+`monitoring_digest`, additive, all user rows cascade on user delete): `SavedSearch`, the monitor
+columns on `SavedSearch`/`SavedCompany` (`monitoredAt`, `monitorStatus` `baselining | active |
+unavailable`, `evaluatedAt`), `MonitorSeenCompany` (PK `(searchId, companyId)`), `MonitorSeenRound`
+(PK `(userId, roundId)`), `MonitorEvent` and `MonitorDigest` (unique `(userId, weekStart)`,
+`firstAttemptAt`), plus `User.digestOptInAt`. Seen rows are never pruned while their source exists.
 
 **`FundingRound_date_idx`** (`("date")`, migration `round_screening_index`) serves the screening
 financing window. Measured: a `(moderationStatus, kind, date)` index was equally fast with a kind
@@ -1032,7 +1113,10 @@ assertions depend on: `gate-policy.e2e-spec.ts` stubs `GatePolicyService.current
 from `resolveGatePolicy`, and its admin-route cases touch only `companyExits` /
 `company.twitterUrl` and delete them at once. `PrismaService` disconnects on `app.close()`
 (`onModuleDestroy`) — finished suites otherwise held their pools and the parallel run exhausted
-Postgres's 100 connections.
+Postgres's 100 connections. The full suite sits near that ceiling; run it with
+`--runInBand` when a run fails on "too many clients". The monitoring suites call
+`runOnce(now)` / `assemble(now)` / `dispatch(now)` directly and fake the mail provider with
+`overrideProvider(MailService)`.
 
 **Funds are a first-class entity too, and ingest-only.** `Fund` is one row per private fund
 with a **required** `managerId` FK to `Investor` — a fund whose manager cannot be resolved
@@ -1432,7 +1516,9 @@ so any new form under `location /` is covered by `writes` with no nginx change. 
 public **only under `/v1/`** (`location ^~ /v1/` → `api:3000`, its own per-IP `apikeys` zone
 10 r/s + 40 burst — never `crawlers`, which would put every `curl`/`python-requests` caller in
 one bucket — and `X-Forwarded-For` **overwritten** with `$remote_addr`, since the API keys rate
-limits and IP allowlists on it); every other API route stays container-to-container. Its
+limits and IP allowlists on it); every other API route stays container-to-container.
+`location = /unsubscribe` (the digest's one-click unsubscribe, served by the web) has only the
+`general` zone: mail providers POST it from a few shared IPs, which `writes`/`crawlers` would drop. Its
 throttler is the per-user / per-key backstop (see Backend). **Cloudflare-ready**: `conf.d/cloudflare-realip.conf` (generated by
 `make nginx-cloudflare-ips`) takes `$remote_addr` from `CF-Connecting-IP`, but only for a
 peer inside a Cloudflare range. Otherwise every visitor behind one edge would share a

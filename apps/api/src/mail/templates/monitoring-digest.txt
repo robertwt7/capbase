@@ -1,0 +1,10 @@
+CAPBASE — Your weekly updates
+
+New observations from the sources you chose to monitor. Funding dates are the recorded financing dates.
+
+{{{ROWS}}}
+
+View all updates: {{{FEED_URL}}}
+
+You enabled weekly email in your account.
+Unsubscribe from weekly email: {{{UNSUBSCRIBE_URL}}}
