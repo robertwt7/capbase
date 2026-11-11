@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   ...canonical('/privacy'),
 };
 
-const LAST_UPDATED = '17 October 2026';
+const LAST_UPDATED = '12 November 2026';
 
 export default function PrivacyPage() {
   return (
@@ -39,6 +39,13 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Watchlist</strong> — companies you save to your profile.
+        </li>
+        <li>
+          <strong>Company claims</strong> — if you claim a company (&ldquo;This is my
+          company&rdquo;), the work email address we send the confirmation link to, or the note and
+          evidence link you send with a request for review. They are stored with your account, used
+          only to verify and administer the claim, and never published: a profile shows only that
+          it is maintained by the company, never who represents it.
         </li>
         <li>
           <strong>Reports</strong> — if you use &ldquo;Report an issue&rdquo;, what you write and,

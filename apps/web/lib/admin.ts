@@ -1,4 +1,7 @@
 import type {
+  AdminClaim,
+  AdminClaimPage,
+  AdminClaimStatusFilter,
   AdminUser,
   AdminVisibilityResponse,
   FieldPolicy,
@@ -31,6 +34,7 @@ export async function getSubmissions(q: SubmissionQuery): Promise<PendingSubmiss
   if (q.source) query.set('source', q.source);
   if (q.userId) query.set('user', q.userId);
   if (q.q) query.set('q', q.q);
+  if (q.representative) query.set('representative', '1');
   return apiFetch<PendingSubmissionsResponse>(`/admin/submissions?${query}`, {
     headers: { authorization: `Bearer ${token ?? ''}` },
     cache: 'no-store',
@@ -229,3 +233,45 @@ export const updateContributionWindow = (days: number) =>
   visibility('/settings/contribution-window', { method: 'PUT', body: JSON.stringify({ days }) });
 
 export const resetContributionWindow = () => visibility('/settings/contribution-window', { method: 'DELETE' });
+
+// --- Company claims ---------------------------------------------------------
+
+/** One page of `/admin/claims` (admin-only, always fresh). */
+export async function getAdminClaims(
+  status: AdminClaimStatusFilter = 'pending',
+  page = 1,
+): Promise<AdminClaimPage> {
+  const token = await getToken();
+  const query = new URLSearchParams({ status });
+  if (page > 1) query.set('page', String(page));
+  return apiFetch<AdminClaimPage>(`/admin/claims?${query}`, {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+}
+
+/** Open manual claim requests — the nav count. */
+export async function getClaimRequestCount(): Promise<number> {
+  const token = await getToken();
+  const { pending } = await apiFetch<{ pending: number }>('/admin/claims/count', {
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    cache: 'no-store',
+  });
+  return pending;
+}
+
+/** Approve / reject a manual request, or revoke any claim. `note` travels only with a
+ *  rejection (quoted in the email, never stored). */
+export async function decideClaim(
+  id: string,
+  decision: 'approve' | 'reject' | 'revoke',
+  note?: string,
+): Promise<AdminClaim> {
+  const token = await getToken();
+  return apiFetch<AdminClaim>(`/admin/claims/${encodeURIComponent(id)}/${decision}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token ?? ''}` },
+    body: JSON.stringify(decision === 'reject' && note ? { note } : {}),
+    cache: 'no-store',
+  });
+}

@@ -39,6 +39,8 @@ function makeService() {
   const prisma = {
     company: { findUnique },
     changeProposal: { create },
+    // The submitter holds no company claim.
+    companyClaim: { findMany: jest.fn(async () => []) },
   } as unknown as PrismaService;
   const service = new CompaniesService(prisma, {} as unknown as UsersService, staticGatePolicy());
   return { service, create };

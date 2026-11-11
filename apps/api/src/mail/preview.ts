@@ -48,6 +48,16 @@ const SAMPLES: { [T in TemplateName]: TemplateVars<T> } = {
     WHEN: '21 Oct 2026, 09:44 UTC',
     SETTINGS_URL: `${SITE_URL}/profile/settings`,
   },
+  'claim-verify': {
+    COMPANY: 'Helia <Research>',
+    LINK: `${SITE_URL}/verify-claim?token=preview-token`,
+  },
+  'claim-notice': {
+    NAME,
+    COMPANY: 'Helia Research',
+    EVENT: "Your request to represent Helia Research wasn't approved.\nReason: The linked page doesn't name you.",
+    LINK: `${SITE_URL}/profile`,
+  },
   'monitoring-digest': {
     // One of each row kind, an escaped name, and an undisclosed amount.
     ROWS: renderDigestRows(

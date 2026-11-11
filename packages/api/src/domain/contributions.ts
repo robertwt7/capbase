@@ -82,6 +82,13 @@ export interface CompanyDetailResponse {
       response*, flat. The client indexes by `entityId` + `field`. Truncated
       rows contribute none, so a locked viewer learns nothing extra from them. */
   citations: Citation[];
+  /** "Profile maintained by the company": present while at least one company claim is active
+   *  (`since` = the earliest verification, `lastConfirmedAt` = the latest "still current"
+   *  confirmation). Capbase's own fact, not a profile field — never gated, never in metadata,
+   *  JSON-LD or the OG image. Null on a stub. */
+  representation: { since: string; lastConfirmedAt: string | null } | null;
+  /** The viewer's own active claim on this company, when they have one; null otherwise. */
+  viewerClaim: { id: string; lastConfirmedAt: string | null; canConfirm: boolean } | null;
 }
 
 export interface MyContribution {

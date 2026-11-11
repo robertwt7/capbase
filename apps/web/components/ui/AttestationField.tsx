@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import type { Control, FieldPath, FieldValues } from 'react-hook-form';
 
 import { Checkbox } from './checkbox';
@@ -23,9 +24,13 @@ export const ATTESTATION_TEXT =
 export function AttestationField<T extends FieldValues>({
   control,
   name = 'attested' as FieldPath<T>,
+  label,
 }: {
   control: Control<T>;
   name?: FieldPath<T>;
+  /** Replaces the Terms §4 sentence for another must-tick box (the company-claim
+   *  "I am authorised to represent this company"). */
+  label?: ReactNode;
 }) {
   return (
     <FormField
@@ -45,13 +50,17 @@ export function AttestationField<T extends FieldValues>({
               />
             </FormControl>
             <FormLabel className="block font-sans text-sm leading-snug font-normal tracking-normal text-graphite-700 normal-case">
-              {ATTESTATION_TEXT}{' '}
-              <Link
-                href="/terms"
-                className="text-ink underline underline-offset-[3px]"
-              >
-                Terms §4
-              </Link>
+              {label ?? (
+                <>
+                  {ATTESTATION_TEXT}{' '}
+                  <Link
+                    href="/terms"
+                    className="text-ink underline underline-offset-[3px]"
+                  >
+                    Terms §4
+                  </Link>
+                </>
+              )}
             </FormLabel>
           </div>
           <FormMessage />

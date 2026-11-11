@@ -417,8 +417,8 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `lib/auth.ts` (`requireAdmin`) gates pages; `lib/admin.ts` + `app/admin/actions.ts`
   (server actions) approve/reject. The admin layout renders **no header of its own**: under
   the public `SiteHeader` it adds `AdminNav` (`app/admin/AdminNav.tsx`, Queue/Reports/Merges/
-  Users/Visibility), whose pending counts come from `GET /admin/submissions/count` and `GET
-  /admin/merges/count` — bare counts, never the queues themselves, since the layout runs on
+  Claims/Users/Visibility), whose pending counts come from `GET /admin/submissions/count`, `GET
+  /admin/merges/count` and `GET /admin/claims/count` — bare counts, never the queues themselves, since the layout runs on
   every admin page. The nav is **rendered only for an ADMIN session**, and only then are the
   counts fetched. Signed-out visitors and ordinary users on `/admin/login` see nothing
   admin-shaped. Never link to `/admin` from the public site. **Both queues are
@@ -439,8 +439,11 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   `/v1/submissions` keeps); type pills; a GET search box `q` matching the company (or, for an
   investor edit, the firm) name through the trigram indexes; and `user=<id>`, the **per-user
   view** — every submitter on a card links there, headed by a card from `GET /admin/users/:id`
-  (`AdminUserDetail`: counts per status and `accessFor`'s gate state, so a retraction's effect on
-  access shows at once). **Sort key** (`submissionSortKey`): decided contributed rows sort by
+  (`AdminUserDetail`: counts per status, `accessFor`'s gate state, so a retraction's effect on
+  access shows at once, and the account's company claims with a Revoke form each); and
+  `representative=1`, the **Verified representatives** pill (see Backend → Company claims): every
+  card submitted under a claim that is active *now* carries a "Verified representative" badge
+  (ink border, no colour), with the filter on or off. **Sort key** (`submissionSortKey`): decided contributed rows sort by
   `reviewedAt` (newest decision first, served by `(moderationStatus, reviewedAt, id)`),
   everything else by `createdAt`. Each decided card says "Approved/Rejected by <admin> · date".
   **Retraction**: rejecting an APPROVED row (`notice.status` read before deciding) unpublishes it
@@ -482,6 +485,34 @@ logo is `components/Logo.tsx` (`Logo` lockup, `LogoMark` cap) — never re-draw 
   users see `components/VerifyEmailBanner.tsx` (with a "Resend link" button) on `/profile`,
   `/profile/settings`, `/profile/api-keys`, `/contribute` and `/companies/[slug]/contribute`. Robots-disallowed,
   `noindex`, `no-referrer`.
+- `/companies/[slug]/claim` — "This is my company" (outside `(profile)`, like `contribute/`;
+  `requireUser`, `noindex`, robots-disallowed). Lists the caller's claims on the company (each with
+  Withdraw), then `ClaimEmailForm` when `CompanyClaimView.emailClaim` (a work address; the
+  company's stored domain is **never** rendered — it may be partner data) with a "My address isn't
+  at this company's domain" disclosure holding `ClaimRequestForm`, or only `ClaimRequestForm`
+  (note + evidence URL) when the company can't be claimed by email. Both are RHF + zod
+  (`lib/validation/claim.ts`, the must-tick `authorised` box via `AttestationField`'s `label`) with
+  Turnstile. Entry points: "This is my company" in `ProposeChangeMenu` ("You represent this
+  company" when `viewerClaim` is set), the profile footer sentence, and `StubProfile`'s
+  `claimHref` on a partner-only stub. `lib/claims.ts` is the seam (`no-store`, no mock fallback,
+  `claimErrorMessage`); `lib/claim-status.ts` the client-safe status labels.
+- `/verify-claim?token=` — a copy of `/verify-email`: spends the claim link on a **button press,
+  never on load**. Robots-disallowed, `noindex`, `no-referrer`.
+- `/admin/claims` — company claims, `FilterLink` pills Pending / Active / Ended (paged by number,
+  `CLAIM_PAGE_SIZE`, `GET /admin/claims?status=&page=`), one `Card` per claim (company, user →
+  per-user view, method, address or note + evidence link, who decided). Pending cards: one form,
+  Approve / Reject via `formAction` and a reason box (sent only on reject, quoted in the email,
+  not stored); active and suspended cards: Revoke. `/admin/users` rows show "Claims (n)"
+  (`AdminUser.claimCount`).
+- **Profile mark**: `components/CompanyRepresentation.tsx` under the one-liner — "Profile
+  maintained by the company" and, once a representative confirmed, "· Confirmed current by the
+  company on <date>" (worded so it can't read as a source retrieval date). The representative sees
+  `ConfirmCurrentButton` in the action row (and an item in `MoreActionsMenu` on a phone), disabled
+  "Confirmed today" when `!viewerClaim.canConfirm`. Never in metadata, JSON-LD or the OG image.
+  `/profile` lists "Companies you represent" (`CompanyClaims.tsx`, rendered only when non-empty;
+  "Awaiting review" for an open request). The history page's `actorLabel` reads "Company
+  representative · approved by <admin>" for a `Revision.representative` entry — never the
+  representative's name.
 - `/report/[type]/[slug]` — the public report form for a company/investor/person profile
   (linked from each profile's footer). Anonymous even when signed in: `lib/reports.ts` sends
   **no** authorization header, only the Turnstile token. Robots-disallowed, `noindex`.
@@ -899,6 +930,77 @@ query params come from the DTO classes through the `@nestjs/swagger` CLI plugin 
 hoisted root** (the plugin loads the root copy; two versions crash the transformer). Responses are
 described per route with `@ApiOperation`/`@ApiOkResponse`. Guide for callers: `/developers`.
 
+**Company claims** (`src/claims/`; plan `thoughts/shared/plans/2026-11-12-company-claims-and-verified-representatives.md`).
+A signed-in user proves they work at a company and becomes its **verified representative**. A claim
+is a **relationship, not a role and never a reviewable type**: it moderates nothing, it is not one
+of the nine contribution tables, and **`accessFor` never reads it** (an active claim with no
+approved contribution stays locked — the e2e suite pins it). What it buys: the queue label and
+filter, a revision marked as a representative edit, the profile mark, and "confirm still current".
+Representatives stay **moderated** — no auto-publish, no fast path; an approved representative edit
+does not clear `partnerOnly`.
+- **Two ways in.** `EMAIL`: `POST /companies/:slug/claim/email` (`JwtAuthGuard`,
+  `VerifiedEmailGuard`, `TurnstileGuard`; not a contribution, so no pending cap) mails a
+  single-use link (`CompanyClaimToken`, the `EmailVerificationToken` pattern: sha256 only, 24 h,
+  conditional `updateMany` spend, bound to user + company + address) to the **work** address —
+  always, even when the account's own address is at the domain (the `email_verification` backfill
+  marked old users verified without a link). `claim-verify` carries no user-written value (a third
+  party's mailbox). `POST /claims/verify` (public, `@AuthThrottle()`) re-reads the company and
+  re-runs the domain rule against its **current** domain, so a link for a company merged or
+  re-domained since is refused. `MANUAL`: `POST /companies/:slug/claim/request` (same guards; note
+  `CLAIM_NOTE_MIN..MAX`, optional `@IsUrl` evidence, `@Equals(true) authorised`) creates an
+  undecided row an admin approves or rejects at `/admin/claims` (`AdminClaimsController`,
+  `@Roles('ADMIN')`: list, `count`, `approve`, `reject` with an unstored reason, `revoke`).
+  Spending a link or approving a request stamps `claimId` on the user's still-PENDING rows for that
+  company. Owner routes: `GET /companies/:slug/claim` (`CompanyClaimView` — `emailClaim`, never the
+  domain), `GET /auth/me/claims`, `DELETE /auth/me/claims/:id` (withdraw; another user's id 404s),
+  `POST /companies/:slug/claim/confirm`. No `/v1` claim route (a key acts as its owner, so a key
+  owner's submissions are labelled like their website ones). Every change emails the **account**
+  address (`claim-notice`).
+- **The domain rule.** `claimableHost` (`claims/claimable-domain.ts`): the company's domain as
+  lower-case ASCII (punycode, `node:url` `domainToASCII`), or null — no domain, a social /
+  platform / free-mail host (`@repo/api` `domain/domains.ts`), or a bare public suffix (`tldts`
+  `getPublicSuffix(…, { allowPrivateDomains: true })`: `co.uk`, `github.io`). `claimDomainMatch`:
+  the address's host equals the stored host **or is a subdomain of it**; the parent of a stored
+  subdomain, a lookalike and a suffix without a dot boundary never pass. A mismatch is `400 {
+  code: CLAIM_DOMAIN_MISMATCH }`, no domain `400 { code: CLAIM_EMAIL_UNAVAILABLE }`.
+  Partner-only companies can be claimed; their domain is only ever a match key.
+- **One definition of active**, `claims/active-claim.ts`: verified, not revoked, user not banned,
+  company not merged away, and for `EMAIL` the company's current domain (`normalizeDomain`) still
+  equals the one it was verified against. **Evaluated live everywhere** — nothing is stamped when a
+  domain changes, so a retracted domain edit restores the claim (status `suspended` meanwhile);
+  `MANUAL` ends only by revocation, withdrawal or a ban. `isActiveClaim` (TS), `activeClaimIds`
+  (the same predicate in one raw query, `NORMALIZED_COMPANY_DOMAIN` restating `normalizeDomain`
+  step for step — the e2e suite checks both agree on every fixture claim), `activeClaimId(user,
+  company)`, `activeClaimsOn(company)`. A ban (`AdminUsersService.update`, same transaction as
+  `rejectPending`) ends every claim (`endReason: 'ban'`) and expires unused links; unbanning
+  restores nothing. Contested claims are fine: there is no `(userId, companyId)` unique key.
+- **Where it shows.** Each of the seven company-anchored contribution writes (`addRound` …
+  `proposeChange`, so `/v1` too) stores `claimId: activeClaimId(…)` (one indexed read). The queue
+  (`listSubmissions`) labels a row `representative` only when its claim is active *now*
+  (`fillRepresentatives`, one query per page, beside `fillReviewers`; the claim id stays off the
+  payload); `?representative=1` resolves `activeClaimIds` once and adds `claimId IN (…)` to the
+  seven tables — `company` and `investorProposal` are excluded like a type filter (count 0).
+  Approval (`moderateRow`, `applyProposal`, inside the transaction) writes `Revision.claimId` only
+  when the claim is active **at approval time** (for a proposal, against the domain before its own
+  diff); the public `Revision.representative` is `claimId !== null` — never the id or the person.
+  The detail read adds `activeClaimsOn` to its `Promise.all`: `representation { since,
+  lastConfirmedAt }` (earliest verification, latest confirmation) and the viewer's own
+  `viewerClaim { id, lastConfirmedAt, canConfirm }`; both null on a stub and with no active claim.
+  Not a `FIELD_REGISTRY` fact and not gated. **Confirm** stamps `lastConfirmedAt` on the caller's
+  active claim only (403 without one, 429 inside `CLAIM_CONFIRM_INTERVAL_HOURS`) — no Revision, no
+  `Company` write, so `Company.updatedAt` never moves.
+- **Limits** (`@repo/api` `domain/claims.ts`, counted from token rows like the MFA lockout;
+  **admins are not exempt** — a claim is not moderation): one link per account per
+  `CLAIM_COOLDOWN_SECONDS` (60), `CLAIM_ATTEMPTS_PER_USER_PER_DAY` (5),
+  `CLAIM_ATTEMPTS_PER_COMPANY_PER_DAY` (10, bounds the mail one company's domain can be sent;
+  accepted trade: accounts can exhaust it for a day, the manual path remains),
+  `MAX_OPEN_CLAIM_REQUESTS` (3), all 429. A new link expires the user's older unused ones for that
+  company (**expired, not deleted** — the rows are the counter); tokens older than 7 days are
+  pruned on insert. The web forms are server actions under nginx `writes`.
+- **Merges**: `companyClaim` is a `COMPANY_CHILDREN` entry (moved to the survivor, restored on
+  unmerge); tokens are not remapped (refused at spend). `test/company-claims.e2e-spec.ts` is the
+  suite (the mail provider faked to read the link; users through Prisma).
+
 **Investor-firm edits** (`investorProposal`, a ninth reviewable type, `/v1` only — no web form):
 `InvestorChangeProposal` holds an `InvestorEditFields` diff (`INVESTOR_EDIT_FIELDS` whitelist;
 ADV facts are ingest-owned). `InvestorsService.proposeChange` drops unchanged keys (400 if
@@ -962,6 +1064,18 @@ served by any API): `CompanyIngestBinding` (`(source, sourceCompanyId)` → comp
 whitelisted evidence and policy version), `IngestRoundBinding` (deal → canonical round, OWN/DEDUP),
 `CompanyRepairRun` (unique `(databaseFingerprint, manifestHash)`, so repeating an apply resumes the
 same run) and `CompanyRepairGroup` (the journal). Plain-id columns, no FKs to `Company`.
+
+**Company-claim tables** (migration `company_claims`, additive): `CompanyClaim` (user, company,
+`method` `EMAIL | MANUAL`, the verified `email` and `domain`, the request's `note` /
+`evidenceUrl`, `verifiedAt`/`verifiedById`, `revokedAt`/`revokedById`, `endReason`
+`withdrawn | revoked | rejected | ban`, `lastConfirmedAt`; indexed on `companyId`, `userId` and
+`(method, verifiedAt, revokedAt, createdAt)` for `/admin/claims`; **PRIVATE** — `email`, `note` and
+`evidenceUrl` reach only the owner and admins) and `CompanyClaimToken` (`(userId, createdAt)` and
+`(companyId, createdAt)` serve the limits; `prod-cleanup.sql` drops them all). `claimId` (a plain
+id, no FK, like `reviewedById`) on `ChangeProposal`, `FundingRound`, `PersonRole`,
+`InvestorHolding`, `AcquisitionDeal`, `ExitEvent` and `DiversitySignal` (indexed, for the queue
+filter) and on `Revision` (not indexed). Both cascade on user and company delete. No backfill:
+older submissions are unlabelled, which is correct.
 
 **Two-factor tables** (migration `mfa_passkeys`, additive): `User.mfaEnabledAt` (denormalised
 "has a factor", so `JwtStrategy` enforces from the row it already reads), `totpSecret` (sealed),
@@ -1462,7 +1576,10 @@ transaction. Rollback refuses a group edited since. Make: `fix`/`fix-prod` (audi
 
 **Domains are a match key, so they must identify the entity.** `src/util/domain.ts`
 classifies a URL host as identifying, social, or platform; sources publish a
-`domain` only for the first kind. This is not theoretical: 3,295 ADV filers list a
+`domain` only for the first kind. (The classifier itself lives in `@repo/api`
+`domain/domains.ts`, with `FREE_MAIL_HOSTS` and `claimDomainMatch` for company claims;
+`src/util/domain.ts` re-exports it so no ingest call site changed, and its spec moved to
+`packages/api/src/domain/domains.spec.ts`.) This is not theoretical: 3,295 ADV filers list a
 linkedin.com URL as their website and 21 list the same medium.com blog — matching
 on those merges unrelated firms into one investor.
 

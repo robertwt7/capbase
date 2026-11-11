@@ -23,6 +23,9 @@ export interface RevisionInput {
   actorUserId?: string | null;
   actorSource?: string | null;
   proposalId?: string | null;
+  /** The company claim the approved submission was made under, when it was active at
+   *  approval time — a representative edit. Never served; the public sees a boolean. */
+  claimId?: string | null;
 }
 
 /** A whole-row CREATE entry: the row became public, so there is no `before`. */
@@ -32,6 +35,7 @@ export function createRevision(args: {
   entityId: string;
   after: unknown;
   actorUserId: string;
+  claimId?: string | null;
 }): RevisionInput {
   return {
     companyId: args.companyId,
@@ -43,6 +47,7 @@ export function createRevision(args: {
     action: 'CREATE',
     actor: 'ADMIN',
     actorUserId: args.actorUserId,
+    claimId: args.claimId ?? null,
   };
 }
 

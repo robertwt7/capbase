@@ -1,4 +1,9 @@
-import { getMergeCount, getReports, getSubmissionCount } from '../../lib/admin';
+import {
+  getClaimRequestCount,
+  getMergeCount,
+  getReports,
+  getSubmissionCount,
+} from '../../lib/admin';
 import { getSession } from '../../lib/auth';
 import { AdminNav } from './AdminNav';
 
@@ -22,9 +27,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const isAdmin = session?.role === 'ADMIN';
 
   const counts = isAdmin
-    ? await Promise.all([pendingSubmissionCount(), openReportCount(), pendingMergeCount()]).then(
-        ([queue, reports, merges]) => ({ queue, reports, merges }),
-      )
+    ? await Promise.all([
+        pendingSubmissionCount(),
+        openReportCount(),
+        pendingMergeCount(),
+        pendingClaimCount(),
+      ]).then(([queue, reports, merges, claims]) => ({ queue, reports, merges, claims }))
     : null;
 
   return (
@@ -62,6 +70,16 @@ async function pendingMergeCount(): Promise<number> {
 async function openReportCount(): Promise<number> {
   try {
     return (await getReports('OPEN')).total;
+  } catch {
+    return 0;
+  }
+}
+
+/** Open manual claim requests, for the nav badge. Never throws, for the same reason as
+ *  pendingSubmissionCount. A bare count. */
+async function pendingClaimCount(): Promise<number> {
+  try {
+    return await getClaimRequestCount();
   } catch {
     return 0;
   }

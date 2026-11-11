@@ -1,0 +1,73 @@
+<!doctype html>
+<!--
+  Capbase transactional email — claim-notice
+  Placeholders: SUBJECT NAME COMPANY EVENT LINK — written as triple-brace placeholders below (see README.md)
+  Ledger tokens (apps/web/app/globals.css), inlined because email clients have no CSS vars:
+    paper #f0ece3 · surface #f7f4ee · line #ded8cc · ink #141210
+    graphite-700 #4a453d · graphite-500 #6e675c
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light only" />
+    <title>{{{SUBJECT}}}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f0ece3;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+      An update on your claim for {{{COMPANY}}}.
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0ece3;">
+      <tr>
+        <td align="center" style="padding:40px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                 style="max-width:520px;background:#f7f4ee;border:1px solid #ded8cc;border-radius:12px;">
+            <tr>
+              <td style="padding:32px;">
+                <p style="margin:0 0 24px;font-family:'IBM Plex Mono',Menlo,Consolas,monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#141210;font-weight:600;">
+                  Capbase
+                </p>
+                <h1 style="margin:0 0 16px;font-family:Archivo,'Helvetica Neue',Arial,sans-serif;font-size:22px;line-height:1.3;color:#141210;">
+                  Your claim for {{{COMPANY}}}
+                </h1>
+                <p style="margin:0 0 16px;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#4a453d;">
+                  Hi {{{NAME}}}, this is a record of a change to your company claim on Capbase.
+                </p>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                       style="margin:0 0 24px;border:1px solid #ded8cc;border-radius:6px;">
+                  <tr>
+                    <td style="padding:16px;">
+                      <p style="margin:0;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#141210;font-weight:600;white-space:pre-line;">
+                        {{{EVENT}}}
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+                  <tr>
+                    <td style="background:#141210;border-radius:6px;">
+                      <a href="{{{LINK}}}"
+                         style="display:inline-block;padding:12px 20px;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#f0ece3;text-decoration:none;">
+                        See your claims
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0 0 8px;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#6e675c;">
+                  Button not working? Paste this into your browser:
+                </p>
+                <p style="margin:0 0 24px;font-family:'IBM Plex Mono',Menlo,Consolas,monospace;font-size:12px;line-height:1.6;word-break:break-all;color:#4a453d;">
+                  {{{LINK}}}
+                </p>
+                <p style="margin:0;padding-top:16px;border-top:1px solid #ded8cc;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#6e675c;">
+                  A claim lists you as a representative of the company. It doesn't publish
+                  anything by itself: your edits are still reviewed before they go live.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

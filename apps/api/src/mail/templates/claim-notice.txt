@@ -1,0 +1,14 @@
+Hi {{{NAME}}},
+
+This is a record of a change to your company claim for {{{COMPANY}}} on Capbase:
+
+  {{{EVENT}}}
+
+See your claims:
+
+{{{LINK}}}
+
+A claim lists you as a representative of the company. It doesn't publish
+anything by itself: your edits are still reviewed before they go live.
+
+— The Capbase team

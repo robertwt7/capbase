@@ -47,3 +47,8 @@ export function parseSubmissionSearch(q: string | undefined): string | undefined
   }
   return trimmed;
 }
+
+/** The queue's `?representative=1` (admin only; /v1 does not take it). Anything else is off. */
+export function parseRepresentative(value: string | undefined): boolean {
+  return value === '1' || value === 'true';
+}

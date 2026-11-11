@@ -54,5 +54,25 @@ export const COMPANY_DETAIL_SCHEMA = {
     },
     citations: { type: 'array', items: { type: 'object' }, description: 'Sources only for returned rows.' },
     latestRound: { type: 'object', nullable: true },
+    representation: {
+      type: 'object',
+      nullable: true,
+      description:
+        'Present while the company has at least one verified representative. Never names them.',
+      properties: {
+        since: { type: 'string', format: 'date-time' },
+        lastConfirmedAt: { type: 'string', format: 'date-time', nullable: true },
+      },
+    },
+    viewerClaim: {
+      type: 'object',
+      nullable: true,
+      description: "The key owner's own active claim on this company, if any.",
+      properties: {
+        id: { type: 'string' },
+        lastConfirmedAt: { type: 'string', format: 'date-time', nullable: true },
+        canConfirm: { type: 'boolean' },
+      },
+    },
   },
 };

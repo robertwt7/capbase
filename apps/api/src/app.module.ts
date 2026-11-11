@@ -8,6 +8,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { SavedSearchesModule } from './saved-searches/saved-searches.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { ClaimsModule } from './claims/claims.module';
 import { validateEnv } from './config/env';
 import { CompaniesModule } from './companies/companies.module';
 import { FundsModule } from './funds/funds.module';
@@ -51,6 +52,7 @@ import { HealthController } from './health.controller';
     V1Module,
     SavedSearchesModule,
     MonitoringModule,
+    ClaimsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

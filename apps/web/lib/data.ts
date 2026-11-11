@@ -668,6 +668,8 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
       gate: { sections: {} },
       // The fallback rows have no database identity, so nothing can cite them.
       citations: [],
+      representation: null,
+      viewerClaim: null,
     };
   }
 });

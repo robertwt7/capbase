@@ -98,6 +98,9 @@ export interface Revision {
   actor: RevisionActor;
   /** Contributor/admin display name, or the ingest source name. Never an email. */
   actorName: string | null;
+  /** An approved submission from the company's verified representative (its claim was active
+   *  when the moderator approved it). Never who the representative is. */
+  representative: boolean;
   createdAt: string;
 }
 

@@ -181,6 +181,8 @@ describe('CompaniesService.getCompanyDetail (contribution gating)', () => {
       diversitySignal: { count: count('diversity') },
       citation: { findMany: citationFindMany },
       entityIdentifier: { findMany: jest.fn(async () => []) },
+      // No company claims: the profile mark is absent.
+      companyClaim: { findMany: jest.fn(async () => []) },
     } as unknown as PrismaService;
     // The real `accessFor` over a mocked `lastContributionAt`, so these tests
     // pin the gate rule itself rather than a stub of it.

@@ -53,6 +53,9 @@ export interface PendingSubmission {
   reviewedAt: string | null;
   /** Who decided it (display name only); null when unknown. */
   reviewedBy: { id: string; name: string } | null;
+  /** Submitted under a company claim that is active RIGHT NOW (re-checked on every read, so a
+   *  revoked claim, a ban or a domain change drops the label at once). Never who the claim is. */
+  representative: boolean;
 }
 
 /** Who wrote a row: a person (website or API key) or an ingest source. */
@@ -71,6 +74,9 @@ export interface SubmissionQuery {
   userId?: string;
   /** Company (or, for an investor edit, firm) name, SUBMISSION_QUERY_MIN..MAX chars. */
   q?: string;
+  /** Only rows submitted under a currently active company claim. New companies and investor
+   *  edits have no company to represent, so the filter leaves them out (their count is 0). */
+  representative?: boolean;
 }
 
 /** Shortest name search the queue applies; anything shorter is ignored. */

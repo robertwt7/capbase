@@ -100,6 +100,8 @@ function fixture() {
     diversitySignal: table([{ id: 'd-1', companyId: 'c-lose' }]),
     companyWebsiteScan: table([{ id: 'scan-lose', companyId: 'c-lose', scanKey: 'immutable-origin-key' }]),
     companyApp: table([{ id: 'app-lose', companyId: 'c-lose', provenanceKey: 'immutable-app-key' }]),
+    // A company claim follows the survivor; no (user, company) unique key, so no collision.
+    companyClaim: table([{ id: 'cl-1', companyId: 'c-lose', userId: 'u-rep' }]),
     changeProposal: table([{ id: 'pr-1', companyId: 'c-lose' }]),
     roundInvestor: table([{ id: 'ri-1', investorId: 'i-lose' }]),
     fund: table([{ id: 'f-1', managerId: 'i-lose' }]),
@@ -279,6 +281,7 @@ function snapshot(db: ReturnType<typeof fixture>['db']) {
     proposals: of(db.changeProposal, 'companyId'),
     scans: of(db.companyWebsiteScan, 'companyId'),
     apps: of(db.companyApp, 'companyId'),
+    claims: of(db.companyClaim, 'companyId'),
     saves: db.savedCompany.rows.map((r) => `${String(r.userId)}:${String(r.companyId)}`).sort(),
     // The MERGE/UNMERGE entries the operations write about THEMSELVES are
     // deliberately not reversed — they are the audit trail for both directions

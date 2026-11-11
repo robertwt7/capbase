@@ -11,6 +11,7 @@ import {
 import { Prisma } from '@repo/db';
 
 import { ApiKeysService } from '../../api-keys/api-keys.service';
+import { adminClaimsForUser } from '../../claims/claims.service';
 import { SecurityEvent } from '../../auth/mfa/mfa.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -78,9 +79,13 @@ export class AdminUsersService {
       }),
       this.prisma.user.count({ where }),
     ]);
-    const counts = await this.contributionCounts(rows.map((r) => r.id));
+    const ids = rows.map((r) => r.id);
+    const [counts, claims] = await Promise.all([
+      this.contributionCounts(ids),
+      this.claimCounts(ids),
+    ]);
     return {
-      items: rows.map((r) => this.toAdminUser(r, counts.get(r.id))),
+      items: rows.map((r) => this.toAdminUser(r, counts.get(r.id), claims.get(r.id))),
       total,
       page,
       pageSize,
@@ -120,15 +125,21 @@ export class AdminUsersService {
     };
 
     const row = await this.prisma.$transaction(async (tx) => {
-      if (banning) await this.rejectPending(tx, id, actorId);
+      if (banning) {
+        await this.rejectPending(tx, id, actorId);
+        await this.endClaims(tx, id, actorId);
+      }
       const updated = await tx.user.update({ where: { id }, data, select: userSelect });
       if (input.role !== undefined || input.banned !== undefined) {
         await this.apiKeys.revokeForRole(tx, id, updated.role, updated.bannedAt !== null);
       }
       return updated;
     });
-    const counts = await this.contributionCounts([id]);
-    return this.toAdminUser(row, counts.get(id));
+    const [counts, claims] = await Promise.all([
+      this.contributionCounts([id]),
+      this.claimCounts([id]),
+    ]);
+    return this.toAdminUser(row, counts.get(id), claims.get(id));
   }
 
   /**
@@ -139,12 +150,18 @@ export class AdminUsersService {
   async detail(id: string): Promise<AdminUserDetail> {
     const row = await this.prisma.user.findUnique({ where: { id }, select: userSelect });
     if (!row) throw new NotFoundException('User not found');
-    const [counts, access] = await Promise.all([
+    const [counts, access, claims] = await Promise.all([
       this.contributionCounts([id]),
       this.usersService.accessFor({ id: row.id, role: row.role }),
+      adminClaimsForUser(this.prisma, id),
     ]);
     const contributions = counts.get(id) ?? NO_CONTRIBUTIONS;
-    return { ...this.toAdminUser(row, contributions), access, contributions };
+    return {
+      ...this.toAdminUser(row, contributions, claims.length),
+      access,
+      contributions,
+      claims,
+    };
   }
 
   /**
@@ -179,8 +196,11 @@ export class AdminUsersService {
     });
     // After the commit and un-awaited, like every other email: it never fails the reset.
     void this.mail.sendSecurityNotice(row.email, row.name, SecurityEvent.adminReset);
-    const counts = await this.contributionCounts([id]);
-    return this.toAdminUser(row, counts.get(id));
+    const [counts, claims] = await Promise.all([
+      this.contributionCounts([id]),
+      this.claimCounts([id]),
+    ]);
+    return this.toAdminUser(row, counts.get(id), claims.get(id));
   }
 
   /** The ban sweep: every PENDING row the user has, REJECTED by the banning admin. */
@@ -208,6 +228,37 @@ export class AdminUsersService {
     ]);
   }
 
+  /**
+   * A ban ends every company claim the user holds (pending requests included) and kills their
+   * unused claim links. Unbanning restores nothing: a claim is re-made, not resumed.
+   */
+  private async endClaims(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    adminUserId: string,
+  ): Promise<void> {
+    const now = new Date();
+    await tx.companyClaim.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now, revokedById: adminUserId, endReason: 'ban' },
+    });
+    await tx.companyClaimToken.updateMany({
+      where: { userId, usedAt: null, expiresAt: { gt: now } },
+      data: { expiresAt: now },
+    });
+  }
+
+  /** Company claims per user, any state (an indexed group on `userId`). */
+  private async claimCounts(userIds: string[]): Promise<Map<string, number>> {
+    if (userIds.length === 0) return new Map();
+    const rows = await this.prisma.companyClaim.groupBy({
+      by: ['userId'],
+      where: { userId: { in: userIds } },
+      _count: { _all: true },
+    });
+    return new Map(rows.map((r) => [r.userId, r._count._all]));
+  }
+
   /** Submissions per user and status across every contributable table, in one query. */
   private async contributionCounts(userIds: string[]): Promise<Map<string, ContributionCounts>> {
     if (userIds.length === 0) return new Map();
@@ -230,7 +281,11 @@ export class AdminUsersService {
     return counts;
   }
 
-  private toAdminUser(row: UserRow, counts: ContributionCounts = NO_CONTRIBUTIONS): AdminUser {
+  private toAdminUser(
+    row: UserRow,
+    counts: ContributionCounts = NO_CONTRIBUTIONS,
+    claimCount = 0,
+  ): AdminUser {
     return {
       id: row.id,
       email: row.email,
@@ -241,6 +296,7 @@ export class AdminUsersService {
       pendingCount: counts.PENDING,
       approvedCount: counts.APPROVED,
       mfaEnabled: row.mfaEnabledAt !== null,
+      claimCount,
     };
   }
 }

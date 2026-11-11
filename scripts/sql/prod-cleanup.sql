@@ -111,6 +111,9 @@ DELETE FROM "MergeCandidate" m WHERE NOT CASE m."entityType"
 -- 5. The accounts themselves (their passkeys and recovery codes cascade). Sign-in challenges
 --    live five minutes and some have no user, so none is worth shipping.
 DELETE FROM "AuthChallenge";
+-- Company-claim links are live credentials for a day; none is worth shipping. Claims of junk
+-- users go with the user (cascade).
+DELETE FROM "CompanyClaimToken";
 DELETE FROM "User" WHERE id IN (SELECT id FROM junk_user);
 
 -- Safety net: refuse to ship if anything demo-shaped survived.

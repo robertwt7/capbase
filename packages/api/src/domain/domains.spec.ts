@@ -1,6 +1,12 @@
-import { describe, it, expect } from '@jest/globals';
-
-import { hostOf, identifyingDomain, isLinkedInHost, isPlatformHost, isSocialHost } from './domain';
+import {
+  claimDomainMatch,
+  hostOf,
+  identifyingDomain,
+  isFreeMailHost,
+  isLinkedInHost,
+  isPlatformHost,
+  isSocialHost,
+} from './domains';
 
 describe('hostOf', () => {
   it.each([
@@ -56,5 +62,37 @@ describe('identifyingDomain', () => {
   it('returns null for junk rather than guessing', () => {
     expect(identifyingDomain(null)).toBeNull();
     expect(identifyingDomain('saxony')).toBeNull();
+  });
+});
+
+describe('isFreeMailHost', () => {
+  it('matches consumer mailbox providers and their subdomains', () => {
+    for (const host of ['gmail.com', 'googlemail.com', 'outlook.com', 'proton.me', 'qq.com']) {
+      expect(isFreeMailHost(host)).toBe(true);
+    }
+    expect(isFreeMailHost('eu.gmail.com')).toBe(true);
+  });
+
+  it('does not match a company domain or a lookalike suffix', () => {
+    expect(isFreeMailHost('acme.com')).toBe(false);
+    expect(isFreeMailHost('notgmail.com')).toBe(false);
+    expect(isFreeMailHost('gmail.com.evil.io')).toBe(false);
+  });
+});
+
+describe('claimDomainMatch', () => {
+  it.each([
+    ['acme.com', 'acme.com', true],
+    ['eu.acme.com', 'acme.com', true], // a subdomain of the stored host
+    ['a.b.acme.com', 'acme.com', true],
+    ['acme.com', 'shop.acme.com', false], // the parent of a stored subdomain
+    ['acme.co', 'acme.com', false],
+    ['xn--acm-dma.com', 'acme.com', false], // acmé.com in punycode
+    ['notacme.com', 'acme.com', false], // a suffix without a dot boundary
+    ['acme.com.evil.io', 'acme.com', false],
+    ['acme.com', '', false],
+    ['', 'acme.com', false],
+  ])('%s against %s → %s', (emailHost, storedHost, expected) => {
+    expect(claimDomainMatch(emailHost, storedHost)).toBe(expected);
   });
 });

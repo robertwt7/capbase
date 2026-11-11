@@ -46,10 +46,16 @@ function prismaFor(existing: typeof baseUser | null) {
     webAuthnCredential: { deleteMany: jest.fn(async () => ({ count: 2 })) },
     recoveryCode: { deleteMany: jest.fn(async () => ({ count: 10 })) },
     authChallenge: { deleteMany: jest.fn(async () => ({ count: 1 })) },
+    companyClaim: { updateMany: jest.fn(async () => ({ count: 0 })) },
+    companyClaimToken: { updateMany: jest.fn(async () => ({ count: 0 })) },
   };
   for (const m of CONTRIBUTABLE) tx[m] = { updateMany: jest.fn(async () => ({ count: 0 })) };
   const prisma = {
-    user: { findUnique: jest.fn(async () => existing) },
+    user: { findUnique: jest.fn(async () => existing), findMany: jest.fn(async () => []) },
+    companyClaim: {
+      groupBy: jest.fn(async () => []),
+      findMany: jest.fn(async () => []),
+    },
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     $queryRaw: jest.fn(async () => [
       { id: 'u1', status: 'PENDING', n: 3 },
@@ -95,6 +101,12 @@ describe('AdminUsersService.update', () => {
     }
     expect(result.pendingCount).toBe(3);
     expect(result.approvedCount).toBe(2);
+    // Every company claim ends with the ban, and unused claim links die.
+    expect((tx.companyClaim as Mocked).updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', revokedAt: null },
+      data: { revokedAt: expect.any(Date), revokedById: 'admin', endReason: 'ban' },
+    });
+    expect((tx.companyClaimToken as Mocked).updateMany).toHaveBeenCalled();
   });
 
   it('unbans without touching submissions or sessions', async () => {
@@ -106,6 +118,7 @@ describe('AdminUsersService.update', () => {
     };
     expect(data).toEqual({ bannedAt: null });
     expect((tx.company as Mocked).updateMany).not.toHaveBeenCalled();
+    expect((tx.companyClaim as Mocked).updateMany).not.toHaveBeenCalled();
   });
 
   it('changes role on its own', async () => {

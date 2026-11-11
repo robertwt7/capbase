@@ -16,7 +16,16 @@ import { CONTRIBUTION_TYPES, TYPE_LABELS } from './contribute/types';
 /** Single entry point into the contribution hub: one dropdown listing every
     child entity type, plus the whole-company edit proposal. Auth is handled by
     the hub page itself (login redirect). */
-export function ProposeChangeMenu({ slug, className }: { slug: string; className?: string }) {
+export function ProposeChangeMenu({
+  slug,
+  className,
+  represents = false,
+}: {
+  slug: string;
+  className?: string;
+  /** The viewer holds an active claim on this company. */
+  represents?: boolean;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -33,6 +42,11 @@ export function ProposeChangeMenu({ slug, className }: { slug: string; className
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href={`/companies/${slug}/contribute?type=edit`}>Edit company details</Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href={`/companies/${slug}/claim`}>
+            {represents ? 'You represent this company' : 'This is my company'}
+          </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

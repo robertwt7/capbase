@@ -34,6 +34,7 @@ import { MergeService } from './merge/merge.service';
 import {
   parseReviewableType,
   parseReviewStatus,
+  parseRepresentative,
   parseSubmissionSearch,
   parseSubmissionSource,
 } from './submission-params';
@@ -58,6 +59,7 @@ export class AdminController {
     @Query('source') source?: string,
     @Query('user') user?: string,
     @Query('q') q?: string,
+    @Query('representative') representative?: string,
   ): Promise<PendingSubmissionsResponse> {
     return this.admin.listSubmissions({
       status: parseReviewStatus(status),
@@ -67,6 +69,7 @@ export class AdminController {
       // An unknown id simply matches nothing.
       userId: user || undefined,
       q: parseSubmissionSearch(q),
+      representative: parseRepresentative(representative),
     });
   }
 

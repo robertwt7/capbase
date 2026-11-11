@@ -18,6 +18,7 @@ export function StubProfile({
   counts,
   next,
   back,
+  claimHref,
 }: {
   kind: 'Company' | 'Investor' | 'Fund' | 'Person';
   name: string;
@@ -29,6 +30,8 @@ export function StubProfile({
   /** Where sign-in returns to — this page. */
   next: string;
   back: { href: string; label: string };
+  /** A company stub's "This is my company" entry (the claim page asks for sign-in itself). */
+  claimHref?: string;
 }) {
   return (
     <div className="mx-auto max-w-(--page-max) px-(--page-pad) pt-8 pb-16">
@@ -82,6 +85,17 @@ export function StubProfile({
           Sign in
         </Button>
       </Card>
+      {claimHref && (
+        <p className="mt-6 font-mono text-xs text-graphite-500">
+          Work at {name}?{' '}
+          <Link
+            href={claimHref}
+            className="underline underline-offset-[3px] transition-colors hover:text-ink"
+          >
+            This is my company
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

@@ -21,3 +21,5 @@ export * from './domain/indexing';
 export * from './domain/search';
 export * from './domain/technology';
 export * from './domain/saved-search';
+export * from './domain/domains';
+export * from './domain/claims';

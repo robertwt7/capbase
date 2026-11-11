@@ -6,6 +6,8 @@ import { notFound } from 'next/navigation';
 import { AdminOnlyBadge } from '@/components/AdminOnlyBadge';
 import { Citation, companyEntityId } from '@/components/Citation';
 import { CompanyLogo } from '@/components/CompanyLogo';
+import { CompanyRepresentation } from '@/components/CompanyRepresentation';
+import { ConfirmCurrentButton } from '@/components/ConfirmCurrentButton';
 import { CompanyTechnology } from '@/components/CompanyTechnology';
 import { FundingLadder } from '@/components/FundingLadder';
 import { Identifiers } from '@/components/Identifiers';
@@ -111,6 +113,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           description={company.description}
           next={path}
           back={{ href: '/companies', label: 'All companies' }}
+          claimHref={`${path}/claim`}
           counts={[
             { label: 'Funding rounds', value: access.totals.rounds, view: v('companyRounds') },
             { label: 'Investors', value: access.totals.investors, view: v('companyInvestors') },
@@ -179,8 +182,24 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
               History
             </Button>
           )}
-          <MoreActionsMenu slug={company.slug} role={session?.role} className="w-9 px-0 min-[601px]:hidden" />
-          <ProposeChangeMenu slug={company.slug} className="max-[600px]:flex-1" />
+          {result.viewerClaim && (
+            <ConfirmCurrentButton
+              slug={company.slug}
+              canConfirm={result.viewerClaim.canConfirm}
+              className="max-[600px]:hidden"
+            />
+          )}
+          <MoreActionsMenu
+            slug={company.slug}
+            role={session?.role}
+            viewerClaim={result.viewerClaim}
+            className="w-9 px-0 min-[601px]:hidden"
+          />
+          <ProposeChangeMenu
+            slug={company.slug}
+            represents={result.viewerClaim !== null}
+            className="max-[600px]:flex-1"
+          />
         </div>
       </div>
 
@@ -200,6 +219,7 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <p className="mt-3 max-w-[48ch] text-[17px] text-graphite-700">
             {m('oneLiner', company.oneLiner)}
           </p>
+          <CompanyRepresentation representation={result.representation} className="mt-2" />
           {(company.industry.length > 0 || masked('industry')) && (
             <div className="mt-4 flex flex-wrap items-center gap-2">
               {company.industry.map((tag) => (
@@ -602,6 +622,13 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
         or{' '}
         <Link href={`/report/company/${company.slug}`} className="underline underline-offset-[3px] transition-colors hover:text-ink">
           report an issue
+        </Link>
+        . Work at {company.name}?{' '}
+        <Link
+          href={`/companies/${company.slug}/claim`}
+          className="underline underline-offset-[3px] transition-colors hover:text-ink"
+        >
+          This is my company
         </Link>
         .
       </footer>

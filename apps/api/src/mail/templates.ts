@@ -32,6 +32,14 @@ export const TEMPLATES = {
     subject: 'Security change on your Capbase account',
     vars: ['NAME', 'EVENT', 'WHEN', 'SETTINGS_URL'],
   },
+  'claim-verify': {
+    subject: 'Confirm you represent a company on Capbase',
+    vars: ['COMPANY', 'LINK'],
+  },
+  'claim-notice': {
+    subject: 'Your company claim on Capbase',
+    vars: ['NAME', 'COMPANY', 'EVENT', 'LINK'],
+  },
   'monitoring-digest': {
     subject: 'Your Capbase updates this week',
     vars: ['ROWS', 'FEED_URL', 'UNSUBSCRIBE_URL'],

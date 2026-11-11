@@ -96,6 +96,11 @@ const COMPANY_CHILDREN = [
   'changeProposal',
   'companyWebsiteScan',
   'companyApp',
+  // Company claims follow the survivor (no (userId, companyId) unique key, so a user who
+  // claimed both rows keeps two — every reader asks "is there an active one"). An EMAIL
+  // claim is active only while the survivor's domain matches the one it was verified on.
+  // Claim tokens are NOT remapped: a link for a merged company is refused when spent.
+  'companyClaim',
 ] as const;
 
 type CompanyChild = (typeof COMPANY_CHILDREN)[number];

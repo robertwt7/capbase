@@ -57,6 +57,63 @@ model EmailVerificationToken {
   @@index([userId])
 }
 
+/// A user's verified relationship to a company ("this is my company"). A relationship, not a
+/// role: it grants no moderation power and never feeds UsersService.accessFor. Also holds a
+/// MANUAL request before an admin decides it. PRIVATE: `email`, `note` and `evidenceUrl` are
+/// never served outside the owner's own views and the admin pages. No (userId, companyId)
+/// unique key, so it is a plain COMPANY_CHILDREN merge entry; every reader asks "is there an
+/// active claim", so a duplicate after a merge is harmless.
+model CompanyClaim {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// 'EMAIL' | 'MANUAL' (CLAIM_METHODS in @repo/api)
+  method    String
+  /// EMAIL: the work address the link was sent to. Null for MANUAL.
+  email     String?
+  /// EMAIL: the company domain the address was verified against (normalizeDomain form).
+  /// The claim is active only while the company still holds it. '' for MANUAL.
+  domain    String  @default("")
+  note        String?
+  evidenceUrl String?
+  /// EMAIL: when the link was spent. MANUAL: when an admin approved it.
+  verifiedAt   DateTime?
+  verifiedById String?
+  revokedAt    DateTime?
+  revokedById  String?
+  /// 'withdrawn' | 'revoked' | 'rejected' | 'ban'
+  endReason    String?
+  /// Set only by the explicit "confirm still current" action. Never by an edit or an approval.
+  lastConfirmedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([method, verifiedAt, revokedAt, createdAt])
+}
+
+/// A single-use claim link. Mirrors EmailVerificationToken, bound to user, company and address.
+/// Superseded tokens are expired rather than deleted: the rows are the per-day attempt counter.
+model CompanyClaimToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email     String
+  domain    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([companyId, createdAt])
+}
+
 /// A registered passkey. `credentialId` is the authenticator's id (base64url).
 model WebAuthnCredential {
   id           String    @id @default(cuid())
@@ -174,6 +231,8 @@ model User {
   reportsResolved Report[]
   apiKeys         ApiKey[]
   investorProposals InvestorChangeProposal[]
+  companyClaims      CompanyClaim[]
+  companyClaimTokens CompanyClaimToken[]
 }
 
 /// A primary document a fact came from. Deduplicated by URL, so many citations
@@ -243,6 +302,9 @@ model Revision {
   actorSource String?
   /// The proposal that produced this entry, when applicable.
   proposalId  String?
+  /// The company claim the approved submission was made under, when that claim was still
+  /// active at approval time — a representative edit. A plain id (no FK); never served.
+  claimId     String?
 
   createdAt DateTime @default(now())
 
@@ -330,6 +392,8 @@ model Company {
   appLinks     CompanyApp[]
   monitorSeenCompanies MonitorSeenCompany[]
   monitorEvents MonitorEvent[]
+  claims       CompanyClaim[]
+  claimTokens  CompanyClaimToken[]
 
   @@unique([externalSource, externalId])
   @@index([mergedIntoId])
@@ -400,11 +464,16 @@ model ChangeProposal {
   /// the approval is retracted. Null = approved before this was recorded (fail closed on revert).
   clearedPartnerFields Json?
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 /// A field-level edit to an Investor firm (public API only). Unlike ChangeProposal it writes no
@@ -486,6 +555,10 @@ model FundingRound {
   monitorSeen MonitorSeenRound[]
   monitorEvents MonitorEvent[]
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   /// Company screening's financing window (an EXISTS with a date range).
@@ -494,6 +567,7 @@ model FundingRound {
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 // Investors named on a specific round; inherits the round's review state.
@@ -836,6 +910,10 @@ model InvestorHolding {
   /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
   reviewedById String?
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   // The leading investorId serves every per-firm lookup; externalSource, id let
@@ -846,6 +924,7 @@ model InvestorHolding {
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 /// One role: a person at a company or an investor firm.
@@ -904,6 +983,10 @@ model PersonRole {
   /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
   reviewedById String?
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([investorId])
@@ -912,6 +995,7 @@ model PersonRole {
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 /// A human, deduplicated across every company and firm they appear at.
@@ -1028,12 +1112,17 @@ model AcquisitionDeal {
   /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
   reviewedById String?
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 model ExitEvent {
@@ -1060,12 +1149,17 @@ model ExitEvent {
   /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
   reviewedById String?
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@unique([externalSource, externalId])
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 model DiversitySignal {
@@ -1087,11 +1181,16 @@ model DiversitySignal {
   /// The admin who made that decision. A plain id (users are never deleted), resolved per page.
   reviewedById String?
 
+  /// The submitter's active company claim when they submitted (a verified representative).
+  /// A plain id (no FK), like reviewedById; the queue re-checks it live.
+  claimId      String?
+
   @@index([companyId])
   @@index([moderationStatus, createdAt, id])
   /// Admin queue for a decided status, newest decision first.
   @@index([moderationStatus, reviewedAt, id])
   @@index([submittedById, moderationStatus, createdAt])
+  @@index([claimId])
 }
 
 /// An external identifier for one Company or Investor — the crosswalk that lets

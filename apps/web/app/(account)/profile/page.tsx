@@ -10,6 +10,8 @@ import { logout } from '../actions';
 import { SavedCompanies } from './SavedCompanies';
 import { SavedSearches } from './SavedSearches';
 import { savedSearchesIfAvailable } from '@/lib/saved-searches';
+import { getMyClaims } from '@/lib/claims';
+import { CompanyClaims } from './CompanyClaims';
 
 import styles from '../account.module.css';
 
@@ -24,10 +26,12 @@ export default async function ProfilePage({
   searchParams: Promise<{ searchCursor?: string }>;
 }) {
   const user = await requireUser('/profile');
-  const [{ access, items }, savedCompanies, searches] = await Promise.all([
+  const [{ access, items }, savedCompanies, searches, claims] = await Promise.all([
     getMyContributions(),
     getSavedCompanies(),
     savedSearchesIfAvailable((await searchParams).searchCursor),
+    // A claim list that fails to load is left out rather than failing the profile.
+    getMyClaims().catch(() => []),
   ]);
 
   return (
@@ -83,6 +87,8 @@ export default async function ProfilePage({
           <SavedSearches page={searches} />
         </>
       ) : null}
+
+      <CompanyClaims claims={claims} />
 
       <h2 className={styles.sectionTitle}>Your contributions</h2>
       {items.length === 0 ? (

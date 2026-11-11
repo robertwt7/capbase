@@ -15,6 +15,7 @@ import {
 } from '@repo/api';
 import type { Company as DbCompany, DirectoryCountScope, Prisma } from '@repo/db';
 
+import { activeClaimIds, isActiveClaim } from '../claims/active-claim';
 import { PARTNER_SOURCE } from '../gate/gate';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -157,11 +158,30 @@ function decisionData(d: Decision) {
   return { moderationStatus: d.status, reviewedAt: d.reviewedAt, reviewedById: d.reviewedById };
 }
 
+/** `claimId` when that claim is active right now (inside the decision's transaction), else
+ *  null — so an approval after a revoke, a ban or a domain change is not a representative edit. */
+async function claimIfActive(
+  tx: Prisma.TransactionClient,
+  claimId: string | null,
+): Promise<string | null> {
+  if (!claimId) return null;
+  const claim = await tx.companyClaim.findUnique({
+    where: { id: claimId },
+    include: {
+      user: { select: { bannedAt: true } },
+      company: { select: { domain: true, mergedIntoId: true } },
+    },
+  });
+  return claim && isActiveClaim(claim, claim.company) ? claim.id : null;
+}
+
 /** A decided row ready to record: the company whose timeline it belongs on, and
     the mapped domain object the profile showed (or now shows). */
 interface DecidedRow {
   companyId: string;
   snapshot: unknown;
+  /** The claim the row was submitted under (null for a company row and unclaimed rows). */
+  claimId: string | null;
 }
 
 /**
@@ -187,7 +207,7 @@ async function applyDecision(
     case 'company': {
       const row = await tx.company.update({ where: { id }, data });
       // A company row anchors its own timeline (entityId === companyId).
-      return record ? { companyId: row.id, snapshot: toCompany(row) } : null;
+      return record ? { companyId: row.id, snapshot: toCompany(row), claimId: null } : null;
     }
     case 'round': {
       const row = await tx.fundingRound.update({
@@ -195,7 +215,9 @@ async function applyDecision(
         data,
         include: { investors: true },
       });
-      return record ? { companyId: row.companyId, snapshot: toFundingRound(row) } : null;
+      return record
+        ? { companyId: row.companyId, snapshot: toFundingRound(row), claimId: row.claimId }
+        : null;
     }
     case 'person': {
       // The role row, not the deduplicated Person — 'person' means the same
@@ -219,7 +241,7 @@ async function applyDecision(
       // is required), so it publishes without one. Only firm-officer roles are
       // company-less, and those are ingest-only — they never reach this queue.
       return record && row.companyId
-        ? { companyId: row.companyId, snapshot: toPerson({ ...row, personId }) }
+        ? { companyId: row.companyId, snapshot: toPerson({ ...row, personId }), claimId: row.claimId }
         : null;
     }
     case 'investor': {
@@ -240,19 +262,25 @@ async function applyDecision(
         where: { id },
         include: { investor: { select: { slug: true, moderationStatus: true } } },
       });
-      return { companyId: row.companyId, snapshot: toInvestorHolding(holding) };
+      return { companyId: row.companyId, snapshot: toInvestorHolding(holding), claimId: row.claimId };
     }
     case 'acquisition': {
       const row = await tx.acquisitionDeal.update({ where: { id }, data });
-      return record ? { companyId: row.companyId, snapshot: toAcquisition(row) } : null;
+      return record
+        ? { companyId: row.companyId, snapshot: toAcquisition(row), claimId: row.claimId }
+        : null;
     }
     case 'exit': {
       const row = await tx.exitEvent.update({ where: { id }, data });
-      return record ? { companyId: row.companyId, snapshot: toExit(row) } : null;
+      return record
+        ? { companyId: row.companyId, snapshot: toExit(row), claimId: row.claimId }
+        : null;
     }
     case 'diversity': {
       const row = await tx.diversitySignal.update({ where: { id }, data });
-      return record ? { companyId: row.companyId, snapshot: toDiversity(row) } : null;
+      return record
+        ? { companyId: row.companyId, snapshot: toDiversity(row), claimId: row.claimId }
+        : null;
     }
   }
 }
@@ -386,6 +414,7 @@ type CursorWhere =
  *  nine tables; `submissionWhere` only sets the keys a table has. */
 interface SubmissionWhere {
   moderationStatus: ReviewStatus;
+  claimId?: { in: string[] };
   submittedById?: string | null | { not: null };
   reviewedAt?: { not: null };
   name?: NameFilter;
@@ -457,8 +486,11 @@ function submissionWhere(
   query: SubmissionQuery,
   key: SubmissionSortKey,
   cursor: SubmissionCursor | null,
+  /** Active claim ids when the representative filter is on (see `activeClaimIds`). */
+  claimIds: string[] | null = null,
 ): SubmissionWhere {
   const where: SubmissionWhere = { moderationStatus: query.status };
+  if (claimIds && hasClaimColumn(t)) where.claimId = { in: claimIds };
   if (query.userId) where.submittedById = query.userId;
   else if (query.source === 'contributed') where.submittedById = { not: null };
   else if (query.source === 'ingested') where.submittedById = null;
@@ -472,6 +504,15 @@ function submissionWhere(
   if (cursor) where.AND = [olderThan(cursor, t, key)];
   return where;
 }
+
+/** The seven company-anchored types carry `claimId`; a new company and an investor edit have
+ *  no company to represent, so the representative filter excludes them like a type filter. */
+function hasClaimColumn(t: ReviewableType): boolean {
+  return t !== 'company' && t !== 'investorProposal';
+}
+
+/** The claim a listed row was submitted under, kept off the public payload. */
+const CLAIM_OF = new WeakMap<PendingSubmission, string>();
 
 @Injectable()
 export class AdminService {
@@ -505,6 +546,8 @@ export class AdminService {
     const { type } = query;
     const key = submissionSortKey(query);
     const cursor = query.before ? parseSubmissionCursor(query.before) : null;
+    // Resolved once, live: revoking, banning or a domain change drops a row from the filter.
+    const claimIds = query.representative ? await activeClaimIds(this.prisma) : null;
     const page = {
       orderBy: [{ [key]: 'desc' as const }, { id: 'desc' as const }],
       take: SUBMISSION_PAGE_SIZE + 1,
@@ -513,7 +556,9 @@ export class AdminService {
       t: ReviewableType,
       read: (where: SubmissionWhere) => Promise<T[]>,
     ): Promise<T[]> =>
-      !type || type === t ? read(submissionWhere(t, query, key, cursor)) : Promise.resolve([]);
+      (!type || type === t) && (!claimIds || hasClaimColumn(t))
+        ? read(submissionWhere(t, query, key, cursor, claimIds))
+        : Promise.resolve([]);
 
     const [
       companies,
@@ -578,7 +623,7 @@ export class AdminService {
           ...page,
         }),
       ),
-      this.countSubmissions(query, key),
+      this.countSubmissions(query, key, claimIds),
     ]);
 
     const items: PendingSubmission[] = [
@@ -638,7 +683,11 @@ export class AdminService {
 
     const hasMore = items.length > SUBMISSION_PAGE_SIZE;
     items.length = Math.min(items.length, SUBMISSION_PAGE_SIZE);
-    await Promise.all([this.fillCitedSources(items), this.fillReviewers(items)]);
+    await Promise.all([
+      this.fillCitedSources(items),
+      this.fillReviewers(items),
+      this.fillRepresentatives(items),
+    ]);
 
     const total = type
       ? countsByType[type]
@@ -657,8 +706,10 @@ export class AdminService {
   private async countSubmissions(
     query: SubmissionQuery,
     key: SubmissionSortKey,
+    claimIds: string[] | null,
   ): Promise<Record<ReviewableType, number>> {
-    const where = (t: ReviewableType) => submissionWhere(t, query, key, null);
+    const where = (t: ReviewableType) => submissionWhere(t, query, key, null, claimIds);
+    const none = Promise.resolve(0);
     const [
       company,
       round,
@@ -670,7 +721,7 @@ export class AdminService {
       proposal,
       investorProposal,
     ] = await Promise.all([
-      this.prisma.company.count({ where: where('company') }),
+      claimIds ? none : this.prisma.company.count({ where: where('company') }),
       this.prisma.fundingRound.count({ where: where('round') }),
       this.prisma.personRole.count({ where: where('person') }),
       this.prisma.investorHolding.count({ where: where('investor') }),
@@ -678,7 +729,9 @@ export class AdminService {
       this.prisma.exitEvent.count({ where: where('exit') }),
       this.prisma.diversitySignal.count({ where: where('diversity') }),
       this.prisma.changeProposal.count({ where: where('proposal') }),
-      this.prisma.investorChangeProposal.count({ where: where('investorProposal') }),
+      claimIds
+        ? none
+        : this.prisma.investorChangeProposal.count({ where: where('investorProposal') }),
     ]);
     return {
       company,
@@ -828,6 +881,8 @@ export class AdminService {
                 ...entry,
                 after: decided.snapshot,
                 actorUserId: decision.reviewedById,
+                // A representative edit only while the claim is active at approval time.
+                claimId: await claimIfActive(tx, decided.claimId),
               })
             : retractRevision({
                 ...entry,
@@ -853,6 +908,9 @@ export class AdminService {
       // point: applying the diff destroys the values it replaces.
       const before = pickCurrent(proposal.company, changes);
       const fields = Object.keys(changes) as (keyof CompanyEditFields)[];
+      // Checked against the domain BEFORE this diff: a representative's own domain edit is
+      // still theirs.
+      const claimId = await claimIfActive(tx, proposal.claimId);
 
       await tx.company.update({
         where: { id: proposal.companyId },
@@ -885,6 +943,7 @@ export class AdminService {
           actor: 'ADMIN',
           actorUserId: adminUserId,
           proposalId: proposal.id,
+          claimId,
         })),
       });
 
@@ -1138,6 +1197,25 @@ export class AdminService {
     }
   }
 
+  /** Label each row submitted under a claim that is active NOW: one query for the page's
+      claims (their users and companies included), checked with the one `isActiveClaim`. */
+  private async fillRepresentatives(items: PendingSubmission[]): Promise<void> {
+    const ids = [...new Set(items.map((i) => CLAIM_OF.get(i)).filter((id): id is string => !!id))];
+    if (ids.length === 0) return;
+    const claims = await this.prisma.companyClaim.findMany({
+      where: { id: { in: ids } },
+      include: {
+        user: { select: { bannedAt: true } },
+        company: { select: { domain: true, mergedIntoId: true } },
+      },
+    });
+    const active = new Set(claims.filter((c) => isActiveClaim(c, c.company)).map((c) => c.id));
+    for (const item of items) {
+      const claimId = CLAIM_OF.get(item);
+      item.representative = claimId !== undefined && active.has(claimId);
+    }
+  }
+
   private item(
     type: ReviewableType,
     row: {
@@ -1147,6 +1225,7 @@ export class AdminService {
       submittedBy?: Submitter;
       reviewedAt?: Date | null;
       reviewedById?: string | null;
+      claimId?: string | null;
     },
     company: CompanyRef,
     label: string,
@@ -1154,7 +1233,7 @@ export class AdminService {
     sourceUrl: string | null = null,
     investor: InvestorRef = null,
   ): PendingSubmission {
-    return {
+    const item: PendingSubmission = {
       type,
       id: row.id,
       label,
@@ -1170,6 +1249,10 @@ export class AdminService {
       reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
       // Only the id until fillReviewers names it.
       reviewedBy: row.reviewedById ? { id: row.reviewedById, name: '' } : null,
+      // Until fillRepresentatives checks the claim.
+      representative: false,
     };
+    if (row.claimId) CLAIM_OF.set(item, row.claimId);
+    return item;
   }
 }

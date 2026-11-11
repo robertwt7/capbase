@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  CLAIM_CONFIRM_INTERVAL_HOURS,
   DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   SITEMAP_PAGE_SIZE,
@@ -64,6 +65,7 @@ import {
   visibleRoundInvestors,
 } from '../gate/gate';
 import { GatePolicyService } from '../gate/gate-policy.service';
+import { activeClaimId, activeClaimsOn } from '../claims/active-claim';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { toFacets } from '../prisma/country-facets';
@@ -653,6 +655,8 @@ export class CompaniesService {
         latestRound: null,
         citations: [],
         indexable: hasProse(row),
+        representation: null,
+        viewerClaim: null,
       };
     }
 
@@ -675,14 +679,23 @@ export class CompaniesService {
     // Only for rows already in the response (each section was capped in the
     // query), so a locked viewer never receives a citation for a row they
     // can't see.
-    const [citations, identifiers, latestRound] = await Promise.all([
+    const [citations, identifiers, latestRound, claims] = await Promise.all([
       this.loadCitations(row.id, company),
       this.loadIdentifiers(row.id),
       gate.sections.companyRounds?.disabled ? Promise.resolve(null) : this.latestRound(row.id, access, policy),
+      activeClaimsOn(this.prisma, row.id),
     ]);
     company.identifiers = identifiers;
 
-    return { company, access: counted, gate, latestRound, citations, indexable: !row.partnerOnly || hasProse(row) };
+    return {
+      company,
+      access: counted,
+      gate,
+      latestRound,
+      citations,
+      indexable: !row.partnerOnly || hasProse(row),
+      ...representationOf(claims, viewer?.id),
+    };
   }
 
   /** Every approved row per section, partner rows included — six indexed
@@ -894,6 +907,7 @@ export class CompaniesService {
       // either: an internal source name maps through an explicit public label.
       actorName:
         row.actor === 'INGEST' ? publicIngestLabel(row.actorSource) : (row.actorUser?.name ?? null),
+      representative: Boolean(row.claimId),
       createdAt: row.createdAt.toISOString(),
     }));
 
@@ -1031,6 +1045,8 @@ export class CompaniesService {
         lead: dto.lead ?? null,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
         investors: { create: dto.investors.map((i) => ({ name: i.name, lead: i.lead })) },
       },
     });
@@ -1051,6 +1067,8 @@ export class CompaniesService {
         title: dto.title ?? null,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
       },
     });
     await this.attachCitation('person', created.id, dto.sourceUrl, userId);
@@ -1072,6 +1090,8 @@ export class CompaniesService {
         linkedinUrl: dto.linkedinUrl ?? null,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
       },
     });
     await this.attachCitation('investor', created.id, dto.sourceUrl, userId);
@@ -1118,6 +1138,8 @@ export class CompaniesService {
         rationale: dto.rationale,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
       },
     });
     await this.attachCitation('acquisition', created.id, dto.sourceUrl, userId);
@@ -1135,6 +1157,8 @@ export class CompaniesService {
         detail: dto.detail,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
       },
     });
     await this.attachCitation('exit', created.id, dto.sourceUrl, userId);
@@ -1151,6 +1175,8 @@ export class CompaniesService {
         note: dto.note,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
       },
     });
     await this.attachCitation('diversity', created.id, dto.sourceUrl, userId);
@@ -1190,6 +1216,8 @@ export class CompaniesService {
         sourceUrl: dto.sourceUrl ?? null,
         moderationStatus: 'PENDING',
         submittedById: userId,
+        // A verified representative's submission is labelled in the queue (re-checked live).
+        claimId: await activeClaimId(this.prisma, userId, company.id),
       },
     });
     return { id: created.id, moderationStatus: created.moderationStatus };
@@ -1236,4 +1264,32 @@ function slugBase(name: string, fallback: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || fallback
   );
+}
+
+/** The profile mark and the viewer's own claim, from the company's ACTIVE claims only (a
+ *  pending request, a revoked, banned or suspended claim never shows). No identity leaves. */
+function representationOf(
+  claims: { id: string; userId: string; verifiedAt: Date | null; lastConfirmedAt: Date | null }[],
+  viewerId: string | undefined,
+): Pick<CompanyDetailResponse, 'representation' | 'viewerClaim'> {
+  if (claims.length === 0) return { representation: null, viewerClaim: null };
+  const iso = (d: Date | null) => d?.toISOString() ?? null;
+  const since = claims.map((c) => c.verifiedAt!).reduce((a, b) => (a < b ? a : b));
+  const confirmed = claims
+    .map((c) => c.lastConfirmedAt)
+    .filter((d): d is Date => d !== null)
+    .reduce<Date | null>((a, b) => (a === null || b > a ? b : a), null);
+  const mine = viewerId ? claims.find((c) => c.userId === viewerId) : undefined;
+  const intervalMs = CLAIM_CONFIRM_INTERVAL_HOURS * 3_600_000;
+  return {
+    representation: { since: since.toISOString(), lastConfirmedAt: iso(confirmed) },
+    viewerClaim: mine
+      ? {
+          id: mine.id,
+          lastConfirmedAt: iso(mine.lastConfirmedAt),
+          canConfirm:
+            !mine.lastConfirmedAt || Date.now() - mine.lastConfirmedAt.getTime() >= intervalMs,
+        }
+      : null,
+  };
 }

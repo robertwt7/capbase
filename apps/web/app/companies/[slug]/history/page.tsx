@@ -280,6 +280,10 @@ function entityName(value: unknown): string {
 
 function actorLabel(item: Revision): string {
   if (item.actor === 'INGEST') return `Ingest · ${item.actorName ?? 'automated'}`;
+  // The representative is never named: only that the company said it, and who approved it.
+  if (item.representative) {
+    return `Company representative · approved by ${item.actorName ?? 'Moderator'}`;
+  }
   return item.actorName ?? (item.actor === 'ADMIN' ? 'Moderator' : 'Contributor');
 }
 

@@ -119,6 +119,23 @@ export class MailService {
     });
   }
 
+  /** A company-claim link to a WORK address — a third party's mailbox, so it carries no
+   *  user-written value: only the company name and the link. Never throws. */
+  sendClaimVerify(to: string, company: string, link: string): Promise<void> {
+    return this.deliver('claim-verify', to, { COMPANY: company, LINK: link }, link);
+  }
+
+  /** A claim was verified, approved, rejected or revoked; to the ACCOUNT address. `event` is
+   *  one sentence (a rejection may add the admin's reason). Never throws. */
+  sendClaimNotice(to: string, name: string, company: string, event: string): Promise<void> {
+    return this.deliver('claim-notice', to, {
+      NAME: name,
+      COMPANY: company,
+      EVENT: event,
+      LINK: `${this.siteUrl}/profile`,
+    });
+  }
+
   /**
    * Result-bearing digest transport (account mail stays best-effort, below). Resend's send
    * options take no abort signal, so the 15 s bound is a race: a request still in flight is

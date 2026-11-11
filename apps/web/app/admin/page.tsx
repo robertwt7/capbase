@@ -15,7 +15,8 @@ import { ApiError } from '../../lib/api';
 import { requireAdmin } from '../../lib/auth';
 import { formatCount, formatDay } from '../../lib/format';
 import { cn } from '../../lib/utils';
-import { moderateAction } from './actions';
+import { claimDecisionAction, moderateAction } from './actions';
+import { claimMethodLabel, claimStatusLabel } from '../../lib/claim-status';
 import { FilterLink } from './FilterLink';
 import { SubmissionDetail } from './SubmissionDetail';
 
@@ -33,6 +34,8 @@ interface QueueParams {
   source: Exclude<SubmissionSource, 'all'>;
   user?: string;
   q?: string;
+  /** Only submissions made under a currently active company claim. */
+  representative?: boolean;
   before?: string;
 }
 
@@ -50,6 +53,7 @@ function queueHref(current: QueueParams, overrides: Partial<QueueParams> = {}): 
   if (next.user) params.set('user', next.user);
   if (next.source === 'ingested' && offersSource(next)) params.set('source', 'ingested');
   if (next.q) params.set('q', next.q);
+  if (next.representative) params.set('representative', '1');
   if (next.before) params.set('before', next.before);
   return `/admin?${params.toString()}`;
 }
@@ -66,6 +70,7 @@ export default async function AdminQueue({
     source?: string;
     user?: string;
     q?: string;
+    representative?: string;
   }>;
 }) {
   const me = await requireAdmin();
@@ -83,6 +88,7 @@ export default async function AdminQueue({
     source: 'contributed',
     user: raw.user || undefined,
     q: raw.q?.trim() || undefined,
+    representative: raw.representative === '1' || undefined,
     before: raw.before || undefined,
   };
   // The web defaults to people's submissions; a user filter implies them.
@@ -99,6 +105,7 @@ export default async function AdminQueue({
       source: current.source,
       userId: current.user,
       q: current.q,
+      representative: current.representative,
     }),
     current.user ? loadAccount(current.user) : Promise.resolve(null),
   ]);
@@ -163,6 +170,12 @@ export default async function AdminQueue({
               {TYPE_PILL[t] ?? t} ({formatCount(queue.countsByType[t])})
             </FilterLink>
           ))}
+        <FilterLink
+          href={queueHref(current, { representative: current.representative ? undefined : true })}
+          active={Boolean(current.representative)}
+        >
+          Verified representatives
+        </FilterLink>
       </nav>
 
       {/* A plain GET form: the other filters ride along as hidden inputs, and a new
@@ -172,6 +185,9 @@ export default async function AdminQueue({
           <input type="hidden" name="status" value={status} />
           {current.type ? <input type="hidden" name="type" value={current.type} /> : null}
           {current.user ? <input type="hidden" name="user" value={current.user} /> : null}
+          {current.representative ? (
+            <input type="hidden" name="representative" value="1" />
+          ) : null}
           {current.source === 'ingested' ? (
             <input type="hidden" name="source" value="ingested" />
           ) : null}
@@ -251,6 +267,7 @@ function emptyMessage(p: QueueParams): string {
   if (p.source === 'ingested') parts.push('from ingest');
   if (p.type) parts.push(`of type ${TYPE_PILL[p.type]?.toLowerCase() ?? p.type}`);
   if (p.q) parts.push(`matching “${p.q}”`);
+  if (p.representative) parts.push('from a verified representative');
   if (p.user) parts.push('from this account');
   return parts.length === 1 ? `${parts[0]} right now.` : `${parts.join(' ')}.`;
 }
@@ -339,6 +356,47 @@ function AccountCard({
           <dd className="text-[15px] text-ink">{accessLine(account)}</dd>
         </div>
       </dl>
+      {account.claims.length > 0 ? (
+        <section aria-label="Company claims" className="mt-4 border-t border-line pt-4">
+          <h2 className="font-mono text-[11px] tracking-[0.06em] text-graphite-500 uppercase">
+            Company claims
+          </h2>
+          <ul className="mt-2 flex flex-col gap-2">
+            {account.claims.map((claim) => (
+              <li key={claim.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <Link
+                  prefetch={false}
+                  href={`/companies/${claim.companySlug}`}
+                  className="text-[15px] text-ink underline underline-offset-[3px]"
+                >
+                  {claim.companyName}
+                </Link>
+                <Badge
+                  variant="pill"
+                  mono
+                  className={cn(claim.status === 'active' && 'border-ink text-ink')}
+                >
+                  {claimStatusLabel(claim)}
+                </Badge>
+                <span className="font-mono text-[12px] text-graphite-500 [overflow-wrap:anywhere]">
+                  {claimMethodLabel(claim)}
+                  {claim.revokedBy ? ` · ended by ${claim.revokedBy}` : ''}
+                </span>
+                {claim.status === 'active' || claim.status === 'suspended' ? (
+                  <form
+                    action={claimDecisionAction.bind(null, claim.id, 'revoke')}
+                    className="ml-auto"
+                  >
+                    <Button variant="outline" shape="box" size="sm" type="submit">
+                      Revoke
+                    </Button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </Card>
   );
 }
@@ -420,6 +478,12 @@ function SubmissionCard({
         <Badge variant="pill" mono className={cn(cited && 'border-ink text-ink')}>
           {cited ? 'cited' : 'uncited'}
         </Badge>
+        {/* Monochrome emphasis: the ink border, never a colour. */}
+        {item.representative ? (
+          <Badge variant="pill" mono className="border-ink text-ink">
+            Verified representative
+          </Badge>
+        ) : null}
         {item.moderationStatus !== 'PENDING' ? (
           <Badge variant="pill" mono>
             {item.moderationStatus}

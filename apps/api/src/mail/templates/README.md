@@ -16,6 +16,8 @@ templates and nothing to copy into the Resend dashboard.
 | `queue-digest`        | daily, to each admin, when the moderation queue isn't empty | `NAME`, `TOTAL`, `BREAKDOWN`, `OLDEST`, `LINK`              |
 | `queue-alert`         | to each admin, when PENDING reaches `QUEUE_ALERT_THRESHOLD` | `NAME`, `TOTAL`, `THRESHOLD`, `BREAKDOWN`, `OLDEST`, `LINK` |
 | `security-notice`     | a 2FA / passkey / recovery-code change, or repeated failures | `NAME`, `EVENT`, `WHEN`, `SETTINGS_URL`                    |
+| `claim-verify`        | a company-claim link, to the WORK address (a third party's mailbox: no user-written value) | `COMPANY`, `LINK`               |
+| `claim-notice`        | a claim was verified, approved, rejected or revoked (to the account address) | `NAME`, `COMPANY`, `EVENT`, `LINK`         |
 
 Subjects live in the `TEMPLATES` registry in `../templates.ts`, not in the files.
 

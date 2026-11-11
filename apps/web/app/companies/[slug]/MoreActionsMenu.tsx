@@ -3,6 +3,7 @@
 import { canViewCompanyHistory, type Role } from '@repo/api';
 import { Ellipsis } from 'lucide-react';
 import Link from 'next/link';
+import { useTransition } from 'react';
 
 import {
   Button,
@@ -12,10 +13,24 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui';
 
+import { confirmCurrentAction } from './actions';
+
 /** The profile's secondary links (Compare, History) folded into one menu,
     for the phone layout where they no longer fit beside the primary action.
     The page shows the plain buttons instead above that width. */
-export function MoreActionsMenu({ slug, role, className }: { slug: string; role?: Role; className?: string }) {
+export function MoreActionsMenu({
+  slug,
+  role,
+  className,
+  viewerClaim,
+}: {
+  slug: string;
+  role?: Role;
+  className?: string;
+  /** The viewer's active claim: adds "Confirm still current" (disabled once done today). */
+  viewerClaim?: { canConfirm: boolean } | null;
+}) {
+  const [pending, startTransition] = useTransition();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -38,6 +53,18 @@ export function MoreActionsMenu({ slug, role, className }: { slug: string; role?
             <Link href={`/companies/${slug}/history`}>History</Link>
           </DropdownMenuItem>
         )}
+        {viewerClaim ? (
+          <DropdownMenuItem
+            disabled={!viewerClaim.canConfirm || pending}
+            onSelect={() =>
+              startTransition(async () => {
+                await confirmCurrentAction(slug);
+              })
+            }
+          >
+            {viewerClaim.canConfirm ? 'Confirm still current' : 'Confirmed today'}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

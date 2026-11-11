@@ -1,0 +1,11 @@
+A Capbase account asked to be listed as a representative of {{{COMPANY}}},
+using this address to show it works there.
+
+Confirm the claim (the link works once and expires in 24 hours):
+
+{{{LINK}}}
+
+Didn't ask for this? Ignore this email and nothing happens. Opening the page
+alone changes nothing; only pressing its button completes the claim.
+
+— The Capbase team

@@ -1,5 +1,6 @@
 import type { ReviewStatus } from './company';
 import type { ViewerAccess } from './contributions';
+import type { AdminClaim } from './claims';
 
 /** CONTRIBUTOR is granted by an admin only: it may mint contributor API keys for /v1 and always
  *  sees complete company profiles, but moderates nothing. */
@@ -219,6 +220,8 @@ export interface AdminUser {
   approvedCount: number;
   /** Whether the account has a second factor. */
   mfaEnabled: boolean;
+  /** Company claims the account holds, in any state (links into the per-user view). */
+  claimCount: number;
 }
 
 /** `GET /admin/users/:id`: one account plus what the moderator needs to judge its
@@ -226,6 +229,8 @@ export interface AdminUser {
 export interface AdminUserDetail extends AdminUser {
   access: ViewerAccess;
   contributions: Record<ReviewStatus, number>;
+  /** Every company claim the account holds, newest first. */
+  claims: AdminClaim[];
 }
 
 export interface AdminUserListQuery {

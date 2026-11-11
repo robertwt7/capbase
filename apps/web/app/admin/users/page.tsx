@@ -144,6 +144,14 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
         >
           {formatCount(user.approvedCount)} approved · {formatCount(user.pendingCount)} pending
         </Link>
+        {user.claimCount > 0 ? (
+          <Link
+            href={`/admin?user=${encodeURIComponent(user.id)}&status=PENDING`}
+            className="mt-1 block whitespace-nowrap underline-offset-[3px] hover:text-ink hover:underline"
+          >
+            Claims ({formatCount(user.claimCount)})
+          </Link>
+        ) : null}
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1.5">

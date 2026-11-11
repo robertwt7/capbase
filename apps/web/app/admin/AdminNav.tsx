@@ -10,6 +10,8 @@ export interface AdminNavCounts {
   queue: number;
   reports: number;
   merges: number;
+  /** Open manual company-claim requests. */
+  claims: number;
 }
 
 /** The moderation sub-nav under the site header. The admin layout renders it for
@@ -20,6 +22,7 @@ export function AdminNav({ counts }: { counts: AdminNavCounts }) {
     { href: '/admin', label: 'Queue', count: counts.queue },
     { href: '/admin/reports', label: 'Reports', count: counts.reports },
     { href: '/admin/merges', label: 'Merges', count: counts.merges },
+    { href: '/admin/claims', label: 'Claims', count: counts.claims },
     { href: '/admin/users', label: 'Users', count: 0 },
     { href: '/admin/visibility', label: 'Visibility', count: 0 },
   ];
