@@ -30,6 +30,7 @@ function dbCompany() {
     operatingStatus: null,
     companyType: null,
     primarySector: 'Fintech',
+    verticals: ['Banking', 'Insurance'],
   };
 }
 
@@ -105,6 +106,31 @@ describe('CompaniesService.proposeChange', () => {
 
     const call = (create.mock.calls[0] as unknown[])[0] as { data: Record<string, unknown> };
     expect(call.data.changes).toEqual({ primarySector: null });
+  });
+});
+
+describe('CompaniesService.proposeChange (verticals)', () => {
+  it('compares verticals as a set: a reordering is no change', async () => {
+    const { service, create } = makeService();
+    await expect(
+      service.proposeChange(
+        'helia',
+        { changes: { verticals: ['Insurance', 'Banking'] } } as CreateChangeProposalDto,
+        'u1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('keeps a changed set, in the order proposed', async () => {
+    const { service, create } = makeService();
+    await service.proposeChange(
+      'helia',
+      { changes: { verticals: ['Insurance', 'Capital markets'] } } as CreateChangeProposalDto,
+      'u1',
+    );
+    const call = (create.mock.calls[0] as unknown[])[0] as { data: Record<string, unknown> };
+    expect(call.data.changes).toEqual({ verticals: ['Insurance', 'Capital markets'] });
   });
 });
 

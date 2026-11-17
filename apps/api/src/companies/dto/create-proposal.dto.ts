@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
+  ArrayUnique,
   Equals,
   IsArray,
   IsIn,
@@ -17,9 +18,11 @@ import {
 import {
   COMPANY_STATUSES,
   COMPANY_TYPES,
+  MAX_COMPANY_VERTICALS,
   OPERATING_STATUSES,
   SECTORS,
   STAGES,
+  VERTICALS,
   type CompanyEditFields,
   type CompanyStatus,
   type CompanyType,
@@ -27,6 +30,7 @@ import {
   type OperatingStatus,
   type Sector,
   type Stage,
+  type Vertical,
 } from '@repo/api';
 
 // The editable-field whitelist: every field optional, validated exactly like its
@@ -129,6 +133,14 @@ export class CompanyEditFieldsDto implements CompanyEditFields {
   @IsOptional()
   @IsIn([...SECTORS])
   primarySector?: Sector | null;
+
+  /** Empty is allowed: an edit may clear the verticals. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_COMPANY_VERTICALS)
+  @ArrayUnique()
+  @IsIn([...VERTICALS], { each: true })
+  verticals?: Vertical[];
 }
 
 export class CreateChangeProposalDto implements CreateChangeProposalInput {

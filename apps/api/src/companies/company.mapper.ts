@@ -16,6 +16,7 @@ import type {
   RoundKind,
   Sector,
   Stage,
+  Vertical,
 } from '@repo/api';
 
 import type {
@@ -150,6 +151,7 @@ export function toCompanyEditFields(row: DbCompany): Required<CompanyEditFields>
     stage: row.stage as Stage,
     totalRaisedUsd: Number(row.totalRaisedUsd),
     lastValuationUsd: numN(row.lastValuationUsd),
+    verticals: row.verticals as Vertical[],
     websiteUrl: row.websiteUrl,
     linkedinUrl: row.linkedinUrl,
     twitterUrl: row.twitterUrl,
@@ -180,6 +182,7 @@ export function toCompany(row: DbCompanyWithRelations): Company {
     founded: row.founded,
     headcount: row.headcount,
     industry: row.industry,
+    verticals: row.verticals as Vertical[],
     status: row.status as CompanyStatus,
     stage: row.stage as Stage,
     totalRaisedUsd: Number(row.totalRaisedUsd),

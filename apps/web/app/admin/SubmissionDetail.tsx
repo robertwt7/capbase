@@ -186,6 +186,7 @@ const EDIT_FIELD_LABELS: Record<keyof CompanyEditFields, string> = {
   operatingStatus: 'Operating status',
   companyType: 'Company type',
   primarySector: 'Sector',
+  verticals: 'Verticals',
 };
 
 // Renders one side of a diff cell. Unlike the row payloads above, a proposal

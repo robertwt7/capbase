@@ -193,6 +193,7 @@ ingest-all: ## Full data rebuild from every source (DAYS=N, default 3650). See d
 	cd apps/jobs && node dist/backfill.js 1 1000000 COMPANIES_HOUSE
 	cd apps/jobs && node dist/backfill.js 1 1000000 SEC_S1
 	cd apps/jobs && node dist/backfill-sectors.js
+	cd apps/jobs && node dist/backfill-verticals.js
 	cd apps/jobs && node dist/backfill-geography.js
 # Identifiers before merge detection (the detector reads them), and both before
 # citations, which is unchanged.
@@ -220,6 +221,24 @@ backfill-geography: ## Fill missing Company/Investor countryCode from stored hq 
 .PHONY: backfill-geography-prod
 backfill-geography-prod: ## [VPS] Fill missing countries inside the deployed jobs container
 	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-geography.js
+
+.PHONY: backfill-verticals
+backfill-verticals: ## Derive Company.verticals from stored industry labels (no network; re-runnable, idempotent)
+	yarn workspace jobs build
+	cd apps/jobs && node dist/backfill-verticals.js
+
+.PHONY: backfill-verticals-prod
+backfill-verticals-prod: ## [VPS] Derive company verticals inside the deployed jobs container (re-run after a mapping change)
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/backfill-verticals.js
+
+.PHONY: audit-verticals
+audit-verticals: ## Read-only vertical coverage audit (server-enforced read-only session; never writes)
+	yarn workspace jobs build
+	cd apps/jobs && node --env-file-if-exists=.env dist/audit-verticals.js
+
+.PHONY: audit-verticals-prod
+audit-verticals-prod: ## [VPS] Read-only vertical coverage audit inside the deployed jobs container (never writes)
+	$(COMPOSE_STACK) run --rm jobs node apps/jobs/dist/audit-verticals.js
 
 .PHONY: backfill-citations
 backfill-citations: ## Mint Source/Citation rows for every ingested row (no network; re-runnable)

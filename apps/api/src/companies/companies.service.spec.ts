@@ -51,6 +51,7 @@ function dbCompany(overrides: Record<string, unknown> = {}) {
     founded: 2016,
     headcount: 10,
     industry: ['Fintech'],
+    verticals: [],
     status: 'Private',
     stage: 'Series B',
     totalRaisedUsd: 1000n,

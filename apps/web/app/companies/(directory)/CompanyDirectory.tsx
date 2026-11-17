@@ -8,12 +8,15 @@ import {
   SECTORS,
   STAGES,
   SCREEN_PARAMS,
+  VERTICAL_SECTOR,
   companyQueryToParams,
   hasRoundCriteria,
+  verticalsOf,
   type CompanyDirectoryPage,
   type CompanyListQuery,
   type CompanyScreenQuery,
   type CountryFacet,
+  type Sector,
 } from '@repo/api';
 
 import { CompanyTable } from '@/components/CompanyTable';
@@ -25,7 +28,9 @@ import {
   Pagination,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui';
@@ -87,6 +92,50 @@ function FilterSelect({
             {o}
           </SelectItem>
         ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** The vertical select: with a sector chosen, that sector's verticals; with none, every
+ *  vertical grouped under its sector (sectors without verticals omitted). */
+function VerticalSelect({
+  value,
+  sector,
+  onChange,
+}: {
+  value: string;
+  sector: Sector | undefined;
+  onChange: (v: string) => void;
+}) {
+  const groups = (sector ? [sector] : SECTORS)
+    .map((s) => ({ sector: s, verticals: verticalsOf(s) }))
+    .filter((g) => g.verticals.length > 0);
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-[200px]" aria-label="All verticals">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>All verticals</SelectItem>
+        {groups.map((g) =>
+          sector ? (
+            g.verticals.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v}
+              </SelectItem>
+            ))
+          ) : (
+            <SelectGroup key={g.sector}>
+              <SelectLabel>{g.sector}</SelectLabel>
+              {g.verticals.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          ),
+        )}
       </SelectContent>
     </Select>
   );
@@ -183,7 +232,7 @@ export function CompanyDirectory({
   const sort: Sort = query.sort ?? 'name';
 
   const chips = screenChips(query, screen, locked);
-  const advanced = chips.filter((c) => !['q', 'sector', 'stage', 'status', 'country'].includes(c.key)).length;
+  const advanced = chips.filter((c) => !['q', 'sector', 'vertical', 'stage', 'status', 'country'].includes(c.key)).length;
   const active = chips.length > 0 || sort !== 'name' || SCREEN_PARAMS.some((p) => query[p] !== undefined);
 
   const removeChip = (chip: Chip) => {
@@ -230,10 +279,23 @@ export function CompanyDirectory({
           'sector',
           <FilterSelect
             value={query.sector ?? ALL}
-            onChange={(v) => set({ sector: pick(v) as Query['sector'] })}
+            onChange={(v) => {
+              const sector = pick(v) as Query['sector'];
+              // A vertical under another sector no longer fits the narrowed list.
+              const keep = query.vertical && (!sector || VERTICAL_SECTOR[query.vertical] === sector);
+              set({ sector, vertical: keep ? query.vertical : undefined });
+            }}
             allLabel="All sectors"
             options={SECTORS}
             className="w-[170px]"
+          />,
+        )}
+        {filter(
+          'vertical',
+          <VerticalSelect
+            value={query.vertical ?? ALL}
+            sector={locked.filters.includes('sector') ? undefined : query.sector}
+            onChange={(v) => set({ vertical: pick(v) as Query['vertical'] })}
           />,
         )}
         {filter(

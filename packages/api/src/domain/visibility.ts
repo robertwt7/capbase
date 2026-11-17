@@ -177,6 +177,7 @@ export const FIELD_REGISTRY = {
     operatingStatus: { label: 'Operating status' },
     companyType: { label: 'Company type' },
     primarySector: { label: 'Sector', filter: 'sector' },
+    verticals: { label: 'Verticals', filter: 'vertical' },
     industry: { label: 'Industry' },
     countryCode: { label: 'Country', filter: 'country' },
     domain: { label: 'Domain', filter: 'domain' },

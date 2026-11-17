@@ -16,6 +16,7 @@ import {
   SCREEN_MONEY_MAX,
   SECTORS,
   STAGES,
+  VERTICALS,
   type CompanyListQuery,
   type CompanySort,
   type CompanyStatus,
@@ -25,6 +26,7 @@ import {
   type RoundWindow,
   type Sector,
   type Stage,
+  type Vertical,
 } from '@repo/api';
 
 /** `YYYY-MM-DD`; the service also rejects an unreal date such as 2026-02-30. */
@@ -38,6 +40,11 @@ export class ListCompaniesDto implements CompanyListQuery {
   @IsOptional()
   @IsIn([...SECTORS])
   sector?: Sector;
+
+  /** One vertical label (`VERTICALS`, e.g. `Banking`) — outside the vocabulary is a 400. */
+  @IsOptional()
+  @IsIn([...VERTICALS])
+  vertical?: Vertical;
 
   @IsOptional()
   @IsIn([...STAGES])

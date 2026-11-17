@@ -1,4 +1,9 @@
-import { canViewCompanyHistory, type GatedSection, type SectionView } from '@repo/api';
+import {
+  canViewCompanyHistory,
+  type GatedSection,
+  type SectionView,
+  type VerticalSource,
+} from '@repo/api';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -280,6 +285,28 @@ export default async function CompanyProfile({ params }: { params: Promise<{ slu
           <Fact label="Stage" value={m('stage', company.stage)} />
           {(company.primarySector || masked('primarySector')) && (
             <Fact label="Sector" value={m('primarySector', company.primarySector)} />
+          )}
+          {(company.verticals.length > 0 || masked('verticals')) && (
+            <Fact
+              label="Verticals"
+              value={m(
+                'verticals',
+                <span className="flex flex-wrap gap-x-2 gap-y-1">
+                  {company.verticals.map((v, i) => (
+                    <Link
+                      key={v}
+                      href={`/companies?vertical=${encodeURIComponent(v)}`}
+                      prefetch={false}
+                      title={verticalSourceLabel(result.verticalSources.find((s) => s.vertical === v))}
+                      className="underline decoration-line underline-offset-[3px] transition-colors hover:text-graphite-700"
+                    >
+                      {v}
+                      {i < company.verticals.length - 1 ? ',' : ''}
+                    </Link>
+                  ))}
+                </span>,
+              )}
+            />
           )}
           {(company.legalName || masked('legalName')) && (
             <Fact label="Legal name" value={m('legalName', company.legalName)} />
@@ -647,6 +674,24 @@ function OutboundLink({ href, children }: { href: string; children: React.ReactN
       {children}
     </a>
   );
+}
+
+/** A vertical's tooltip: the source label it was derived from, or who set it. */
+function verticalSourceLabel(source: VerticalSource | undefined): string | undefined {
+  if (!source) return undefined;
+  const label = source.label ? ` · ${source.label}` : '';
+  switch (source.scheme) {
+    case 'sic':
+      return `Companies House SIC${source.code ? ` ${source.code}` : ''}${label}`;
+    case 'formD':
+      return `SEC Form D industry group${label}`;
+    case 'wikidata':
+      return `Wikidata industry${label}`;
+    case 'partner':
+      return `partner industry${label}`;
+    case 'contributor':
+      return 'Set by a contributor';
+  }
 }
 
 function Fact({

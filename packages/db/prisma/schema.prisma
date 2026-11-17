@@ -335,6 +335,10 @@ model Company {
   founded     Int
   headcount   Int
   industry    String[]
+  /// Verticals (`VERTICALS`, a second level under the sectors), derived from `industry` by
+  /// `deriveVerticals` unless an approved edit set them. `'verticals'` sits in `partnerFields`
+  /// exactly when they were derived from partner-marked labels.
+  verticals   String[] @default([])
   // Domain status (Private/Public/Acquired) — distinct from moderationStatus.
   status      String
   stage       String
@@ -418,6 +422,8 @@ model Company {
   @@index([oneLiner(ops: raw("gin_trgm_ops"))], type: Gin, map: "Company_oneLiner_trgm_idx")
   /// `GET /v1/companies?domain=`: the pre-create de-duplication lookup is a point read.
   @@index([domain])
+  /// `?vertical=` and the vertical market pages: `verticals @> ARRAY[$1]`.
+  @@index([verticals], type: Gin)
 }
 
 // A company pinned to a user's personal watchlist.

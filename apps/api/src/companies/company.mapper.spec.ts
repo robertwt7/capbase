@@ -6,6 +6,8 @@ import {
   toExit,
   toFundingRound,
   toInvestorHolding,
+  toCompany,
+  toCompanyEditFields,
   toPerson,
 } from './company.mapper';
 
@@ -122,5 +124,22 @@ describe('company.mapper row identity', () => {
         note: '',
       } as never).id,
     ).toBe('d1');
+  });
+});
+
+describe('company.mapper verticals', () => {
+  it('carries verticals on the company and its editable view', () => {
+    const row = {
+      slug: 's',
+      name: 'n',
+      domain: '',
+      industry: ['Banks'],
+      verticals: ['Banking'],
+      totalRaisedUsd: 0n,
+      lastValuationUsd: null,
+      revenueUsd: null,
+    } as never;
+    expect(toCompany(row).verticals).toEqual(['Banking']);
+    expect(toCompanyEditFields(row).verticals).toEqual(['Banking']);
   });
 });

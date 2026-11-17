@@ -51,6 +51,7 @@ export const COMPANY_BLANKS: Record<string, unknown> = {
   founded: 0,
   headcount: 0,
   industry: [],
+  verticals: [],
   status: '',
   stage: '',
   totalRaisedUsd: 0,

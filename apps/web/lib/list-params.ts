@@ -14,6 +14,7 @@ import {
   PERSON_SORTS,
   SECTORS,
   STAGES,
+  VERTICALS,
   parseCompanyScreen,
   type CompanyListQuery,
   type FundListQuery,
@@ -43,6 +44,7 @@ export function companyListQuery(sp: SearchParams): CompanyListQuery {
   return {
     q: sp.q?.trim() || undefined,
     sector: pick(sp.sector, SECTORS),
+    vertical: pick(sp.vertical, VERTICALS),
     stage: pick(sp.stage, STAGES),
     status: pick(sp.status, COMPANY_STATUSES),
     country: countryOf(sp.country),

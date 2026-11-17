@@ -14,6 +14,7 @@
 import type { Company, ReviewStatus } from './company';
 import type { ReviewableType } from './moderation';
 import type { Citation } from './provenance';
+import type { VerticalSource } from './verticals';
 import { sectionLimit, type GatedSection, type GatePolicy, type GateView } from './visibility';
 
 /** Rows of `section` this viewer may receive under `policy`. Infinity = all. */
@@ -89,6 +90,9 @@ export interface CompanyDetailResponse {
   representation: { since: string; lastConfirmedAt: string | null } | null;
   /** The viewer's own active claim on this company, when they have one; null otherwise. */
   viewerClaim: { id: string; lastConfirmedAt: string | null; canConfirm: boolean } | null;
+  /** Where each of `company.verticals` came from (the source label, or a contributor), computed
+   *  from the gated row: empty when `verticals` is masked for this viewer. */
+  verticalSources: VerticalSource[];
 }
 
 export interface MyContribution {

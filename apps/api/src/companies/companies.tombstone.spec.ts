@@ -19,7 +19,7 @@ function serviceWith(rows: { id: string; slug: string; mergedIntoId: string | nu
       // The public read: APPROVED *and* not merged away.
       findFirst: jest.fn(async ({ where }: { where: { slug: string } }) => {
         const row = live(where.slug);
-        return row ? { ...row, industry: [], rounds: [], people: [], investors: [], acquisitions: [], exits: [], diversity: [], totalRaisedUsd: 0n } : null;
+        return row ? { ...row, industry: [], verticals: [], rounds: [], people: [], investors: [], acquisitions: [], exits: [], diversity: [], totalRaisedUsd: 0n } : null;
       }),
       // The redirect lookup, which ignores the tombstone filter on purpose.
       findUnique: jest.fn(async ({ where }: { where: { slug?: string; id?: string } }) => {
