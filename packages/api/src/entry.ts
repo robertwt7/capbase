@@ -23,3 +23,4 @@ export * from './domain/technology';
 export * from './domain/saved-search';
 export * from './domain/domains';
 export * from './domain/claims';
+export * from './domain/verticals';

@@ -167,6 +167,7 @@ export function resolveRoundWindow(
 export const COMPANY_QUERY_PARAMS = [
   'q',
   'sector',
+  'vertical',
   'stage',
   'status',
   'country',

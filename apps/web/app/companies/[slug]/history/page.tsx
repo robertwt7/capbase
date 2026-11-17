@@ -33,6 +33,7 @@ const FIELD_LABELS: Record<string, string> = {
   operatingStatus: 'Operating status',
   companyType: 'Company type',
   primarySector: 'Sector',
+  verticals: 'Verticals',
   countryCode: 'Country',
 };
 

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { SECTORS } from '@repo/api';
+import { SECTORS, VERTICAL_PAGE_MIN_COMPANIES } from '@repo/api';
 
 import { CompanyTable } from '@/components/CompanyTable';
 import {
@@ -13,7 +13,7 @@ import {
   SectionHeader,
   Stat,
 } from '@/components/ui';
-import { getCompanies, getMarketStats } from '@/lib/data';
+import { getCompanies, getMarketStats, getVerticalStats } from '@/lib/data';
 import { formatCount, formatUsd } from '@/lib/format';
 import { directoryCanonical } from '@/lib/list-params';
 import { sectorFromSlug, sectorSlug } from '@/lib/markets';
@@ -59,12 +59,17 @@ export default async function SectorPage({
   const rawPage = Number((await searchParams).page);
   const page = Number.isInteger(rawPage) && rawPage >= 1 ? rawPage : 1;
 
-  const [stats, companies] = await Promise.all([
+  const [stats, companies, verticalStats] = await Promise.all([
     getMarketStats(),
     getCompanies({ sector, page }),
+    getVerticalStats(),
   ]);
   const stat = stats.find((s) => s.sector === sector);
   const base = `/markets/${sectorSlug(sector)}`;
+  // The verticals with a page, largest first (the API sorts by membership).
+  const verticals = verticalStats.filter(
+    (v) => v.sector === sector && v.companyCount >= VERTICAL_PAGE_MIN_COMPANIES,
+  );
 
   return (
     <PageContainer className="pt-14 pb-20">
@@ -85,6 +90,25 @@ export default async function SectorPage({
           <Stat size="lg" label="Capital raised" value={formatUsd(stat.totalRaisedUsd)} />
           <Stat size="lg" label="Median valuation" value={formatUsd(stat.medianValuationUsd)} />
         </div>
+      ) : null}
+
+      {verticals.length > 0 ? (
+        <section className="mt-10">
+          <SectionHeader title="Verticals" note={`${verticals.length} in ${sector}`} />
+          <ul role="list" className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+            {verticals.map((v) => (
+              <li key={v.slug}>
+                <Link
+                  href={`${base}/${v.slug}`}
+                  className="flex h-full items-baseline justify-between gap-3 rounded-sm border border-line bg-surface px-4 py-3 transition-colors hover:border-ink"
+                >
+                  <span className="font-sans text-sm text-ink">{v.vertical}</span>
+                  <span className="font-mono text-xs text-graphite-500">{formatCount(v.companyCount)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       <div className="mt-10">

@@ -1,0 +1,42 @@
+import { COMPANY_COLUMNS } from '@/components/CompanyTable';
+import { StatsSkeleton, TableSkeleton } from '@/components/skeletons';
+import { LoadingStatus, PageContainer, SectionHeader, Skeleton } from '@/components/ui';
+
+export default function Loading() {
+  return (
+    <PageContainer className="pt-14 pb-20" aria-busy="true">
+      <LoadingStatus label="Loading vertical…" />
+      {/* Breadcrumb eyebrow, then the vertical name. */}
+      <span className="flex h-4 items-center">
+        <Skeleton className="h-2.5 w-52" />
+      </span>
+      <span className="mt-3 flex h-9 items-center">
+        <Skeleton className="h-7 w-56" />
+      </span>
+
+      <div className="mt-8 flex flex-wrap gap-x-14 gap-y-3 border-t border-b border-t-ink border-b-line py-7">
+        <StatsSkeleton count={3} />
+      </div>
+
+      <div className="mt-10 flex flex-col gap-10">
+        <SectionHeader title="By stage" note={<Skeleton className="h-3 w-24" />} />
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i}>
+            <span className="flex h-4 items-center">
+              <Skeleton className="h-2.5 w-44" />
+            </span>
+            <div className="mt-3">
+              <TableSkeleton
+                cols={COMPANY_COLUMNS}
+                cells={['left', 'right', 'right']}
+                rows={4}
+                logo
+                collapseAt={700}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </PageContainer>
+  );
+}

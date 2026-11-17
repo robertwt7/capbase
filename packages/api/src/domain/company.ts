@@ -4,6 +4,7 @@
 
 import type { CompanyTechnology, CompanyApp } from './technology';
 import type { EntityIdentifierRef } from './identifiers';
+import type { Vertical } from './verticals';
 import type { UnlockBy } from './visibility';
 
 export type Stage =
@@ -311,6 +312,9 @@ export interface Company {
   founded: number;
   headcount: number;
   industry: string[];
+  /** Second-level classification under the sectors (`verticals.ts`), derived from `industry`
+   *  unless an approved edit set them. A field-gated fact, like `industry`. */
+  verticals: Vertical[];
   status: CompanyStatus;
   stage: Stage;
   totalRaisedUsd: number;

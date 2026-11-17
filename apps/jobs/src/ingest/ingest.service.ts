@@ -8,6 +8,7 @@ import {
   type InvestorType,
 } from '@repo/api';
 import { Prisma, refreshDirectoryCounts, toJsonValue } from '@repo/db';
+import { deriveVerticals } from '@repo/api/domain/vertical-map';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -30,6 +31,7 @@ import {
 } from '../sources/ingestion-source';
 import { kebab } from '../util/slug';
 import { suppliedCompanyFields } from './company-fields';
+import { humanVerticalCompanyIds, verticalsPartnerMarked } from './verticals';
 import {
   COMPANY_MATCH_POLICY_VERSION,
   countriesCompatible,
@@ -361,6 +363,21 @@ const sameValue = (a: unknown, b: unknown): boolean =>
     ? a.length === b.length && a.every((v, i) => v === b[i])
     : a === b;
 
+/** Company columns ingest derives from others: written with them, never a revision (a derived
+ *  value is not a fact on the timeline; its inputs already are). */
+const DERIVED_COMPANY_FIELDS = new Set(['verticals']);
+
+/** The columns a company write states for provenance. A partner write of an empty `verticals`
+ *  marks nothing: a mark on an empty list masks nothing (`verticalsPartnerMarked`). */
+function companyProvenanceFields(source: string, data: Record<string, unknown>): string[] {
+  return Object.keys(data).filter(
+    (f) =>
+      f !== 'verticals' ||
+      !PARTNER_SOURCES.has(source) ||
+      verticalsPartnerMarked(true, data.verticals as string[]),
+  );
+}
+
 @Injectable()
 export class IngestService {
   private readonly logger = new Logger(IngestService.name);
@@ -377,6 +394,9 @@ export class IngestService {
   private matchStats: MatchStats = emptyMatchStats();
   /** Investor focus roles written / skipped this run. */
   private focusStats: FocusWriteCounts = emptyFocusCounts();
+  /** Companies whose verticals a human owns, loaded lazily once per run (approved proposals
+   *  only, so small). Derivation leaves them alone. */
+  private humanVerticals: Promise<Set<string>> | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -403,6 +423,7 @@ export class IngestService {
     this.stats = emptyEdgeStats();
     this.matchStats = emptyMatchStats();
     this.focusStats = emptyFocusCounts();
+    this.humanVerticals = null;
     let processed = 0;
     let upserted = 0;
     let investors = 0;
@@ -2511,6 +2532,7 @@ export class IngestService {
         name: c.name,
         hq: c.hq || 'Undisclosed',
         industry: c.industry,
+        ...(await this.derivedVerticals(ownId, r.source, c.industry)),
         stage: c.stage,
         // A source that folds its rounds into other sources' (roundDedup) has
         // its total raised to the company's round sum after the rounds are
@@ -2540,6 +2562,7 @@ export class IngestService {
     }
 
     const slug = this.uniqueSlug(c.name, r.companyExternalId, index);
+    const verticals = deriveVerticals(c.industry, PARTNER_SOURCES.has(r.source)).verticals;
     const created = await this.prisma.company.create({
       data: {
         slug,
@@ -2558,10 +2581,14 @@ export class IngestService {
         founded: c.foundedYear,
         headcount: c.headcount ?? 0,
         industry: c.industry,
+        verticals,
         status: c.status ?? 'Private',
         stage: c.stage,
         totalRaisedUsd: BigInt(Math.round(c.totalRaisedUsd)),
-        ...createdProvenance(r.source, suppliedCompanyFields(c)),
+        ...createdProvenance(r.source, [
+          ...suppliedCompanyFields(c),
+          ...(verticals.length > 0 ? ['verticals'] : []),
+        ]),
         externalSource: r.source,
         externalId: r.companyExternalId,
         moderationStatus: 'APPROVED',
@@ -2617,7 +2644,10 @@ export class IngestService {
     if (!row.companyType && c.companyType) data.companyType = c.companyType;
     if (row.founded === 0 && c.foundedYear) data.founded = c.foundedYear;
     if (row.headcount === 0 && c.headcount) data.headcount = c.headcount;
-    if (row.industry.length === 0 && c.industry.length > 0) data.industry = c.industry;
+    if (row.industry.length === 0 && c.industry.length > 0) {
+      data.industry = c.industry;
+      Object.assign(data, await this.derivedVerticals(companyId, r.source, c.industry));
+    }
     if (isUndisclosedPlace(row.hq) && !isUndisclosedPlace(c.hq)) data.hq = c.hq;
     if (c.oneLiner && row.oneLiner.startsWith(SEC_ONE_LINER_PREFIX)) data.oneLiner = c.oneLiner;
     if (c.description && row.description.includes(SEC_DESCRIPTION_MARKER)) {
@@ -2668,8 +2698,8 @@ export class IngestService {
     data: Record<string, unknown>,
     known?: Record<string, unknown>,
   ): Promise<void> {
-    const fields = Object.keys(data);
-    if (!known && fields.length === 0) return;
+    const fields = companyProvenanceFields(source, data);
+    if (!known && Object.keys(data).length === 0) return;
     if (!known && !this.recordRevisions) {
       await this.prisma.company.update({ where: { id: companyId }, data });
       await this.syncPartnerFields('Company', companyId, source, fields);
@@ -2688,7 +2718,7 @@ export class IngestService {
     // match with nothing to fill still matters here — a public source landing
     // on a partner-only row makes it public record.
     const provenance = provenanceUpdate(before, source, fields);
-    if (fields.length === 0 && Object.keys(provenance).length === 0) return;
+    if (Object.keys(data).length === 0 && Object.keys(provenance).length === 0) return;
     const update = { where: { id: companyId }, data: { ...data, ...provenance } };
     if (!this.recordRevisions) {
       await this.prisma.company.update(update);
@@ -2696,7 +2726,7 @@ export class IngestService {
     }
 
     const revisions = Object.keys(data)
-      .filter((field) => !sameValue(before[field], data[field]))
+      .filter((field) => !DERIVED_COMPANY_FIELDS.has(field) && !sameValue(before[field], data[field]))
       .map((field) => ({
         companyId,
         entityType: 'company',
@@ -2718,6 +2748,18 @@ export class IngestService {
       this.prisma.company.update(update),
       this.prisma.revision.createMany({ data: revisions }),
     ]);
+  }
+
+  /** `{ verticals }` derived from the industry labels a source is writing, or `{}` when a human
+   *  owns the company's verticals (an approved edit set them). */
+  private async derivedVerticals(
+    companyId: string,
+    source: string,
+    industry: readonly string[],
+  ): Promise<{ verticals?: string[] }> {
+    this.humanVerticals ??= humanVerticalCompanyIds(this.prisma);
+    if ((await this.humanVerticals).has(companyId)) return {};
+    return { verticals: deriveVerticals(industry, PARTNER_SOURCES.has(source)).verticals };
   }
 
   private uniqueSlug(name: string, externalId: string, index: MatchIndex): string {

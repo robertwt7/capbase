@@ -1,7 +1,9 @@
 import {
   COMPANY_TYPES,
+  MAX_COMPANY_VERTICALS,
   OPERATING_STATUSES,
   SECTORS,
+  isVertical,
   type Company,
   type CompanyEditFields,
   type CompanyStatus,
@@ -10,11 +12,31 @@ import {
   type OperatingStatus,
   type Sector,
   type Stage,
+  type Vertical,
 } from '@repo/api';
 import { z } from 'zod';
 
 import { companyFormSchema } from './company';
 import { urlOrEmpty } from './utils';
+
+/** The comma-joined vertical list the form holds (string-only form values) → the labels. */
+export const verticalList = (v: string): string[] =>
+  v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+/** Comma-joined verticals: each from the vocabulary, no repeats, at most MAX_COMPANY_VERTICALS. */
+const verticalsField = z.string().superRefine((v, ctx) => {
+  const list = verticalList(v);
+  if (list.some((x) => !isVertical(x))) {
+    ctx.addIssue({ code: 'custom', message: 'Pick verticals from the list.' });
+  } else if (new Set(list).size !== list.length) {
+    ctx.addIssue({ code: 'custom', message: 'Each vertical can be picked once.' });
+  } else if (list.length > MAX_COMPANY_VERTICALS) {
+    ctx.addIssue({ code: 'custom', message: `Pick at most ${MAX_COMPANY_VERTICALS} verticals.` });
+  }
+});
 
 // Optional vocab select: '' means unset, mirroring a null column on the row.
 const vocabOrEmpty = (values: readonly string[]) =>
@@ -31,6 +53,7 @@ export const editFormSchema = companyFormSchema.extend({
   legalName: z.string().trim(),
   operatingStatus: vocabOrEmpty(OPERATING_STATUSES),
   companyType: vocabOrEmpty(COMPANY_TYPES),
+  verticals: verticalsField,
   note: z.string().trim().max(500, 'Keep the note under 500 characters.'),
 });
 
@@ -58,6 +81,7 @@ export function editDefaultsFromCompany(company: Company): EditFormValues {
     legalName: company.legalName ?? '',
     operatingStatus: company.operatingStatus ?? '',
     companyType: company.companyType ?? '',
+    verticals: company.verticals.join(', '),
     // The source is about *this* edit, so it never pre-fills from the company.
     sourceUrl: '',
     note: '',
@@ -67,6 +91,9 @@ export function editDefaultsFromCompany(company: Company): EditFormValues {
 }
 
 const strOrNull = (s: string): string | null => (s === '' ? null : s);
+
+const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((x) => b.includes(x));
 
 const sameValue = (a: unknown, b: unknown): boolean =>
   Array.isArray(a) && Array.isArray(b)
@@ -103,6 +130,7 @@ export function toProposalInput(
     operatingStatus: strOrNull(v.operatingStatus) as OperatingStatus | null,
     companyType: strOrNull(v.companyType) as CompanyType | null,
     primarySector: strOrNull(v.primarySector) as Sector | null,
+    verticals: verticalList(v.verticals) as Vertical[],
   };
 
   const currentView: Required<CompanyEditFields> = {
@@ -125,11 +153,17 @@ export function toProposalInput(
     operatingStatus: current.operatingStatus ?? null,
     companyType: current.companyType ?? null,
     primarySector: current.primarySector ?? null,
+    verticals: current.verticals,
   };
 
   const changes: CompanyEditFields = {};
   for (const key of Object.keys(candidate) as (keyof CompanyEditFields)[]) {
-    if (!sameValue(candidate[key], currentView[key])) {
+    // Verticals are a set: sent only when the set changed, not on a reordering.
+    const same =
+      key === 'verticals'
+        ? sameSet(candidate.verticals, currentView.verticals)
+        : sameValue(candidate[key], currentView[key]);
+    if (!same) {
       (changes as Record<string, unknown>)[key] = candidate[key];
     }
   }

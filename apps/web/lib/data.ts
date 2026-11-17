@@ -42,6 +42,8 @@ import {
   type PersonListQuery,
   type PersonSummary,
   type SitemapCount,
+  type VerticalMarketResponse,
+  type VerticalStat,
 } from '@repo/api';
 
 import { ApiError, apiFetch } from './api';
@@ -141,6 +143,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2016,
     headcount: 1840,
     industry: ['Fintech', 'Payments', 'Infrastructure'],
+    verticals: [],
     status: 'Private',
     stage: 'Series E',
     totalRaisedUsd: 1_350_000_000,
@@ -278,6 +281,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2014,
     headcount: 1200,
     industry: ['Design', 'Productivity', 'SaaS'],
+    verticals: [],
     status: 'Acquired',
     stage: 'Acquired',
     totalRaisedUsd: 333_000_000,
@@ -306,6 +310,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2021,
     headcount: 900,
     industry: ['Artificial intelligence', 'Enterprise', 'Infrastructure'],
+    verticals: [],
     status: 'Private',
     stage: 'Series D',
     totalRaisedUsd: 7_300_000_000,
@@ -323,6 +328,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2013,
     headcount: 7000,
     industry: ['Data', 'Analytics', 'Enterprise'],
+    verticals: [],
     status: 'Private',
     stage: 'Late stage',
     totalRaisedUsd: 10_000_000_000,
@@ -340,6 +346,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2019,
     headcount: 1000,
     industry: ['Fintech', 'SaaS'],
+    verticals: [],
     status: 'Private',
     stage: 'Series D',
     totalRaisedUsd: 1_200_000_000,
@@ -357,6 +364,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2016,
     headcount: 800,
     industry: ['Productivity', 'SaaS'],
+    verticals: [],
     status: 'Private',
     stage: 'Series C',
     totalRaisedUsd: 343_000_000,
@@ -374,6 +382,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2013,
     headcount: 4500,
     industry: ['Design', 'Consumer', 'SaaS'],
+    verticals: [],
     status: 'Private',
     stage: 'Late stage',
     totalRaisedUsd: 580_000_000,
@@ -391,6 +400,7 @@ const mockCompanies: MockCompany[] = [
     founded: 2016,
     headcount: 3000,
     industry: ['HR tech', 'IT', 'SaaS'],
+    verticals: [],
     status: 'Private',
     stage: 'Series F',
     totalRaisedUsd: 1_400_000_000,
@@ -539,6 +549,7 @@ function paginateFallbackCompanies(query: CompanyListQuery): CompanyDirectoryPag
       return false;
     }
     if (query.sector && c.primarySector !== query.sector) return false;
+    if (query.vertical && !c.verticals.includes(query.vertical)) return false;
     if (query.country && c.countryCode !== query.country) return false;
     if (query.stage && c.stage !== query.stage) return false;
     if (query.status && c.status !== query.status) return false;
@@ -670,6 +681,7 @@ export const getCompanyDetail = cache(async function getCompanyDetail(
       citations: [],
       representation: null,
       viewerClaim: null,
+      verticalSources: [],
     };
   }
 });
@@ -902,10 +914,41 @@ export async function getMarketTotals(): Promise<MarketTotals> {
   }
 }
 
+/**
+ * Every vertical with at least one member and its public counts. Public and the same for every
+ * viewer, so no token: the default 60s ISR entry is shared. Empty when the API is unreachable
+ * (no invented market data).
+ */
+export async function getVerticalStats(): Promise<VerticalStat[]> {
+  try {
+    return await apiFetch<VerticalStat[]>('/market/verticals');
+  } catch (err) {
+    console.warn('[data] getVerticalStats failed; no verticals listed:', err);
+    return [];
+  }
+}
+
+/**
+ * One vertical's market page for this viewer — gated per viewer like a profile, so the token
+ * when signed in and always `no-store`. `undefined` when the API 404s (unknown, or below the
+ * page minimum). No offline fallback.
+ */
+// React cache(): generateMetadata and the page share one fetch per request.
+export const getVerticalMarket = cache(async function getVerticalMarket(
+  slug: string,
+): Promise<VerticalMarketResponse | undefined> {
+  try {
+    return await apiFetch<VerticalMarketResponse>(`/market/verticals/${encodeURIComponent(slug)}`, await profileInit());
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
+  }
+});
+
 // --- Sitemap ---------------------------------------------------------------
 
-/** The four entity families the sitemap pages over. */
-export type SitemapFamily = 'companies' | 'investors' | 'people' | 'funds';
+/** The entity families the sitemap pages over (`markets` = the vertical pages). */
+export type SitemapFamily = 'companies' | 'investors' | 'people' | 'funds' | 'markets';
 
 /** One `SITEMAP_PAGE_SIZE` page of a family's indexable slugs (0-based).
  *  `no-store`: a page is still past Next's 2MB fetch-cache limit, and over it

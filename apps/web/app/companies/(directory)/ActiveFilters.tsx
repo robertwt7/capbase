@@ -70,6 +70,7 @@ export function screenChips(query: CompanyListQuery, screen: CompanyScreenContex
   const chips: Chip[] = [];
   if (query.q) chips.push({ key: 'q', label: `Search · “${query.q}”`, remove: { q: undefined } });
   if (query.sector && !off('sector')) chips.push({ key: 'sector', label: `Sector · ${query.sector}`, remove: { sector: undefined } });
+  if (query.vertical && !off('vertical')) chips.push({ key: 'vertical', label: `Vertical · ${query.vertical}`, remove: { vertical: undefined } });
   if (query.stage && !off('stage')) chips.push({ key: 'stage', label: `Stage · ${query.stage}`, remove: { stage: undefined } });
   if (query.status && !off('status')) chips.push({ key: 'status', label: `Status · ${query.status}`, remove: { status: undefined } });
   if (query.country && !off('country')) {

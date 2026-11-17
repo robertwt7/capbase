@@ -34,6 +34,7 @@ const FIELD_LABELS: Record<keyof CompanyEditFields, string> = {
   operatingStatus: 'operating status',
   companyType: 'company type',
   primarySector: 'sector',
+  verticals: 'verticals',
 };
 
 /** The same, for an investor-firm edit. */

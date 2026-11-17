@@ -10,6 +10,7 @@ import type {
   Stage,
 } from './company';
 import type { CountryCode } from './geography';
+import type { Vertical } from './verticals';
 
 /** Editable Company fields — all optional; a proposal carries only what changed. */
 export interface CompanyEditFields {
@@ -32,6 +33,9 @@ export interface CompanyEditFields {
   operatingStatus?: OperatingStatus | null;
   companyType?: CompanyType | null;
   primarySector?: Sector | null;
+  /** At most `MAX_COMPANY_VERTICALS`. An approved change makes the company's verticals
+   *  human-owned: derivation stops touching them until the proposal is retracted. */
+  verticals?: Vertical[];
 }
 
 export interface CreateChangeProposalInput {

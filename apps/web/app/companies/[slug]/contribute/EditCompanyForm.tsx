@@ -19,6 +19,7 @@ import {
   SourceUrlField,
   TextareaField,
   TextField,
+  VerticalsField,
 } from '@/components/ui';
 import {
   editDefaultsFromCompany,
@@ -146,6 +147,7 @@ export function EditCompanyForm({ slug, companyName, company, turnstileSiteKey }
           ))}
         </SelectField>
       </div>
+      <VerticalsField control={form.control} name="verticals" sector={company.primarySector} />
 
       <GroupLabel>Capital</GroupLabel>
       <div className="grid gap-4 sm:grid-cols-2">

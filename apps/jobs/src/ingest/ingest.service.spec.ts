@@ -286,6 +286,8 @@ function mockPrismaBase(
       upsert: jest.fn<(args: Record<string, unknown>) => Promise<unknown>>(async () => ({})),
     },
     $executeRaw: jest.fn<(...args: unknown[]) => Promise<number>>(async () => 0),
+    // The only raw read is `humanVerticalCompanyIds`: no human-owned verticals by default.
+    $queryRaw: jest.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => []),
     person: {
       findMany: jest.fn<(args: unknown) => Promise<unknown[]>>(async () => existingPeople),
       create: jest.fn<(args: { data: Record<string, unknown> }) => Promise<{ id: string }>>(
@@ -943,8 +945,8 @@ describe('IngestService match-&-enrich', () => {
 
       expect(written).toBe(true);
       const data = updated(prisma);
-      expect(data).toMatchObject({ industry: ['Software'], hq: 'London, GB' });
-      expect([...(data.partnerFields as string[])].sort()).toEqual(['hq', 'industry']);
+      expect(data).toMatchObject({ industry: ['Software'], verticals: ['Software'], hq: 'London, GB' });
+      expect([...(data.partnerFields as string[])].sort()).toEqual(['hq', 'industry', 'verticals']);
       const rows = revisionsFrom(prisma);
       expect(rows.map((row) => row.field).sort()).toEqual(['hq', 'industry']);
       expect(rows.every((row) => row.actorSource === 'PARTNER')).toBe(true);
@@ -3523,5 +3525,82 @@ describe('IngestService company identity policy', () => {
     await partnerService(prisma, [RE]).run(RUN_PARTNER);
     expect(prisma.candidates).toHaveLength(1);
     expect(prisma.candidates[0]!.status).toBe('REJECTED');
+  });
+});
+
+describe('IngestService verticals', () => {
+  function partnerSource(records: NormalizedRecord[]): IngestionSource {
+    return { name: 'PARTNER', fetch: async () => records };
+  }
+  const partnerRun = { ...RUN, sources: ['PARTNER'] };
+  const updates = (prisma: ReturnType<typeof mockPrisma>) =>
+    prisma.company.update.mock.calls.map((c) => (c[0] as unknown as { data: Record<string, unknown> }).data);
+
+  it('a partner create derives its verticals and marks them', async () => {
+    const prisma = mockPrisma();
+    const r = record({ source: 'PARTNER', company: { ...record().company, industry: ['Software'] } });
+    await new IngestService(prisma as unknown as PrismaService, [partnerSource([r])], config()).run(partnerRun);
+    const created = prisma.company.create.mock.calls[0]![0].data;
+    expect(created.verticals).toEqual(['Software']);
+    expect(created.partnerFields).toEqual(expect.arrayContaining(['industry', 'verticals']));
+  });
+
+  it('a partner create whose labels map to nothing marks no verticals', async () => {
+    const prisma = mockPrisma();
+    const r = record({ source: 'PARTNER', company: { ...record().company, industry: ['Financial Services'] } });
+    await new IngestService(prisma as unknown as PrismaService, [partnerSource([r])], config()).run(partnerRun);
+    const created = prisma.company.create.mock.calls[0]![0].data;
+    expect(created.verticals).toEqual([]);
+    expect(created.partnerFields).not.toContain('verticals');
+  });
+
+  it('a public create derives verticals with no provenance', async () => {
+    const prisma = mockPrisma();
+    await serviceWith(prisma, [record({ company: { ...record().company, industry: ['Banks', 'Life insurance'] } })]).run(RUN);
+    const created = prisma.company.create.mock.calls[0]![0].data;
+    expect(created.verticals).toEqual(['Banking', 'Insurance']);
+    expect(created).not.toHaveProperty('partnerFields');
+  });
+
+  it('a public own-key write re-derives verticals and unmarks them', async () => {
+    const prisma = mockPrisma([
+      companyRow({
+        externalSource: 'STUB',
+        externalId: 'X1',
+        industry: ['Software'],
+        verticals: ['Software'],
+        partnerFields: ['industry', 'verticals'],
+      }),
+    ]);
+    await serviceWith(prisma, [record({ company: { ...record().company, industry: ['Biotechnology'] } })]).run(RUN);
+    const [data] = updates(prisma);
+    expect(data).toMatchObject({ industry: ['Biotechnology'], verticals: ['Biotechnology'] });
+    expect(data!.partnerFields).toEqual([]);
+    expect(revisionsFrom(prisma).map((r) => r.field)).toEqual(['industry']);
+  });
+
+  it('enrich of a company whose verticals a human owns leaves them alone', async () => {
+    const prisma = mockPrisma([companyRow({ domain: 'acme.example', industry: [], verticals: ['Retail'] })]);
+    prisma.$queryRaw.mockResolvedValue([{ companyId: 'c-sec' }]);
+    const written = await serviceWith(prisma, []).enrichCompanyFacts(
+      'c-sec',
+      record({ source: 'WIKIDATA', company: { ...record().company, industry: ['software industry'] } }),
+    );
+    expect(written).toBe(true);
+    const [data] = updates(prisma);
+    expect(data).toMatchObject({ industry: ['software industry'] });
+    expect(data).not.toHaveProperty('verticals');
+  });
+
+  it('enrich derives verticals from the labels it fills and never records them as a revision', async () => {
+    const prisma = mockPrisma([companyRow({ industry: [], verticals: [] })]);
+    await serviceWith(prisma, []).enrichCompanyFacts(
+      'c-sec',
+      record({ source: 'WIKIDATA', company: { ...record().company, industry: ['software industry'] } }),
+    );
+    expect(updates(prisma)[0]).toMatchObject({ verticals: ['Software'] });
+    const fields = revisionsFrom(prisma).map((r) => r.field);
+    expect(fields).toContain('industry');
+    expect(fields).not.toContain('verticals');
   });
 });

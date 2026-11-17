@@ -14,6 +14,10 @@ import {
   DEFAULT_FEATURED_LIMIT,
   DEFAULT_PAGE_SIZE,
   SITEMAP_PAGE_SIZE,
+  STAGES,
+  VERTICAL_PAGE_MIN_COMPANIES,
+  VERTICAL_STAGE_PREVIEW,
+  fieldGate,
   gateLimit,
   gateView,
   canViewCompanyHistory,
@@ -44,12 +48,19 @@ import {
   type RevisionActor,
   type Role,
   type RoundKind,
+  type Stage,
+  type Vertical,
+  type VerticalMarketResponse,
+  type VerticalSource,
+  type VerticalStageGroup,
+  type VerticalStat,
   type ViewerAccess,
   resolveRoundWindow,
   screenApplied,
   sectionFiltersNeedLookup,
   validateCompanyScreen,
 } from '@repo/api';
+import { explainVerticals } from '@repo/api/domain/vertical-map';
 import type { Company as DbCompany, Prisma } from '@repo/db';
 import {
   COMPANY_BLANKS,
@@ -162,6 +173,7 @@ const STUB_HIDDEN = [
   'founded',
   'headcount',
   'industry',
+  'verticals',
   'status',
   'stage',
   'totalRaisedUsd',
@@ -190,6 +202,18 @@ function companyStub(row: DbCompany, access: ViewerAccess, policy: GatePolicy): 
 
 const dateOnly = (d: Date): string => d.toISOString().slice(0, 10);
 
+/**
+ * Where each of the gated company's verticals came from. In memory over the row's own labels
+ * (≤ 4), no query. Gating ran first, so a masked `verticals` yields `[]`; and a source label is
+ * withheld whenever `industry` is masked, so the tooltip never discloses a label the viewer may
+ * not read.
+ */
+function verticalSourcesOf(company: Company, row: DbCompany): VerticalSource[] {
+  const sources = explainVerticals(company.verticals, row.industry, row.partnerFields.includes('industry'));
+  if (!company.masked?.includes('industry')) return sources;
+  return sources.map(({ vertical, scheme }) => ({ vertical, scheme }));
+}
+
 /** The sections the screening filters match on. */
 const SCREEN_SECTIONS: readonly GatedSection[] = ['companyRounds', 'companyInvestors'];
 
@@ -201,6 +225,9 @@ const sameValue = (a: unknown, b: unknown): boolean =>
   Array.isArray(a) && Array.isArray(b)
     ? a.length === b.length && a.every((v, i) => v === b[i])
     : a === b;
+
+const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((v) => b.includes(v));
 
 /** How many top-scored companies the landing page samples from. Large enough that
     consecutive visits see different faces, small enough that every face is notable. */
@@ -406,6 +433,7 @@ export class CompaniesService {
     const signedOut = !partnerVisible(access);
     const dir = directoryFilters(policy, 'company', access, {
       sector: Boolean(query.sector),
+      vertical: Boolean(query.vertical),
       stage: Boolean(query.stage),
       status: Boolean(query.status),
       country: Boolean(query.country),
@@ -461,6 +489,8 @@ export class CompaniesService {
         ],
       }),
       ...(use('sector', query.sector) && { primarySector: query.sector }),
+      // `has` compiles to `"verticals" @> ARRAY[$1]`, which the GIN index serves.
+      ...(use('vertical', query.vertical) && { verticals: { has: query.vertical } }),
       ...(use('stage', query.stage) && { stage: query.stage }),
       ...(use('status', query.status) && { status: query.status }),
       ...(use('country', query.country) && { countryCode: query.country }),
@@ -486,9 +516,97 @@ export class CompaniesService {
   async monitorSelection(query: CompanyListQuery, policy: GatePolicy, now: Date) {
     const access: ViewerAccess = { unlocked: true, signedIn: true, admin: false, unlockedUntil: null, windowDays: policy.contributionWindowDays };
     const selection = await this.directoryWhere(query, access, policy, now);
-    const applied = { sector: Boolean(query.sector), stage: Boolean(query.stage), status: Boolean(query.status), country: Boolean(query.country), ...screenApplied(query) };
+    const applied = { sector: Boolean(query.sector), vertical: Boolean(query.vertical), stage: Boolean(query.stage), status: Boolean(query.status), country: Boolean(query.country), ...screenApplied(query) };
     const unavailable = [...selection.locked.filters, ...selection.locked.disabled].some(k => applied[k as keyof typeof applied]);
     return unavailable ? ({ available: false } as const) : ({ available: true, where: selection.where } as const);
+  }
+
+  /**
+   * One vertical's market page for this viewer: the members the directory's `?vertical=` shows
+   * them (the same `directoryWhere`, so the two can never disagree), grouped by stage, with
+   * totals summed over exactly the values the viewer is shown. `stat` is the public membership
+   * (`MarketService`), which decides the 404 and indexability.
+   */
+  async verticalMarket(
+    vertical: Vertical,
+    stat: VerticalStat,
+    viewer?: { id: string; role: Role },
+  ): Promise<VerticalMarketResponse> {
+    const policy = this.gatePolicy.current();
+    const access = await listAccessFor(viewer, policy, 'company', (v) => this.users.accessFor(v));
+    const indexable = stat.publicCompanyCount >= VERTICAL_PAGE_MIN_COMPANIES;
+    const { where, locked } = await this.directoryWhere({ vertical }, access, policy);
+    if (locked.filters.includes('vertical') || locked.disabled.includes('vertical')) {
+      return {
+        stat,
+        indexable,
+        access,
+        visible: { companyCount: 0, totalRaisedUsd: null, dealCount: 0, stages: [] },
+        unlockBy: locked.unlockBy.vertical ?? 'signIn',
+      };
+    }
+
+    // The raised sum covers exactly the totals the viewer is shown: none when the field is
+    // hidden, only the non-partner ones below its partner audience.
+    const raised = fieldGate(policy, 'company', 'totalRaisedUsd', access);
+    const sumWhere: Prisma.CompanyWhereInput | null =
+      raised === 'hide'
+        ? null
+        : raised === 'hidePartner'
+          ? { AND: [where, { NOT: { partnerFields: { has: 'totalRaisedUsd' } } }] }
+          : where;
+    const [counts, sums, dealCount] = await Promise.all([
+      this.prisma.company.groupBy({ by: ['stage'], where, _count: { _all: true } }),
+      sumWhere
+        ? this.prisma.company
+            .groupBy({ by: ['stage'], where: sumWhere, _sum: { totalRaisedUsd: true } })
+            .then((rows) => rows.map((r): [string, number] => [r.stage, Number(r._sum.totalRaisedUsd ?? 0)]))
+        : Promise.resolve([] as [string, number][]),
+      this.prisma.fundingRound.count({
+        where: { moderationStatus: 'APPROVED', kind: { not: 'Grant' }, company: where },
+      }),
+    ]);
+    const sumOf = new Map(sums);
+    const order = (stage: string) => {
+      const i = STAGES.indexOf(stage as Stage);
+      return i === -1 ? STAGES.length : i;
+    };
+    const present = counts
+      .filter((r) => r._count._all > 0)
+      .sort((a, b) => order(a.stage) - order(b.stage) || a.stage.localeCompare(b.stage));
+
+    const orderBy: Prisma.CompanyOrderByWithRelationInput[] =
+      raised === 'hide' ? [{ name: 'asc' }] : [{ totalRaisedUsd: 'desc' }, { name: 'asc' }];
+    const previews = await Promise.all(
+      present.map((r) =>
+        this.prisma.company.findMany({
+          where: { AND: [where, { stage: r.stage }] },
+          orderBy,
+          take: VERTICAL_STAGE_PREVIEW,
+        }),
+      ),
+    );
+    const stages: VerticalStageGroup[] = present.map((r, i) => ({
+      stage: r.stage as Stage,
+      companyCount: r._count._all,
+      totalRaisedUsd: sumWhere ? (sumOf.get(r.stage) ?? 0) : null,
+      companies: previews[i]!.map((row) =>
+        gateFields('company', toCompany(row), row.partnerFields, access, policy, COMPANY_BLANKS),
+      ),
+    }));
+
+    return {
+      stat,
+      indexable,
+      access,
+      visible: {
+        companyCount: stages.reduce((n, g) => n + g.companyCount, 0),
+        totalRaisedUsd: sumWhere ? stages.reduce((n, g) => n + (g.totalRaisedUsd ?? 0), 0) : null,
+        dealCount,
+        stages,
+      },
+      unlockBy: null,
+    };
   }
 
   /** One keyset page of ids matching a `monitorSelection` predicate. */
@@ -657,6 +775,7 @@ export class CompaniesService {
         indexable: hasProse(row),
         representation: null,
         viewerClaim: null,
+        verticalSources: [],
       };
     }
 
@@ -695,6 +814,7 @@ export class CompaniesService {
       citations,
       indexable: !row.partnerOnly || hasProse(row),
       ...representationOf(claims, viewer?.id),
+      verticalSources: verticalSourcesOf(company, row),
     };
   }
 
@@ -1199,7 +1319,8 @@ export class CompaniesService {
     for (const key of Object.keys(changes) as (keyof CompanyEditFields)[]) {
       const value = changes[key];
       if (value === undefined) continue;
-      if (sameValue(value, current[key])) continue;
+      // Verticals are a set: a reordering is no change.
+      if (key === 'verticals' ? sameSet(value as string[], current.verticals) : sameValue(value, current[key])) continue;
       (cleaned as Record<string, unknown>)[key] = value;
     }
     if (Object.keys(cleaned).length === 0) {

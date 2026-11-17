@@ -4,6 +4,7 @@
 import type { CompanyStatus, FundStatus, FundStrategy, InvestorType, Sector, Stage } from './company';
 import type { CountryCode } from './geography';
 import type { CompanyScreenQuery } from './screening';
+import type { Vertical } from './verticals';
 import type { UnlockBy } from './visibility';
 
 export interface Paginated<T> {
@@ -62,6 +63,8 @@ export const MAX_FEATURED_LIMIT = 24;
 export interface CompanyListQuery extends CompanyScreenQuery {
   q?: string;
   sector?: Sector;
+  /** One vertical (`VERTICALS`); matches any company holding it, whatever its sector. */
+  vertical?: Vertical;
   stage?: Stage;
   status?: CompanyStatus;
   /** ISO 3166-1 alpha-2. */

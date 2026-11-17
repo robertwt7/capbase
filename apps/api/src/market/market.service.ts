@@ -1,7 +1,39 @@
-import { Injectable } from '@nestjs/common';
-import type { MarketStat, MarketTotals } from '@repo/api';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  SITEMAP_PAGE_SIZE,
+  VERTICAL_PAGE_MIN_COMPANIES,
+  VERTICAL_SECTOR,
+  isVertical,
+  labelSlug,
+  verticalFromSlug,
+  type MarketSitemapEntry,
+  type MarketStat,
+  type MarketTotals,
+  type Role,
+  type VerticalMarketResponse,
+  type VerticalStat,
+} from '@repo/api';
 
+import { CompaniesService } from '../companies/companies.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+interface VerticalRow {
+  vertical: string;
+  companyCount: number;
+  publicCompanyCount: number;
+  updatedAt: Date;
+}
+
+/** The vertical stats are a full grouped scan that only moves when an ingest, a backfill or an
+ *  approval runs; recompute at most this often (the country facet's TTL). */
+const VERTICAL_STATS_TTL_MS = 15 * 60_000;
+
+interface VerticalStats {
+  stats: VerticalStat[];
+  /** Newest member update per vertical, for sitemap `lastmod`. */
+  updatedAt: Map<string, string>;
+  expiresAt: number;
+}
 
 interface SectorCompanyRow {
   sector: string;
@@ -34,6 +66,9 @@ const trendPct = (recent: number, prior: number): number =>
 const currentQuarter = (now = new Date()): string =>
   `Q${Math.floor(now.getUTCMonth() / 3) + 1} ${now.getUTCFullYear()}`;
 
+/** A vertical page is indexable when enough of its members are public record. */
+const indexableVertical = (s: VerticalStat): boolean => s.publicCompanyCount >= VERTICAL_PAGE_MIN_COMPANIES;
+
 /**
  * Market aggregates computed live from approved Company/FundingRound rows —
  * there is no seeded stats table. Cheap at current scale (two grouped scans);
@@ -41,7 +76,94 @@ const currentQuarter = (now = new Date()): string =>
  */
 @Injectable()
 export class MarketService {
-  constructor(private readonly prisma: PrismaService) {}
+  private verticalCache: VerticalStats | null = null;
+  /** Single flight: concurrent cold reads share one scan. */
+  private verticalLoad: Promise<VerticalStats> | null = null;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companies: CompaniesService,
+  ) {}
+
+  /** Every vertical with at least one approved member, largest first. Public and
+   *  unconfigurable, like every count (`publicCompanyCount` is provenance-based and never reads
+   *  the gate policy, so indexability never depends on the policy). */
+  async verticalStats(): Promise<VerticalStat[]> {
+    return (await this.loadVerticalStats()).stats;
+  }
+
+  /** Test-only: drop the in-process vertical stats cache. */
+  resetCache(): void {
+    this.verticalCache = null;
+  }
+
+  /** `GET /market/verticals/:slug`. 404 for an unknown slug or a vertical below
+   *  `VERTICAL_PAGE_MIN_COMPANIES` members. */
+  async verticalMarket(slug: string, viewer?: { id: string; role: Role }): Promise<VerticalMarketResponse> {
+    const vertical = verticalFromSlug(slug);
+    const stat = vertical ? (await this.verticalStats()).find((s) => s.vertical === vertical) : undefined;
+    if (!vertical || !stat || stat.companyCount < VERTICAL_PAGE_MIN_COMPANIES) {
+      throw new NotFoundException(`Vertical "${slug}" not found`);
+    }
+    return this.companies.verticalMarket(vertical, stat, viewer);
+  }
+
+  /** One `SITEMAP_PAGE_SIZE` page of indexable vertical pages (84 at most, so one page). */
+  async sitemap(page = 0): Promise<MarketSitemapEntry[]> {
+    const { stats, updatedAt } = await this.loadVerticalStats();
+    return stats
+      .filter(indexableVertical)
+      .map((s) => ({ slug: `${s.sectorSlug}/${s.slug}`, updatedAt: updatedAt.get(s.vertical)! }))
+      .sort((a, b) => a.slug.localeCompare(b.slug))
+      .slice(page * SITEMAP_PAGE_SIZE, (page + 1) * SITEMAP_PAGE_SIZE);
+  }
+
+  async sitemapCount(): Promise<number> {
+    return (await this.verticalStats()).filter(indexableVertical).length;
+  }
+
+  private async loadVerticalStats(): Promise<VerticalStats> {
+    if (this.verticalCache && this.verticalCache.expiresAt > Date.now()) return this.verticalCache;
+    this.verticalLoad ??= this.queryVerticalStats().finally(() => {
+      this.verticalLoad = null;
+    });
+    return this.verticalLoad;
+  }
+
+  private async queryVerticalStats(): Promise<VerticalStats> {
+    const rows = await this.prisma.$queryRaw<VerticalRow[]>`
+      SELECT v AS vertical,
+             COUNT(*)::int AS "companyCount",
+             COUNT(*) FILTER (WHERE NOT c."partnerOnly"
+                              AND NOT ('verticals' = ANY(c."partnerFields")))::int AS "publicCompanyCount",
+             MAX(c."updatedAt") AS "updatedAt"
+        FROM "Company" c, unnest(c."verticals") v
+       WHERE c."moderationStatus" = 'APPROVED' AND c."mergedIntoId" IS NULL
+       GROUP BY v
+    `;
+    const known = rows.filter((r) => isVertical(r.vertical));
+    const stats: VerticalStat[] = known
+      .map((r) => {
+        const vertical = r.vertical as keyof typeof VERTICAL_SECTOR;
+        const sector = VERTICAL_SECTOR[vertical];
+        return {
+          vertical,
+          slug: labelSlug(vertical),
+          sector,
+          sectorSlug: labelSlug(sector),
+          companyCount: r.companyCount,
+          publicCompanyCount: r.publicCompanyCount,
+        };
+      })
+      .sort((a, b) => b.companyCount - a.companyCount || a.vertical.localeCompare(b.vertical));
+    const cache: VerticalStats = {
+      stats,
+      updatedAt: new Map(known.map((r) => [r.vertical, r.updatedAt.toISOString()])),
+      expiresAt: Date.now() + VERTICAL_STATS_TTL_MS,
+    };
+    this.verticalCache = cache;
+    return cache;
+  }
 
   async getStats(): Promise<MarketStat[]> {
     const [companyRows, roundRows] = await Promise.all([

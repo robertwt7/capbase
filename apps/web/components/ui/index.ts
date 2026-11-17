@@ -80,4 +80,5 @@ export {
 export { TextField, TextareaField, SelectField } from './fields';
 export { SourceUrlField } from './SourceUrlField';
 export { AttestationField, ATTESTATION_TEXT } from './AttestationField';
+export { VerticalsField } from './VerticalsField';
 export { TurnstileField } from './TurnstileField';

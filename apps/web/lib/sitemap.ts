@@ -53,9 +53,9 @@ export interface SitemapEntry {
 }
 
 /** The entity families that need paging. `static` is a single file. */
-export type SitemapKind = 'static' | 'companies' | 'investors' | 'people' | 'funds';
+export type SitemapKind = 'static' | SitemapFamily;
 
-const FAMILIES: readonly SitemapFamily[] = ['companies', 'investors', 'people', 'funds'];
+const FAMILIES: readonly SitemapFamily[] = ['companies', 'investors', 'people', 'funds', 'markets'];
 
 /** `/companies/acme` etc. — the path prefix each family's slugs hang off. */
 const PREFIX: Record<SitemapFamily, string> = {
@@ -63,6 +63,8 @@ const PREFIX: Record<SitemapFamily, string> = {
   investors: '/investors',
   people: '/people',
   funds: '/funds',
+  // Vertical market pages: the API's slug is `<sector>/<vertical>`.
+  markets: '/markets',
 };
 
 /** Escape the five XML metacharacters. Slugs are kebab-case today, so this is
@@ -136,7 +138,7 @@ export async function indexFiles(): Promise<string[]> {
 /** `people-1.xml` → { kind: 'people', page: 1 }; null when it names nothing. */
 export function parseSitemapFile(file: string): { kind: SitemapKind; page: number } | null {
   if (file === 'static.xml') return { kind: 'static', page: 0 };
-  const match = /^(companies|investors|people|funds)-(\d+)\.xml$/.exec(file);
+  const match = /^(companies|investors|people|funds|markets)-(\d+)\.xml$/.exec(file);
   if (!match) return null;
   return { kind: match[1] as SitemapKind, page: Number(match[2]) };
 }
