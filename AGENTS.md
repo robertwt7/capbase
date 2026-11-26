@@ -1306,8 +1306,12 @@ unfunded, so no source emits it, and the profile's empty Funding rounds block sa
 `Energy`, `Real estate`, `Industrials`, `Consumer & retail`, `Transport`, `Media & telecom`,
 `Education`) shared between `Company.primarySector` and `MarketStat.sector`. This is the
 connection between companies and the sector tape; market stats (`MarketStat`/`MarketTotals`)
-are **computed live** by the API's `MarketService` from approved Company/FundingRound rows —
-there are no seeded market tables. Two small status vocabularies also
+are **computed** by the API's `MarketService` from approved Company/FundingRound rows —
+there are no seeded market tables. Each aggregate (totals, sector stats, vertical stats) is a
+full scan of the approved companies, so it is held in memory for 15 minutes and refreshed in the
+background (`market/refreshing-value.ts`: only the first read waits, a failed refresh keeps the
+last value) — run per request they held the 10-connection pool for seconds each and starved
+every other read into 500s. Two small status vocabularies also
 exist: `OperatingStatus`/`OPERATING_STATUSES` (`Active`/`Closed`) and `CompanyType`/`COMPANY_TYPES`
 (`For profit`/`Non-profit`).
 

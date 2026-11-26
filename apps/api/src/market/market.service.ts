@@ -16,6 +16,7 @@ import {
 
 import { CompaniesService } from '../companies/companies.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RefreshingValue } from './refreshing-value';
 
 interface VerticalRow {
   vertical: string;
@@ -24,15 +25,15 @@ interface VerticalRow {
   updatedAt: Date;
 }
 
-/** The vertical stats are a full grouped scan that only moves when an ingest, a backfill or an
- *  approval runs; recompute at most this often (the country facet's TTL). */
-const VERTICAL_STATS_TTL_MS = 15 * 60_000;
+/** Every market aggregate is a full scan of the approved companies (seconds at 340k rows) that
+ *  only moves when an ingest, a backfill or an approval runs; recompute at most this often (the
+ *  country facet's TTL). */
+const MARKET_STATS_TTL_MS = 15 * 60_000;
 
 interface VerticalStats {
   stats: VerticalStat[];
   /** Newest member update per vertical, for sitemap `lastmod`. */
   updatedAt: Map<string, string>;
-  expiresAt: number;
 }
 
 interface SectorCompanyRow {
@@ -70,15 +71,22 @@ const currentQuarter = (now = new Date()): string =>
 const indexableVertical = (s: VerticalStat): boolean => s.publicCompanyCount >= VERTICAL_PAGE_MIN_COMPANIES;
 
 /**
- * Market aggregates computed live from approved Company/FundingRound rows —
- * there is no seeded stats table. Cheap at current scale (two grouped scans);
- * the web's 60s ISR window caches the result.
+ * Market aggregates computed from approved Company/FundingRound rows — there is no seeded stats
+ * table. Each is held in memory for `MARKET_STATS_TTL_MS` and refreshed in the background
+ * (`RefreshingValue`), so a page view never waits on the scan: run per request, these scans
+ * held the connection pool for seconds each and starved every other read.
  */
 @Injectable()
 export class MarketService {
-  private verticalCache: VerticalStats | null = null;
-  /** Single flight: concurrent cold reads share one scan. */
-  private verticalLoad: Promise<VerticalStats> | null = null;
+  private readonly verticals = new RefreshingValue('Vertical stats', MARKET_STATS_TTL_MS, () =>
+    this.queryVerticalStats(),
+  );
+  private readonly sectors = new RefreshingValue('Sector stats', MARKET_STATS_TTL_MS, () =>
+    this.queryStats(),
+  );
+  private readonly totals = new RefreshingValue('Market totals', MARKET_STATS_TTL_MS, () =>
+    this.queryTotals(),
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -89,12 +97,14 @@ export class MarketService {
    *  unconfigurable, like every count (`publicCompanyCount` is provenance-based and never reads
    *  the gate policy, so indexability never depends on the policy). */
   async verticalStats(): Promise<VerticalStat[]> {
-    return (await this.loadVerticalStats()).stats;
+    return (await this.verticals.get()).stats;
   }
 
-  /** Test-only: drop the in-process vertical stats cache. */
+  /** Test-only: drop the in-process market caches. */
   resetCache(): void {
-    this.verticalCache = null;
+    this.verticals.reset();
+    this.sectors.reset();
+    this.totals.reset();
   }
 
   /** `GET /market/verticals/:slug`. 404 for an unknown slug or a vertical below
@@ -110,7 +120,7 @@ export class MarketService {
 
   /** One `SITEMAP_PAGE_SIZE` page of indexable vertical pages (84 at most, so one page). */
   async sitemap(page = 0): Promise<MarketSitemapEntry[]> {
-    const { stats, updatedAt } = await this.loadVerticalStats();
+    const { stats, updatedAt } = await this.verticals.get();
     return stats
       .filter(indexableVertical)
       .map((s) => ({ slug: `${s.sectorSlug}/${s.slug}`, updatedAt: updatedAt.get(s.vertical)! }))
@@ -120,14 +130,6 @@ export class MarketService {
 
   async sitemapCount(): Promise<number> {
     return (await this.verticalStats()).filter(indexableVertical).length;
-  }
-
-  private async loadVerticalStats(): Promise<VerticalStats> {
-    if (this.verticalCache && this.verticalCache.expiresAt > Date.now()) return this.verticalCache;
-    this.verticalLoad ??= this.queryVerticalStats().finally(() => {
-      this.verticalLoad = null;
-    });
-    return this.verticalLoad;
   }
 
   private async queryVerticalStats(): Promise<VerticalStats> {
@@ -156,16 +158,18 @@ export class MarketService {
         };
       })
       .sort((a, b) => b.companyCount - a.companyCount || a.vertical.localeCompare(b.vertical));
-    const cache: VerticalStats = {
-      stats,
-      updatedAt: new Map(known.map((r) => [r.vertical, r.updatedAt.toISOString()])),
-      expiresAt: Date.now() + VERTICAL_STATS_TTL_MS,
-    };
-    this.verticalCache = cache;
-    return cache;
+    return { stats, updatedAt: new Map(known.map((r) => [r.vertical, r.updatedAt.toISOString()])) };
   }
 
-  async getStats(): Promise<MarketStat[]> {
+  getStats(): Promise<MarketStat[]> {
+    return this.sectors.get();
+  }
+
+  async getTotals(): Promise<MarketTotals> {
+    return { ...(await this.totals.get()), quarter: currentQuarter() };
+  }
+
+  private async queryStats(): Promise<MarketStat[]> {
     const [companyRows, roundRows] = await Promise.all([
       this.prisma.$queryRaw<SectorCompanyRow[]>`
         SELECT
@@ -219,7 +223,7 @@ export class MarketService {
       .sort((a, b) => b.totalRaisedUsd - a.totalRaisedUsd);
   }
 
-  async getTotals(): Promise<MarketTotals> {
+  private async queryTotals(): Promise<Omit<MarketTotals, 'quarter'>> {
     const [row] = await this.prisma.$queryRaw<TotalsRow[]>`
       SELECT
         COALESCE((
@@ -257,7 +261,6 @@ export class MarketService {
       investorCount: row?.investorCount ?? 0,
       fundCount: row?.fundCount ?? 0,
       personCount: row?.personCount ?? 0,
-      quarter: currentQuarter(),
     };
   }
 }
